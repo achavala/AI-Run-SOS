@@ -11,6 +11,14 @@ import { SubmissionsModule } from './submissions/submissions.module';
 import { TimesheetsModule } from './timesheets/timesheets.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { OffersModule } from './offers/offers.module';
+import { AssignmentsModule } from './assignments/assignments.module';
+import { MarginGuardModule } from './margin-guard/margin-guard.module';
+import { ScoreboardModule } from './scoreboard/scoreboard.module';
+import { MarketJobsModule } from './market-jobs/market-jobs.module';
+import { VendorReqsModule } from './vendor-reqs/vendor-reqs.module';
+import { PstIntelModule } from './pst-intel/pst-intel.module';
+import { AiModule } from './ai/ai.module';
 import { AuditInterceptor } from './common/audit.interceptor';
 
 @Module({
@@ -25,6 +33,14 @@ import { AuditInterceptor } from './common/audit.interceptor';
     TimesheetsModule,
     InvoicesModule,
     DashboardModule,
+    OffersModule,
+    AssignmentsModule,
+    MarginGuardModule,
+    ScoreboardModule,
+    MarketJobsModule,
+    VendorReqsModule,
+    PstIntelModule,
+    AiModule,
   ],
   providers: [
     {

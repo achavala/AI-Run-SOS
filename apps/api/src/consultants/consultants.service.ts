@@ -5,25 +5,67 @@ import { PrismaService } from '../prisma/prisma.service';
 export class ConsultantsService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll(tenantId: string) {
-    const consultants = await this.prisma.consultant.findMany({
-      where: { tenantId },
-      include: { _count: { select: { submissions: true } } },
-      orderBy: { lastName: 'asc' },
-    });
+  async findAll(
+    tenantId: string,
+    opts: {
+      page?: number;
+      pageSize?: number;
+      search?: string;
+      readiness?: string;
+    } = {},
+  ) {
+    const page = Math.max(1, opts.page ?? 1);
+    const pageSize = Math.min(100, Math.max(1, opts.pageSize ?? 50));
+    const skip = (page - 1) * pageSize;
 
-    return consultants.map((c) => ({
-      id: c.id,
-      firstName: c.firstName,
-      lastName: c.lastName,
-      email: c.email,
-      skills: c.skills as string[],
-      visaStatus: c.visaStatus,
-      availableFrom: c.availableFrom?.toISOString() ?? null,
-      verificationStatus: c.verificationStatus,
-      trustScore: c.trustScore,
-      activeSubmissions: c._count.submissions,
-    }));
+    const where: any = { tenantId };
+
+    if (opts.readiness) {
+      where.readiness = opts.readiness;
+    }
+
+    if (opts.search) {
+      const term = opts.search.trim();
+      where.OR = [
+        { firstName: { contains: term, mode: 'insensitive' } },
+        { lastName: { contains: term, mode: 'insensitive' } },
+        { email: { contains: term, mode: 'insensitive' } },
+      ];
+    }
+
+    const [consultants, total] = await Promise.all([
+      this.prisma.consultant.findMany({
+        where,
+        include: { _count: { select: { submissions: true } } },
+        orderBy: { lastName: 'asc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.consultant.count({ where }),
+    ]);
+
+    return {
+      data: consultants.map((c) => ({
+        id: c.id,
+        firstName: c.firstName,
+        lastName: c.lastName,
+        email: c.email,
+        phone: c.phone,
+        skills: c.skills as string[],
+        readiness: c.readiness,
+        desiredRate: c.desiredRate,
+        availableFrom: c.availableFrom?.toISOString() ?? null,
+        verificationStatus: c.verificationStatus,
+        trustScore: c.trustScore,
+        activeSubmissions: c._count.submissions,
+        createdAt: c.createdAt.toISOString(),
+        updatedAt: c.updatedAt.toISOString(),
+      })),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    };
   }
 
   async findOne(tenantId: string, id: string) {
@@ -66,8 +108,6 @@ export class ConsultantsService {
         email: data.email,
         phone: data.phone,
         skills: data.skills ?? [],
-        visaStatus: data.visaStatus,
-        workAuthExpiry: data.workAuthExpiry ? new Date(data.workAuthExpiry) : undefined,
         availableFrom: data.availableFrom ? new Date(data.availableFrom) : undefined,
         desiredRate: data.desiredRate,
       },

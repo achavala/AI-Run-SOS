@@ -20,12 +20,21 @@ model Tenant {
 
   users               User[]
   vendors              Vendor[]
+  vendorContacts       VendorContact[]
+  clientCompanies      ClientCompany[]
   consultants          Consultant[]
+  consultantWorkAuths  ConsultantWorkAuth[]
+  resumeVersions       ResumeVersion[]
   jobs                 Job[]
+  jobReqSources        JobReqSource[]
   submissions          Submission[]
   consentRecords       ConsentRecord[]
   interviews           Interview[]
+  offers               Offer[]
   placements           Placement[]
+  assignments          Assignment[]
+  rateCards            RateCard[]
+  marginEvents         MarginEvent[]
   timesheets           Timesheet[]
   invoices             Invoice[]
   payments             Payment[]
@@ -34,6 +43,17 @@ model Tenant {
   agentAuditLogs       AgentAuditLog[]
   trustEvents          TrustEvent[]
   notifications        Notification[]
+  communicationEvents  CommunicationEvent[]
+  dailyScoreboards     DailyScoreboard[]
+}
+
+// ─── Pods (closure engine) ───────────────────────────────────────
+
+enum Pod {
+  SWE
+  CLOUD_DEVOPS
+  DATA
+  CYBER
 }
 
 // ─── Users & Auth ────────────────────────────────────────────────
@@ -85,6 +105,8 @@ model Vendor {
   id               String    @id @default(cuid())
   tenantId         String
   companyName      String
+  domain           String?
+  website          String?
   contactName      String?
   contactEmail     String?
   contactPhone     String?
@@ -103,10 +125,49 @@ model Vendor {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant     Tenant      @relation(fields: [tenantId], references: [id])
-  jobs       Job[]
-  invoices   Invoice[]
-  placements Placement[]
+  tenant      Tenant          @relation(fields: [tenantId], references: [id])
+  contacts    VendorContact[]
+  jobs        Job[]
+  invoices    Invoice[]
+  placements  Placement[]
+  assignments Assignment[]
+  offers      Offer[]
+
+  @@index([tenantId])
+}
+
+model VendorContact {
+  id        String  @id @default(cuid())
+  tenantId  String
+  vendorId  String
+  name      String
+  email     String?
+  phone     String?
+  title     String?
+  isPrimary Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  vendor Vendor @relation(fields: [vendorId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, vendorId])
+}
+
+model ClientCompany {
+  id        String  @id @default(cuid())
+  tenantId  String
+  name      String
+  industry  String?
+  website   String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  jobs        Job[]
+  assignments Assignment[]
 
   @@index([tenantId])
 }
@@ -120,46 +181,115 @@ enum VerificationStatus {
   FLAGGED
 }
 
+enum ConsultantReadiness {
+  NEW
+  DOCS_PENDING
+  VERIFIED
+  SUBMISSION_READY
+  ON_ASSIGNMENT
+  OFFBOARDED
+}
+
 model Consultant {
-  id                    String             @id @default(cuid())
+  id                    String              @id @default(cuid())
   tenantId              String
-  userId                String?            @unique
+  userId                String?             @unique
   firstName             String
   lastName              String
   email                 String
   phone                 String?
-  skills                Json               @default("[]")
+  skills                Json                @default("[]")
+  pods                  Pod[]
   resumeUrl             String?
-  visaStatus            String?
-  workAuthExpiry        DateTime?
   availableFrom         DateTime?
   desiredRate           Float?
   currentRate           Float?
-  verificationStatus    VerificationStatus @default(UNVERIFIED)
-  verificationChecklist Json               @default("[]")
-  consentPolicy         Json               @default("{}")
+  readiness             ConsultantReadiness @default(NEW)
+  verificationStatus    VerificationStatus  @default(UNVERIFIED)
+  verificationChecklist Json                @default("[]")
+  consentPolicy         Json                @default("{}")
   trustScore            Float?
-  performanceHistory    Json               @default("[]")
-  createdAt             DateTime           @default(now())
-  updatedAt             DateTime           @updatedAt
+  performanceHistory    Json                @default("[]")
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
 
-  tenant           Tenant            @relation(fields: [tenantId], references: [id])
-  user             User?             @relation(fields: [userId], references: [id])
+  tenant           Tenant               @relation(fields: [tenantId], references: [id])
+  user             User?                @relation(fields: [userId], references: [id])
+  workAuths        ConsultantWorkAuth[]
+  resumeVersions   ResumeVersion[]
   submissions      Submission[]
   consentRecords   ConsentRecord[]
+  offers           Offer[]
   placements       Placement[]
+  assignments      Assignment[]
   timesheets       Timesheet[]
   immigrationCases ImmigrationCase[]
 
   @@index([tenantId])
   @@index([tenantId, email])
+  @@index([tenantId, readiness])
+}
+
+// ─── Work Authorization ──────────────────────────────────────────
+
+enum WorkAuthType {
+  USC
+  GC
+  H1B
+  L1
+  OPT
+  CPT
+  EAD
+  TN
+  OTHER
+}
+
+model ConsultantWorkAuth {
+  id           String       @id @default(cuid())
+  tenantId     String
+  consultantId String
+  authType     WorkAuthType
+  expiryDate   DateTime?
+  employer     String?
+  notes        String?
+  isCurrent    Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+  consultant Consultant @relation(fields: [consultantId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, consultantId])
+}
+
+// ─── Resume Versions ─────────────────────────────────────────────
+
+model ResumeVersion {
+  id           String   @id @default(cuid())
+  tenantId     String
+  consultantId String
+  version      String
+  fileUrl      String
+  fileHash     String
+  watermark    String?
+  source       String?
+  isCurrent    Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+  consultant Consultant @relation(fields: [consultantId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, consultantId])
 }
 
 // ─── Jobs ────────────────────────────────────────────────────────
 
 enum JobStatus {
-  DRAFT
-  OPEN
+  NEW
+  QUALIFYING
+  ACTIVE
   ON_HOLD
   FILLED
   CANCELLED
@@ -180,10 +310,12 @@ model Job {
   id                      String       @id @default(cuid())
   tenantId                String
   vendorId                String
+  clientCompanyId         String?
   title                   String
   description             String
   structuredRequirements  Json         @default("{}")
   skills                  Json         @default("[]")
+  pod                     Pod?
   location                String?
   locationType            LocationType @default(REMOTE)
   rateMin                 Float?
@@ -191,7 +323,8 @@ model Job {
   rateType                RateType     @default(HOURLY)
   startDate               DateTime?
   durationMonths          Int?
-  status                  JobStatus    @default(DRAFT)
+  status                  JobStatus    @default(NEW)
+  freshnessScore          Float?
 
   // Job Truth metrics (computed)
   closureLikelihood Float?
@@ -201,26 +334,58 @@ model Job {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant      Tenant       @relation(fields: [tenantId], references: [id])
-  vendor      Vendor       @relation(fields: [vendorId], references: [id])
-  submissions Submission[]
-  placements  Placement[]
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  vendor        Vendor         @relation(fields: [vendorId], references: [id])
+  clientCompany ClientCompany? @relation(fields: [clientCompanyId], references: [id])
+  reqSources    JobReqSource[]
+  submissions   Submission[]
+  offers        Offer[]
+  placements    Placement[]
+  assignments   Assignment[]
 
   @@index([tenantId])
   @@index([tenantId, status])
   @@index([tenantId, vendorId])
+  @@index([tenantId, pod])
+}
+
+// ─── Job Req Sources ─────────────────────────────────────────────
+
+enum ReqSourceType {
+  EMAIL
+  PORTAL
+  MANUAL
+  API
+}
+
+model JobReqSource {
+  id        String        @id @default(cuid())
+  tenantId  String
+  jobId     String
+  source    ReqSourceType
+  rawText   String?
+  sourceRef String?
+  receivedAt DateTime     @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  job    Job    @relation(fields: [jobId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, jobId])
 }
 
 // ─── Submissions ─────────────────────────────────────────────────
 
 enum SubmissionStatus {
   DRAFT
-  PENDING_CONSENT
-  AWAITING_CONSENT
+  CONSENT_PENDING
   SUBMITTED
-  SHORTLISTED
+  INTERVIEWING
+  OFFERED
+  ACCEPTED
   REJECTED
   WITHDRAWN
+  CLOSED
 }
 
 enum SubmitterType {
@@ -229,32 +394,38 @@ enum SubmitterType {
 }
 
 model Submission {
-  id                  String           @id @default(cuid())
-  tenantId            String
-  jobId               String
-  consultantId        String
-  submittedById       String?
-  submitterType       SubmitterType    @default(USER)
-  agentId             String?
-  resumeVersion       String?
-  resumeHash          String?
-  rtrDocUrl           String?
-  status              SubmissionStatus @default(DRAFT)
-  vendorFeedback      String?
-  feedbackReceivedAt  DateTime?
+  id                   String           @id @default(cuid())
+  tenantId             String
+  jobId                String
+  consultantId         String
+  submittedById        String?
+  submitterType        SubmitterType    @default(USER)
+  agentId              String?
+  resumeVersionId      String?
+  resumeHash           String?
+  rtrDocUrl            String?
+  rateCardId           String?
+  status               SubmissionStatus @default(DRAFT)
+  vendorFeedback       String?
+  feedbackReceivedAt   DateTime?
   duplicateCheckResult Json?
-  notes               String?
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
+  marginApproved       Boolean          @default(false)
+  marginOverrideBy     String?
+  notes                String?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
 
-  tenant         Tenant          @relation(fields: [tenantId], references: [id])
-  job            Job             @relation(fields: [jobId], references: [id])
-  consultant     Consultant      @relation(fields: [consultantId], references: [id])
-  consentRecord  ConsentRecord?
-  interviews     Interview[]
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  job           Job            @relation(fields: [jobId], references: [id])
+  consultant    Consultant     @relation(fields: [consultantId], references: [id])
+  rateCard      RateCard?      @relation(fields: [rateCardId], references: [id])
+  consentRecord ConsentRecord?
+  interviews    Interview[]
+  offers        Offer[]
 
   @@unique([tenantId, jobId, consultantId])
   @@index([tenantId])
+  @@index([tenantId, status])
 }
 
 // ─── Consent Ledger ──────────────────────────────────────────────
@@ -310,6 +481,44 @@ model Interview {
   submission Submission @relation(fields: [submissionId], references: [id])
 
   @@index([tenantId])
+}
+
+// ─── Offers ──────────────────────────────────────────────────────
+
+enum OfferStatus {
+  EXTENDED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  WITHDRAWN
+}
+
+model Offer {
+  id            String      @id @default(cuid())
+  tenantId      String
+  submissionId  String
+  jobId         String
+  consultantId  String
+  vendorId      String
+  billRate      Float
+  payRate       Float
+  startDate     DateTime?
+  endDate       DateTime?
+  status        OfferStatus @default(EXTENDED)
+  expiresAt     DateTime?
+  notes         String?
+  approvedById  String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+  submission Submission @relation(fields: [submissionId], references: [id])
+  job        Job        @relation(fields: [jobId], references: [id])
+  consultant Consultant @relation(fields: [consultantId], references: [id])
+  vendor     Vendor     @relation(fields: [vendorId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, status])
 }
 
 // ─── Placements ──────────────────────────────────────────────────
@@ -442,6 +651,190 @@ model Payment {
   tenant  Tenant  @relation(fields: [tenantId], references: [id])
   invoice Invoice @relation(fields: [invoiceId], references: [id])
 
+  @@index([tenantId])
+}
+
+// ─── Assignments (active engagement lifecycle) ──────────────────
+
+enum AssignmentStatus {
+  ONBOARDING
+  ACTIVE
+  ENDING
+  COMPLETED
+  TERMINATED
+}
+
+model Assignment {
+  id            String           @id @default(cuid())
+  tenantId      String
+  consultantId  String
+  jobId         String
+  vendorId      String
+  clientCompanyId String?
+  placementId   String?
+  rateCardId    String?
+  startDate     DateTime
+  projectedEnd  DateTime?
+  actualEnd     DateTime?
+  status        AssignmentStatus @default(ONBOARDING)
+  onboardingChecklist Json       @default("[]")
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  consultant    Consultant     @relation(fields: [consultantId], references: [id])
+  job           Job            @relation(fields: [jobId], references: [id])
+  vendor        Vendor         @relation(fields: [vendorId], references: [id])
+  clientCompany ClientCompany? @relation(fields: [clientCompanyId], references: [id])
+  rateCard      RateCard?      @relation(fields: [rateCardId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+}
+
+// ─── Rate Cards (margin math) ────────────────────────────────────
+
+model RateCard {
+  id            String   @id @default(cuid())
+  tenantId      String
+  billRate      Float
+  payRate       Float
+  vendorCutPct  Float    @default(0)
+  burdenPct     Float    @default(0)
+  payrollTaxPct Float    @default(0)
+  portalFeePct  Float    @default(0)
+  otherFees     Float    @default(0)
+
+  // Computed fields (set by MarginGuard)
+  grossMarginHr    Float?
+  netMarginHr      Float?
+  marginSafe       Boolean  @default(false)
+  minMarginTarget  Float    @default(10)
+
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  submissions Submission[]
+  assignments Assignment[]
+
+  @@index([tenantId])
+}
+
+// ─── Margin Events (planned vs realized) ─────────────────────────
+
+enum MarginEventType {
+  PLANNED
+  REALIZED
+  ADJUSTMENT
+  LEAKAGE
+}
+
+model MarginEvent {
+  id            String          @id @default(cuid())
+  tenantId      String
+  entityType    String
+  entityId      String
+  eventType     MarginEventType
+  plannedMargin Float?
+  realizedMargin Float?
+  delta         Float?
+  reason        String?
+  createdAt     DateTime        @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, entityType, entityId])
+}
+
+// ─── Communication Events ────────────────────────────────────────
+
+enum CommChannel {
+  EMAIL
+  PHONE
+  SMS
+  PORTAL
+  INTERNAL_NOTE
+}
+
+enum CommDirection {
+  INBOUND
+  OUTBOUND
+  INTERNAL
+}
+
+model CommunicationEvent {
+  id          String        @id @default(cuid())
+  tenantId    String
+  entityType  String
+  entityId    String
+  channel     CommChannel
+  direction   CommDirection
+  subject     String?
+  body        String?
+  fromAddress String?
+  toAddress   String?
+  threadId    String?
+  sentByAgent Boolean       @default(false)
+  agentId     String?
+  createdAt   DateTime      @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, entityType, entityId])
+  @@index([threadId])
+}
+
+// ─── Daily Scoreboard (AutopilotGM) ─────────────────────────────
+
+model DailyScoreboard {
+  id       String   @id @default(cuid())
+  tenantId String
+  date     DateTime @db.Date
+
+  // Targets
+  targetQualifiedReqs   Int   @default(30)
+  targetHighConfReqs    Int   @default(10)
+  targetSubmissions     Int   @default(25)
+  targetInterviews      Int   @default(4)
+  targetActiveOffers    Int   @default(2)
+  targetClosures        Int   @default(1)
+
+  // Actuals
+  actualQualifiedReqs   Int   @default(0)
+  actualHighConfReqs    Int   @default(0)
+  actualSubmissions     Int   @default(0)
+  actualInterviews      Int   @default(0)
+  actualActiveOffers    Int   @default(0)
+  actualClosures        Int   @default(0)
+
+  // Pod focus
+  podFocus              Pod?
+  podRotationReason     String?
+
+  // Conversion metrics
+  subToInterviewRate    Float?
+  interviewToOfferRate  Float?
+  offerToAcceptRate     Float?
+
+  // Margin health
+  avgMarginHr           Float?
+  marginSafeSubmissions Int   @default(0)
+  marginOverrides       Int   @default(0)
+
+  // Agent action plan
+  actionPlan            Json  @default("[]")
+
+  generatedByAgent      String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, date])
   @@index([tenantId])
 }
 
@@ -581,4 +974,478 @@ model Notification {
   user   User   @relation(fields: [userId], references: [id])
 
   @@index([tenantId, userId])
+}
+
+// ── Market Jobs (external job board aggregation) ──────────────────
+
+enum MarketJobSource {
+  JSEARCH
+  JOOBLE
+  ADZUNA
+  ARBEITNOW
+  CAREERJET
+  CORPTOCORP
+  DICE
+  LINKEDIN
+  INDEED
+  ZIPRECRUITER
+  OTHER
+}
+
+enum UrlStatus {
+  ALIVE
+  DEAD
+  REDIRECT
+  UNKNOWN
+}
+
+enum EmploymentType {
+  C2C
+  W2
+  W2_1099
+  FULLTIME
+  PARTTIME
+  CONTRACT
+  UNKNOWN
+}
+
+enum CompPeriod {
+  HOUR
+  DAY
+  WEEK
+  MONTH
+  YEAR
+  UNKNOWN
+}
+
+enum MarketJobStatus {
+  ACTIVE
+  STALE
+  EXPIRED
+  CONVERTED
+}
+
+model MarketJob {
+  id          String            @id @default(cuid())
+  externalId  String
+  source      MarketJobSource
+  title       String
+  company     String
+  description String            @db.Text
+  location    String?
+  locationType LocationType     @default(REMOTE)
+  employmentType EmploymentType @default(UNKNOWN)
+  classificationConfidence Float @default(0)
+  negativeSignals Json          @default("[]")
+
+  // Raw compensation as provided
+  rateText    String?
+  rateMin     Float?
+  rateMax     Float?
+  compPeriod  CompPeriod        @default(UNKNOWN)
+
+  // Normalized to hourly for cross-job comparison and filtering
+  hourlyRateMin Float?
+  hourlyRateMax Float?
+
+  skills      Json              @default("[]")
+
+  applyUrl    String?
+  sourceUrl   String?
+
+  recruiterName     String?
+  recruiterEmail    String?
+  recruiterPhone    String?
+  recruiterLinkedIn String?
+
+  // Cross-provider dedupe: hash of normalized(title+company+location+domain+desc_prefix)
+  fingerprint String?
+  canonicalId String?
+  canonical   MarketJobCanonical? @relation(fields: [canonicalId], references: [id])
+
+  postedAt        DateTime?
+  sourcePostedAt  DateTime?
+  expiresAt       DateTime?
+  discoveredAt    DateTime          @default(now())
+  lastSeenAt      DateTime          @default(now())
+  status          MarketJobStatus   @default(ACTIVE)
+
+  // URL health check
+  urlStatus       UrlStatus         @default(UNKNOWN)
+  urlVerifiedAt   DateTime?
+
+  // Realness score (0-100)
+  realnessScore   Int?
+  realnessReasons Json              @default("[]")
+
+  // Actionability score (0-100) — can we place on this?
+  actionabilityScore  Int?
+  actionabilityReasons Json            @default("[]")
+
+  // Vendor/company domain matching
+  matchedVendorId String?
+  companyDomain   String?
+
+  // Link to internal job if converted
+  convertedToJobId String?
+  convertedAt      DateTime?
+
+  rawPayload  Json?
+
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([source, externalId])
+  @@index([fingerprint])
+  @@index([canonicalId])
+  @@index([status, postedAt])
+  @@index([status, sourcePostedAt])
+  @@index([status, employmentType])
+  @@index([status, locationType])
+  @@index([source])
+  @@index([company])
+  @@index([hourlyRateMin])
+  @@index([hourlyRateMax])
+  @@index([realnessScore])
+  @@index([urlStatus])
+  @@index([convertedToJobId])
+}
+
+// Groups duplicate listings across providers under one canonical entry
+model MarketJobCanonical {
+  id           String      @id @default(cuid())
+  fingerprint  String      @unique
+  bestTitle    String
+  bestCompany  String
+  bestLocation String?
+  jobCount     Int         @default(1)
+  firstSeenAt  DateTime    @default(now())
+  lastSeenAt   DateTime    @default(now())
+
+  aliases      MarketJob[]
+
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+// Controls what queries each provider runs and how much budget per sync
+model MarketQueryPlan {
+  id          String          @id @default(cuid())
+  provider    MarketJobSource
+  query       String
+  location    String?
+  pod         Pod?
+  hourSlots   Int[]           @default([])
+  maxPages    Int             @default(2)
+  isEnabled   Boolean         @default(true)
+  priority    Int             @default(0)
+
+  // Budget tracking
+  callsToday      Int         @default(0)
+  callsThisMonth  Int         @default(0)
+  maxCallsPerDay  Int         @default(50)
+  maxCallsPerMonth Int        @default(2000)
+  lastResetDate   DateTime?
+  lastRunAt       DateTime?
+
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@unique([provider, query, location])
+  @@index([provider, isEnabled])
+}
+
+// ── Vendor Reqs (Lane 1: email-sourced actionable reqs) ──────────
+
+enum VendorReqStatus {
+  NEW
+  REVIEWED
+  CONVERTED
+  REJECTED
+  EXPIRED
+}
+
+model VendorReq {
+  id              String          @id @default(cuid())
+  tenantId        String
+  vendorId        String?
+  vendorContactId String?
+
+  // Email origin
+  messageId       String?
+  threadId        String?
+  fromEmail       String
+  fromName        String?
+  subject         String
+  receivedAt      DateTime
+
+  // Extracted fields
+  title           String?
+  description     String?         @db.Text
+  location        String?
+  locationType    LocationType?
+  employmentType  EmploymentType  @default(UNKNOWN)
+  rateText        String?
+  hourlyRateMin   Float?
+  hourlyRateMax   Float?
+  duration        String?
+  clientHint      String?
+  skills          Json            @default("[]")
+  negativeSignals Json            @default("[]")
+
+  // Scoring
+  realnessScore       Int?
+  actionabilityScore  Int?
+
+  // Extraction evidence
+  extractionMethod    String          @default("DETERMINISTIC")
+  extractionEvidence  Json            @default("{}")
+
+  // Matched to vendor by domain
+  matchedByDomain     Boolean         @default(false)
+
+  // Conversion
+  status              VendorReqStatus @default(NEW)
+  convertedToJobId    String?
+  convertedAt         DateTime?
+
+  // Attachments (JD docs)
+  attachments         Json            @default("[]")
+
+  rawBody             String?         @db.Text
+
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  @@index([tenantId])
+  @@index([tenantId, vendorId])
+  @@index([tenantId, status])
+  @@index([fromEmail])
+  @@index([messageId])
+}
+
+// ── QA Truth Sampler (daily quality checks) ──────────────────────
+
+enum QaSampleVerdict {
+  PASS
+  FAIL
+  STALE
+  DUPLICATE
+  BOGUS
+  HARVEST
+}
+
+model QaSample {
+  id            String          @id @default(cuid())
+  marketJobId   String
+  sampledAt     DateTime        @default(now())
+
+  // Checks performed
+  urlAlive      Boolean?
+  typeCorrect   Boolean?
+  isDuplicate   Boolean?
+  isBogus       Boolean?
+  hasContact    Boolean?
+  freshnessOk   Boolean?
+
+  verdict       QaSampleVerdict @default(PASS)
+  notes         String?
+
+  // Scores at sample time
+  realnessScore       Int?
+  actionabilityScore  Int?
+
+  createdAt     DateTime        @default(now())
+
+  @@index([sampledAt])
+  @@index([verdict])
+}
+
+// ── Spend Guard (daily/weekly budget caps with alerts) ───────────
+
+model SpendGuard {
+  id              String    @id @default(cuid())
+  provider        MarketJobSource
+  date            DateTime  @db.Date
+
+  requestsMade    Int       @default(0)
+  newJobsIngested Int       @default(0)
+  maxRequestsDay  Int       @default(100)
+  maxNewJobsDay   Int       @default(500)
+
+  alertFired      Boolean   @default(false)
+  alertMessage    String?
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([provider, date])
+  @@index([provider, date])
+}
+
+// ── Email Sync State (tracks Graph delta tokens) ─────────────────
+
+model EmailSyncState {
+  id              String    @id @default(cuid())
+  tenantId        String
+  mailbox         String
+  folder          String    @default("Inbox")
+  deltaToken      String?   @db.Text
+  lastSyncAt      DateTime?
+  messagesTotal   Int       @default(0)
+  messagesNew     Int       @default(0)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([tenantId, mailbox, folder])
+}
+
+// ── PST / Email Archive Ingestion ────────────────────────────────
+
+model RawEmailMessage {
+  id          String    @id @default(cuid())
+  pstBatch    String
+  sourcePath  String
+  messageId   String?
+  threadHint  String?
+  subject     String?
+  fromEmail   String?
+  fromName    String?
+  toEmails    String[]
+  ccEmails    String[]
+  sentAt      DateTime?
+  bodyText    String?   @db.Text
+  bodyHtml    String?   @db.Text
+  processed   Boolean   @default(false)
+
+  attachments RawEmailAttachment[]
+
+  createdAt   DateTime  @default(now())
+
+  @@index([fromEmail])
+  @@index([sentAt])
+  @@index([pstBatch])
+  @@index([processed])
+}
+
+model RawEmailAttachment {
+  id          String    @id @default(cuid())
+  emailId     String
+  filename    String?
+  contentType String?
+  sizeBytes   Int?
+  sha256      String?
+  storagePath String
+
+  email       RawEmailMessage @relation(fields: [emailId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime  @default(now())
+
+  @@index([sha256])
+  @@index([emailId])
+}
+
+model ExtractedVendorCompany {
+  id          String    @id @default(cuid())
+  name        String?
+  domain      String    @unique
+  emailCount  Int       @default(0)
+  firstSeenAt DateTime?
+  lastSeenAt  DateTime?
+
+  contacts    ExtractedVendorContact[]
+  reqSignals  VendorReqSignal[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model ExtractedVendorContact {
+  id              String    @id @default(cuid())
+  vendorCompanyId String
+  name            String?
+  email           String    @unique
+  phone           String?
+  linkedIn        String?
+  emailCount      Int       @default(0)
+  firstSeenAt     DateTime?
+  lastSeenAt      DateTime?
+
+  vendorCompany   ExtractedVendorCompany @relation(fields: [vendorCompanyId], references: [id])
+  reqSignals      VendorReqSignal[]
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([vendorCompanyId])
+}
+
+model ExtractedConsultant {
+  id            String    @id @default(cuid())
+  fullName      String?
+  email         String?   @unique
+  phone         String?
+  location      String?
+  primarySkills String[]
+  lastSeenAt    DateTime?
+  sourceType    String    @default("EMAIL")
+
+  resumeVersions ExtractedResumeVersion[]
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model ExtractedResumeVersion {
+  id            String    @id @default(cuid())
+  consultantId  String
+  sha256        String
+  filename      String?
+  storagePath   String
+  extractedText String?   @db.Text
+
+  consultant    ExtractedConsultant @relation(fields: [consultantId], references: [id])
+
+  createdAt     DateTime  @default(now())
+
+  @@index([sha256])
+  @@index([consultantId])
+}
+
+model VendorReqSignal {
+  id              String    @id @default(cuid())
+  vendorCompanyId String?
+  vendorContactId String?
+  rawEmailId      String?
+  title           String?
+  location        String?
+  employmentType  String?
+  rateText        String?
+  skills          String[]
+  clientHint      String?
+
+  vendorCompany   ExtractedVendorCompany? @relation(fields: [vendorCompanyId], references: [id])
+  vendorContact   ExtractedVendorContact? @relation(fields: [vendorContactId], references: [id])
+
+  createdAt       DateTime  @default(now())
+
+  @@index([vendorCompanyId])
+  @@index([vendorContactId])
+}
+
+model ExtractionFact {
+  id                 String    @id @default(cuid())
+  entityType         String
+  entityId           String
+  field              String
+  value              String
+  confidence         Float     @default(0.5)
+  sourceEmailId      String?
+  sourceAttachmentId String?
+
+  createdAt          DateTime  @default(now())
+
+  @@index([entityType, entityId])
+  @@index([sourceEmailId])
 }

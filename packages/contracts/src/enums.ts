@@ -11,8 +11,9 @@ export const UserRole = {
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
 
 export const JobStatus = {
-  DRAFT: 'DRAFT',
-  OPEN: 'OPEN',
+  NEW: 'NEW',
+  QUALIFYING: 'QUALIFYING',
+  ACTIVE: 'ACTIVE',
   ON_HOLD: 'ON_HOLD',
   FILLED: 'FILLED',
   CANCELLED: 'CANCELLED',
@@ -20,13 +21,14 @@ export const JobStatus = {
 export type JobStatus = (typeof JobStatus)[keyof typeof JobStatus];
 
 export const SubmissionStatus = {
-  DRAFT: 'DRAFT',
-  PENDING_CONSENT: 'PENDING_CONSENT',
-  AWAITING_CONSENT: 'AWAITING_CONSENT',
+  CONSENT_PENDING: 'CONSENT_PENDING',
   SUBMITTED: 'SUBMITTED',
-  SHORTLISTED: 'SHORTLISTED',
+  INTERVIEWING: 'INTERVIEWING',
+  OFFERED: 'OFFERED',
+  ACCEPTED: 'ACCEPTED',
   REJECTED: 'REJECTED',
   WITHDRAWN: 'WITHDRAWN',
+  CLOSED: 'CLOSED',
 } as const;
 export type SubmissionStatus = (typeof SubmissionStatus)[keyof typeof SubmissionStatus];
 

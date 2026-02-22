@@ -9,39 +9,97 @@
 5. **Rate Limits**: Agents have per-minute and per-hour action limits
 6. **Sandboxing**: Agents run in isolated contexts with no cross-tenant access
 
-## Agent Registry
+---
 
-### Front-Office Agents
+## 7 Core Agents
 
-| Agent | Role | Allowed Tools | Approval Required |
-|-------|------|---------------|-------------------|
-| VendorOnboardingAgent | `vendor_ops` | vendor.create, vendor.update, document.request, email.send | High-risk terms → Management |
-| JobIntakeAgent | `job_ops` | job.create, job.update, vendor.query, email.send | None |
-| SalesNegotiationAgent | `sales_assist` | rate.benchmark, email.draft, vendor.query | Rate proposals → Management |
+### Strategic Agents
 
-### Recruiting Agents
+#### 1. MarketPulse (Sales Strategist)
 
-| Agent | Role | Allowed Tools | Approval Required |
-|-------|------|---------------|-------------------|
-| TalentSourcingAgent | `sourcing` | consultant.search, consultant.shortlist | None |
-| ResumeForensicsAgent | `verification` | consultant.read, verification.flag | None (flags only, never accuses) |
-| SubmissionAgent | `submissions` | submission.create, consent.check, duplicate.check, email.send | Consent required from consultant |
-| InterviewCoordinatorAgent | `scheduling` | interview.schedule, email.send, calendar.query | None |
+| Attribute | Value |
+|-----------|-------|
+| Role | `sales_strategist` |
+| Purpose | Daily pod focus, rate bands, vendor priority |
+| Tools | job.query, vendor.query, rate.benchmark, email.draft, report.generate |
+| Approval gates | Rate proposals → President |
+| Rate limits | 20/min, 300/hr |
 
-### Back-Office Agents
+---
 
-| Agent | Role | Allowed Tools | Approval Required |
-|-------|------|---------------|-------------------|
-| ImmigrationOpsAgent | `immigration` | case.track, document.request, alert.create | Filing → Management |
-| TimesheetAndInvoicingAgent | `billing` | timesheet.chase, invoice.generate, payment.remind | Write-off → Management |
-| ComplianceAgent | `compliance` | compliance.check, onboarding.block, document.verify | Override → Management |
+#### 2. SupplyRadar (Recruiting Strategist)
 
-### Meta Agents
+| Attribute | Value |
+|-----------|-------|
+| Role | `recruiting_strategist` |
+| Purpose | Hot bench, skill gaps, nurture sequences |
+| Tools | consultant.search, consultant.query, job.query, skill.gap.analyze, sequence.trigger |
+| Approval gates | None |
+| Rate limits | 30/min, 500/hr |
 
-| Agent | Role | Allowed Tools | Approval Required |
-|-------|------|---------------|-------------------|
-| TrustGraphAgent | `analytics` | trust.compute, event.read | None (read-only computation) |
-| QualityPlacementsAgent | `analytics` | placement.analyze, match.rank | None (advisory only) |
+---
+
+#### 3. ReqCollector Swarm
+
+| Attribute | Value |
+|-----------|-------|
+| Role | `req_intake` |
+| Purpose | Email intake, portal watch, dedup, freshness scoring |
+| Tools | job.create, job.update, email.parse, portal.watch, duplicate.check, freshness.score |
+| Approval gates | None |
+| Rate limits | 60/min, 1000/hr |
+
+---
+
+#### 4. AutopilotGM (High-Level Strategist)
+
+| Attribute | Value |
+|-----------|-------|
+| Role | `boss_agent` |
+| Purpose | Boss agent, daily scoreboard, pod rotation, escalation |
+| Tools | scoreboard.generate, pod.rotate, escalation.create, report.generate, agent.orchestrate |
+| Approval gates | Escalations → President/MD/CFO |
+| Rate limits | 10/min, 100/hr |
+
+---
+
+### Operational Agents
+
+#### 5. MarginGuard (Deal Desk)
+
+| Attribute | Value |
+|-----------|-------|
+| Role | `deal_desk` |
+| Purpose | Compute margin after all costs, block sub < $10/hr unless CFO, suggest counter-offers |
+| Tools | margin.compute, submission.block, counter_offer.suggest, rate.query |
+| Approval gates | Sub < $10/hr margin → CFO only |
+| Rate limits | 40/min, 600/hr |
+
+---
+
+#### 6. TrustVerification
+
+| Attribute | Value |
+|-----------|-------|
+| Role | `verification` |
+| Purpose | Resume forensics, verification badges, skill assessment |
+| Tools | consultant.read, resume.forensics, verification.badge, skill.assess, document.verify |
+| Approval gates | Compliance override → MD |
+| Rate limits | 25/min, 400/hr |
+
+---
+
+#### 7. FollowUpScheduler
+
+| Attribute | Value |
+|-----------|-------|
+| Role | `followup` |
+| Purpose | Followup sequences, interview scheduling, feedback capture |
+| Tools | sequence.trigger, interview.schedule, email.send, calendar.query, feedback.capture |
+| Approval gates | None |
+| Rate limits | 50/min, 800/hr |
+
+---
 
 ## Tool Security Model
 
@@ -82,18 +140,26 @@ Agent → Policy Check → Tool Router → Rate Limiter → Tool Execution → A
 }
 ```
 
-## Rate Limits
+---
 
-| Agent Type | Per Minute | Per Hour | Daily |
-|------------|-----------|----------|-------|
-| Front-office | 30 | 500 | 5000 |
-| Recruiting | 60 | 1000 | 10000 |
-| Back-office | 20 | 300 | 3000 |
-| Meta (analytics) | 10 | 100 | 1000 |
+## Rate Limits Summary
+
+| Agent | Per Min | Per Hour |
+|-------|---------|----------|
+| MarketPulse | 20 | 300 |
+| SupplyRadar | 30 | 500 |
+| ReqCollector Swarm | 60 | 1000 |
+| AutopilotGM | 10 | 100 |
+| MarginGuard | 40 | 600 |
+| TrustVerification | 25 | 400 |
+| FollowUpScheduler | 50 | 800 |
+
+---
 
 ## Communication Policies
 
 ### Email Signature (required for all outbound)
+
 ```
 ---
 [Agent Name] — AI Assistant
@@ -102,10 +168,13 @@ This message was composed by an AI assistant. For human assistance, reply with "
 ```
 
 ### Tone Controls
+
 - Professional, concise, never aggressive
 - Payment reminders: escalating formality (friendly → firm → formal → escalation notice)
 - Never threaten legal action (escalate to human)
 - Never make promises about timelines without checking workflow state
+
+---
 
 ## Escalation Rules
 
@@ -114,3 +183,4 @@ This message was composed by an AI assistant. For human assistance, reply with "
 3. Agent hits rate limit → queue action, notify management
 4. Agent policy violation attempt → block, log, alert management
 5. External party requests human → immediately route to assigned human
+6. MarginGuard blocks submission → CFO must approve or reject

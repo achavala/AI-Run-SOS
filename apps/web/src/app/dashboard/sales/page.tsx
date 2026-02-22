@@ -1,99 +1,41 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { KpiCard } from '@/components/kpi-card';
 import { DataTable, type Column } from '@/components/data-table';
+import { api } from '@/lib/api';
 import {
   BuildingOfficeIcon,
-  DocumentCheckIcon,
+  ClockIcon,
   ChartBarIcon,
   TrophyIcon,
 } from '@heroicons/react/24/outline';
 
-const VENDORS = [
-  {
-    id: 'V-001',
-    name: 'TechStream Solutions',
-    contact: 'David Park',
-    email: 'david@techstream.io',
-    trustScore: 92,
-    paySpeed: 12,
-    ghostRate: 2,
-    activeJobs: 14,
-    revenue: 480000,
-    msaStatus: 'ACTIVE',
-  },
-  {
-    id: 'V-002',
-    name: 'Apex Staffing Group',
-    contact: 'Jennifer Liu',
-    email: 'jliu@apexstaffing.com',
-    trustScore: 87,
-    paySpeed: 18,
-    ghostRate: 5,
-    activeJobs: 9,
-    revenue: 320000,
-    msaStatus: 'ACTIVE',
-  },
-  {
-    id: 'V-003',
-    name: 'NovaTech Partners',
-    contact: 'Robert Chen',
-    email: 'rchen@novatech.co',
-    trustScore: 84,
-    paySpeed: 22,
-    ghostRate: 8,
-    activeJobs: 7,
-    revenue: 215000,
-    msaStatus: 'ACTIVE',
-  },
-  {
-    id: 'V-004',
-    name: 'ProConnect Inc.',
-    contact: 'Sarah Miller',
-    email: 'sarah@proconnect.com',
-    trustScore: 76,
-    paySpeed: 28,
-    ghostRate: 12,
-    activeJobs: 11,
-    revenue: 185000,
-    msaStatus: 'ACTIVE',
-  },
-  {
-    id: 'V-005',
-    name: 'Velocity Talent',
-    contact: 'Mark Johnson',
-    email: 'mark@velocitytalent.com',
-    trustScore: 71,
-    paySpeed: 35,
-    ghostRate: 15,
-    activeJobs: 5,
-    revenue: 94000,
-    msaStatus: 'ACTIVE',
-  },
-  {
-    id: 'V-006',
-    name: 'GlobalBridge Corp',
-    contact: 'Lisa Wang',
-    email: 'lwang@globalbridge.io',
-    trustScore: 68,
-    paySpeed: 42,
-    ghostRate: 20,
-    activeJobs: 3,
-    revenue: 62000,
-    msaStatus: 'ACTIVE',
-  },
-];
+interface Vendor {
+  id: string;
+  name: string;
+  domain: string | null;
+  website: string | null;
+  trustScore: number | null;
+  avgPayDays: number | null;
+  ghostRate: number | null;
+  email: string | null;
+  phone: string | null;
+  contactName: string | null;
+  activeJobCount: number;
+  totalRevenue: number;
+  msaStatus: string | null;
+  createdAt: string;
+}
 
-const DEAL_PIPELINE = [
-  { vendor: 'Pinnacle Systems', stage: 'Negotiation', value: '$240K', probability: 80, daysInStage: 5 },
-  { vendor: 'Summit Technologies', stage: 'Proposal Sent', value: '$180K', probability: 60, daysInStage: 12 },
-  { vendor: 'Horizon Digital', stage: 'Discovery', value: '$320K', probability: 30, daysInStage: 3 },
-  { vendor: 'Atlas IT Group', stage: 'Contract Review', value: '$150K', probability: 90, daysInStage: 2 },
-  { vendor: 'Beacon Solutions', stage: 'Proposal Sent', value: '$95K', probability: 50, daysInStage: 8 },
-];
+type VendorRow = Vendor & Record<string, unknown>;
 
-type VendorRow = (typeof VENDORS)[number] & Record<string, unknown>;
+function trustScoreColor(score: number): string {
+  if (score > 80) return 'bg-emerald-500';
+  if (score >= 60) return 'bg-amber-500';
+  return 'bg-red-500';
+}
 
 const vendorColumns: Column<VendorRow>[] = [
   {
@@ -103,7 +45,9 @@ const vendorColumns: Column<VendorRow>[] = [
     render: (row) => (
       <div>
         <p className="font-medium text-gray-900">{row.name}</p>
-        <p className="text-xs text-gray-500">{row.contact}</p>
+        {row.contactName && (
+          <p className="text-xs text-gray-500">{row.contactName}</p>
+        )}
       </div>
     ),
   },
@@ -111,60 +55,162 @@ const vendorColumns: Column<VendorRow>[] = [
     key: 'trustScore',
     header: 'Trust Score',
     sortable: true,
-    render: (row) => (
-      <div className="flex items-center gap-2">
-        <div className="h-1.5 w-16 rounded-full bg-gray-200">
-          <div
-            className={`h-1.5 rounded-full ${
-              row.trustScore >= 80 ? 'bg-emerald-500' : row.trustScore >= 70 ? 'bg-amber-500' : 'bg-red-500'
-            }`}
-            style={{ width: `${row.trustScore}%` }}
-          />
+    render: (row) => {
+      const score = row.trustScore;
+      if (score == null) return <span className="text-xs text-gray-400">N/A</span>;
+      return (
+        <div className="flex items-center gap-2">
+          <div className="h-1.5 w-16 rounded-full bg-gray-200">
+            <div
+              className={`h-1.5 rounded-full ${trustScoreColor(score)}`}
+              style={{ width: `${score}%` }}
+            />
+          </div>
+          <span className="text-sm font-semibold text-gray-900">{score}</span>
         </div>
-        <span className="text-sm font-semibold text-gray-900">{row.trustScore}</span>
-      </div>
-    ),
+      );
+    },
   },
   {
-    key: 'paySpeed',
+    key: 'avgPayDays',
     header: 'Pay Speed',
     sortable: true,
-    render: (row) => (
-      <span className={`text-sm font-medium ${row.paySpeed <= 15 ? 'text-emerald-600' : row.paySpeed <= 30 ? 'text-amber-600' : 'text-red-600'}`}>
-        {row.paySpeed} days
-      </span>
-    ),
+    render: (row) => {
+      const days = row.avgPayDays;
+      if (days == null) return <span className="text-xs text-gray-400">N/A</span>;
+      return (
+        <span
+          className={`text-sm font-medium ${
+            days <= 15 ? 'text-emerald-600' : days <= 30 ? 'text-amber-600' : 'text-red-600'
+          }`}
+        >
+          {days} days
+        </span>
+      );
+    },
   },
   {
     key: 'ghostRate',
     header: 'Ghost %',
     sortable: true,
-    render: (row) => (
-      <span className={`text-sm ${row.ghostRate <= 5 ? 'text-emerald-600' : row.ghostRate <= 10 ? 'text-amber-600' : 'text-red-600'}`}>
-        {row.ghostRate}%
-      </span>
-    ),
+    render: (row) => {
+      const rate = row.ghostRate;
+      if (rate == null) return <span className="text-xs text-gray-400">N/A</span>;
+      return (
+        <span
+          className={`text-sm ${
+            rate <= 5 ? 'text-emerald-600' : rate <= 10 ? 'text-amber-600' : 'text-red-600'
+          }`}
+        >
+          {rate}%
+        </span>
+      );
+    },
   },
   {
-    key: 'activeJobs',
+    key: 'activeJobCount',
     header: 'Jobs',
     sortable: true,
     className: 'text-center',
-    render: (row) => <span className="font-medium">{row.activeJobs}</span>,
+    render: (row) => <span className="font-medium">{row.activeJobCount}</span>,
   },
   {
-    key: 'revenue',
+    key: 'totalRevenue',
     header: 'Revenue',
     sortable: true,
-    render: (row) => (
-      <span className="font-medium text-gray-900">
-        ${(row.revenue / 1000).toFixed(0)}K
-      </span>
-    ),
+    render: (row) => {
+      const rev = row.totalRevenue;
+      if (!rev) return <span className="text-xs text-gray-400">—</span>;
+      return (
+        <span className="font-medium text-gray-900">
+          ${rev >= 1000 ? `${(rev / 1000).toFixed(0)}K` : rev.toFixed(0)}
+        </span>
+      );
+    },
   },
 ];
 
 export default function SalesPage() {
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const data = await api.get<Vendor[]>('/vendors');
+        if (!cancelled) setVendors(data);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load vendors');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  const filtered = search
+    ? vendors.filter((v) =>
+        v.name.toLowerCase().includes(search.toLowerCase()) ||
+        v.contactName?.toLowerCase().includes(search.toLowerCase()) ||
+        v.domain?.toLowerCase().includes(search.toLowerCase()),
+      )
+    : vendors;
+
+  const activeVendors = vendors.filter((v) => v.activeJobCount > 0);
+
+  const avgTrust =
+    vendors.length > 0
+      ? Math.round(
+          vendors.reduce((sum, v) => sum + (v.trustScore ?? 0), 0) /
+            vendors.filter((v) => v.trustScore != null).length || 0,
+        )
+      : 0;
+
+  const vendorsWithPay = vendors.filter((v) => v.avgPayDays != null);
+  const avgPayDays =
+    vendorsWithPay.length > 0
+      ? Math.round(
+          vendorsWithPay.reduce((sum, v) => sum + (v.avgPayDays ?? 0), 0) / vendorsWithPay.length,
+        )
+      : 0;
+
+  const totalRevenue = vendors.reduce((sum, v) => sum + (v.totalRevenue ?? 0), 0);
+
+  if (loading) {
+    return (
+      <>
+        <PageHeader
+          title="Sales Dashboard"
+          description="Vendor relationships, trust scores, and deal pipeline"
+        />
+        <div className="flex items-center justify-center py-32">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200 border-t-indigo-600" />
+        </div>
+      </>
+    );
+  }
+
+  if (error) {
+    return (
+      <>
+        <PageHeader
+          title="Sales Dashboard"
+          description="Vendor relationships, trust scores, and deal pipeline"
+        />
+        <div className="rounded-xl border border-red-200 bg-red-50 p-8 text-center">
+          <p className="text-sm font-medium text-red-800">Failed to load sales data</p>
+          <p className="mt-1 text-xs text-red-600">{error}</p>
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       <PageHeader
@@ -182,82 +228,65 @@ export default function SalesPage() {
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           title="Active Vendors"
-          value="24"
-          change="+2"
-          changeType="positive"
-          subtitle="this month"
+          value={String(activeVendors.length)}
+          subtitle={`of ${vendors.length} total`}
           icon={BuildingOfficeIcon}
         />
         <KpiCard
-          title="Pending Proposals"
-          value="7"
-          change="-1"
-          changeType="positive"
-          subtitle="vs last week"
-          icon={DocumentCheckIcon}
-        />
-        <KpiCard
-          title="Win Rate"
-          value="68%"
-          change="+5.2%"
-          changeType="positive"
-          subtitle="last 90 days"
-          icon={ChartBarIcon}
-        />
-        <KpiCard
           title="Avg Trust Score"
-          value="81"
-          change="+3"
-          changeType="positive"
+          value={String(avgTrust)}
           subtitle="across vendors"
           icon={TrophyIcon}
+        />
+        <KpiCard
+          title="Avg Pay Speed"
+          value={avgPayDays ? `${avgPayDays}d` : 'N/A'}
+          subtitle="days to payment"
+          icon={ClockIcon}
+        />
+        <KpiCard
+          title="Total Revenue"
+          value={totalRevenue >= 1000 ? `$${(totalRevenue / 1000).toFixed(0)}K` : `$${totalRevenue}`}
+          subtitle="all vendors"
+          icon={ChartBarIcon}
         />
       </div>
 
       {/* Vendor Table */}
       <div className="mt-8">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Vendor Directory</h2>
+          <h2 className="text-lg font-semibold text-gray-900">
+            Vendor Directory
+            <span className="ml-2 text-sm font-normal text-gray-400">
+              ({filtered.length})
+            </span>
+          </h2>
           <input
             type="text"
             placeholder="Search vendors..."
             className="input w-64"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
           />
         </div>
         <DataTable
           columns={vendorColumns}
-          data={VENDORS as unknown as VendorRow[]}
+          data={filtered as VendorRow[]}
           keyField="id"
+          emptyMessage="No vendors found"
         />
       </div>
 
-      {/* Deal Pipeline */}
+      {/* Deal Pipeline - empty state until real deal data is available */}
       <div className="mt-8 rounded-xl border border-gray-200 bg-white p-6">
         <h3 className="text-sm font-semibold text-gray-900">Deal Pipeline</h3>
         <p className="text-xs text-gray-500">Active vendor negotiations</p>
-
-        <div className="mt-4 space-y-3">
-          {DEAL_PIPELINE.map((deal, i) => (
-            <div
-              key={i}
-              className="flex items-center gap-4 rounded-lg border border-gray-100 p-4 transition-colors hover:bg-gray-50"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-gray-900">{deal.vendor}</p>
-                <p className="text-xs text-gray-500">{deal.stage} &middot; {deal.daysInStage}d in stage</p>
-              </div>
-              <span className="text-sm font-semibold text-gray-900">{deal.value}</span>
-              <div className="flex items-center gap-2">
-                <div className="h-1.5 w-16 rounded-full bg-gray-200">
-                  <div
-                    className="h-1.5 rounded-full bg-indigo-500"
-                    style={{ width: `${deal.probability}%` }}
-                  />
-                </div>
-                <span className="w-8 text-right text-xs font-medium text-gray-600">{deal.probability}%</span>
-              </div>
-            </div>
-          ))}
+        <div className="flex items-center justify-center py-12 text-center">
+          <div>
+            <ChartBarIcon className="mx-auto h-8 w-8 text-gray-300" />
+            <p className="mt-2 text-sm text-gray-400">No active deals</p>
+            <p className="text-xs text-gray-300">Deals will appear here when tracked</p>
+          </div>
         </div>
       </div>
     </>

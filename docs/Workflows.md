@@ -2,110 +2,167 @@
 
 All workflows are deterministic state machines. Each transition is logged.
 
-## 1. Job Intake Workflow
+## 1. Job Workflow
 
 ```
-[Received] → [Parsing] → [Clarification Needed?]
-                              ├─ Yes → [Awaiting Clarification] → [Parsing]
-                              └─ No  → [Qualified] → [Open]
-[Open] → [On Hold] | [Filled] | [Cancelled]
+NEW → QUALIFYING → ACTIVE → ON_HOLD | FILLED | CANCELLED
 ```
 
-**Agents involved:** JobIntakeAgent
-**Human gates:** None (but Management can override status)
-**Triggers:** Email/API with JD text
+| State | Description |
+|-------|-------------|
+| NEW | Raw intake, not yet qualified |
+| QUALIFYING | Parsing, clarification, pod assignment |
+| ACTIVE | Open for submissions |
+| ON_HOLD | Paused (client pause, rate renegotiation) |
+| FILLED | Position closed |
+| CANCELLED | Job no longer valid |
 
-## 2. Submission Workflow
+**Agents:** ReqCollector Swarm, MarketPulse  
+**Human gates:** None (Management can override)
 
-```
-[Draft] → [Pending Consent]
-              ├─ Auto-consent policy matches → [Submitted]
-              └─ Needs explicit consent → [Awaiting Consent]
-                    ├─ Approved → [Submitted]
-                    └─ Denied → [Withdrawn]
-[Submitted] → [Shortlisted] | [Rejected] | [Withdrawn]
-[Shortlisted] → [Interview Scheduled]
-```
+---
 
-**Agents involved:** SubmissionAgent, TalentSourcingAgent
-**Human gates:** Consultant consent (explicit or auto-policy)
-**Validation:** Duplicate check, resume hash verification, RTR document
-
-## 3. Interview Workflow
+## 2. Consultant Readiness Workflow
 
 ```
-[Scheduled] → [Reminder Sent] → [Completed] | [Cancelled] | [No Show]
-[Completed] → [Feedback Requested] → [Feedback Captured]
+NEW → DOCS_PENDING → VERIFIED → SUBMISSION_READY → ON_ASSIGNMENT | OFFBOARDED
 ```
 
-**Agents involved:** InterviewCoordinatorAgent
+| State | Description |
+|-------|-------------|
+| NEW | Profile created, not yet vetted |
+| DOCS_PENDING | Awaiting resume, work auth, verification docs |
+| VERIFIED | TrustVerification passed, docs complete |
+| SUBMISSION_READY | Can be submitted to jobs |
+| ON_ASSIGNMENT | Currently placed |
+| OFFBOARDED | Assignment ended, may return to SUBMISSION_READY |
+
+**Agents:** TrustVerification, SupplyRadar  
+**Human gates:** MD for compliance/immigration overrides
+
+---
+
+## 3. Submission Workflow
+
+```
+DRAFT → CONSENT_PENDING → SUBMITTED → INTERVIEWING → OFFERED → ACCEPTED → CLOSED
+```
+
+| State | Description |
+|-------|-------------|
+| DRAFT | Being prepared, not yet sent |
+| CONSENT_PENDING | Awaiting consultant consent |
+| SUBMITTED | Sent to vendor |
+| INTERVIEWING | Interview scheduled or in progress |
+| OFFERED | Offer extended to consultant |
+| ACCEPTED | Consultant accepted offer |
+| CLOSED | Rejected, withdrawn, or converted to placement |
+
+**Agents:** FollowUpScheduler, MarginGuard (pre-submit margin check)  
+**Human gates:** Consultant consent; CFO for sub < $10/hr margin
+
+---
+
+## 4. Offer Workflow
+
+```
+EXTENDED → ACCEPTED | DECLINED | EXPIRED | WITHDRAWN
+```
+
+| State | Description |
+|-------|-------------|
+| EXTENDED | Offer sent to consultant |
+| ACCEPTED | Consultant accepted |
+| DECLINED | Consultant declined |
+| EXPIRED | Offer deadline passed |
+| WITHDRAWN | Client/vendor withdrew |
+
+**Agents:** FollowUpScheduler  
 **Human gates:** None
 
-## 4. Offer → Placement Workflow
+---
+
+## 5. Assignment Workflow
 
 ```
-[Offer Extended] → [Offer Accepted] | [Offer Declined] | [Offer Expired]
-[Offer Accepted] → [Onboarding] → [Compliance Check]
-                                        ├─ Pass → [Active Placement]
-                                        └─ Fail → [Blocked - Missing Docs]
-[Active Placement] → [Extended] | [Completed] | [Terminated]
+ONBOARDING → ACTIVE → ENDING → COMPLETED | TERMINATED
 ```
 
-**Agents involved:** ComplianceAgent
-**Human gates:** Compliance override requires Management approval
+| State | Description |
+|-------|-------------|
+| ONBOARDING | Compliance check, docs, start prep |
+| ACTIVE | Consultant working |
+| ENDING | Notice given, winding down |
+| COMPLETED | Normal end |
+| TERMINATED | Early termination |
 
-## 5. Timesheet Workflow
+**Agents:** TrustVerification (compliance), FollowUpScheduler  
+**Human gates:** MD for compliance override
 
-```
-[Draft] → [Submitted] → [Approved] | [Rejected]
-[Approved] → [Invoiced]
-[Rejected] → [Draft] (with feedback)
-```
+---
 
-**Agents involved:** TimesheetAndInvoicingAgent
-**Human gates:** Timesheet approval (consultant's manager or accounts)
-
-## 6. Invoice → Payment Workflow
-
-```
-[Draft] → [Sent] → [Overdue] | [Paid] | [Partial] | [Disputed]
-[Overdue] → [Reminder Sent] → [Escalated]
-[Disputed] → [Under Review] → [Resolved] | [Written Off]
-```
-
-**Agents involved:** TimesheetAndInvoicingAgent
-**Human gates:** Write-off requires Management approval
-
-## 7. Immigration Case Workflow
+## 6. Timesheet Workflow
 
 ```
-[Initiated] → [Documents Requested] → [Documents Received]
-→ [Filed] → [Pending] → [Approved] | [Denied] | [RFE]
-[RFE] → [Response Filed] → [Pending]
-[Approved] → [Active] → [Expiring Soon] → [Renewal Initiated]
+DRAFT → SUBMITTED → APPROVED | REJECTED → INVOICED
 ```
 
-**Agents involved:** ImmigrationOpsAgent
-**Human gates:** Filing and submission require Management sign-off
-**Auto-alerts:** 90/60/30 day expiry warnings
+| State | Description |
+|-------|-------------|
+| DRAFT | Consultant editing |
+| SUBMITTED | Sent for approval |
+| APPROVED | Approved by vendor/manager |
+| REJECTED | Sent back to DRAFT with feedback |
+| INVOICED | Rolled into invoice |
 
-## 8. Vendor Onboarding Workflow
+**Agents:** TimesheetAndInvoicingAgent (or equivalent)  
+**Human gates:** Approval by vendor/manager
+
+---
+
+## 7. Invoice Workflow
 
 ```
-[Initiated] → [Info Requested] → [Info Received]
-→ [Review] → [Approved] | [Rejected] | [Needs Revision]
-[Approved] → [Active]
+DRAFT → SENT → PAID | PARTIAL | OVERDUE | DISPUTED
 ```
 
-**Agents involved:** VendorOnboardingAgent
-**Human gates:** High-risk term flags require Management review
-**Collected:** W-9, MSA, insurance certs, payment terms
+| State | Description |
+|-------|-------------|
+| DRAFT | Being prepared |
+| SENT | Sent to vendor |
+| PAID | Fully paid |
+| PARTIAL | Partial payment received |
+| OVERDUE | Past due date |
+| DISPUTED | Vendor disputes |
+
+**Agents:** TimesheetAndInvoicingAgent  
+**Human gates:** CFO for write-offs
+
+---
+
+## 8. Daily AutopilotGM Scoreboard Workflow
+
+```
+[Daily Trigger] → [Aggregate Pod Metrics] → [Compute Targets vs Actual] → [Generate Scoreboard] → [Notify/Display]
+```
+
+**Metrics per pod:**
+- Submissions (target: quality count toward 20–25/closure)
+- Interviews scheduled (target: 20% sub→interview)
+- Offers extended (target: 30% interview→offer)
+- Closures (target: 1/day)
+- Margin (target: ≥ $10/hr)
+
+**Agent:** AutopilotGM  
+**Output:** Daily scoreboard for President, MD, CFO
+
+---
 
 ## Workflow Engine
 
 All workflows run on Temporal (or equivalent durable execution engine).
-Benefits:
+
 - Automatic retries with backoff
-- Workflow state is persisted and queryable
-- Long-running workflows (immigration cases can span months/years)
+- Workflow state persisted and queryable
+- Long-running workflows supported
 - Built-in visibility and debugging

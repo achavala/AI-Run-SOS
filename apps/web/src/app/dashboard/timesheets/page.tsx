@@ -4,6 +4,7 @@ import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { KpiCard } from '@/components/kpi-card';
 import { DataTable, type Column } from '@/components/data-table';
+import { api } from '@/lib/api';
 import {
   ClockIcon,
   CheckCircleIcon,
@@ -11,145 +12,96 @@ import {
   DocumentArrowUpIcon,
   MagnifyingGlassIcon,
 } from '@heroicons/react/24/outline';
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
-const TIMESHEETS = [
-  {
-    id: 'TS-3001',
-    consultant: 'Sarah Chen',
-    placement: 'Sr. React Dev — TechStream',
-    weekEnding: '2026-02-20',
-    hours: 40,
-    billRate: 95,
-    payRate: 85,
-    totalBill: 3800,
-    totalPay: 3400,
-    margin: 400,
-    status: 'APPROVED',
-  },
-  {
-    id: 'TS-3002',
-    consultant: 'Ravi Patel',
-    placement: 'Cloud Engineer — Apex Staffing',
-    weekEnding: '2026-02-20',
-    hours: 40,
-    billRate: 110,
-    payRate: 95,
-    totalBill: 4400,
-    totalPay: 3800,
-    margin: 600,
-    status: 'SUBMITTED',
-  },
-  {
-    id: 'TS-3003',
-    consultant: 'Maria Garcia',
-    placement: 'Data Engineer — NovaTech',
-    weekEnding: '2026-02-20',
-    hours: 36,
-    billRate: 85,
-    payRate: 80,
-    totalBill: 3060,
-    totalPay: 2880,
-    margin: 180,
-    status: 'SUBMITTED',
-  },
-  {
-    id: 'TS-3004',
-    consultant: 'James Wilson',
-    placement: 'Backend Dev — ProConnect',
-    weekEnding: '2026-02-20',
-    hours: 40,
-    billRate: 100,
-    payRate: 90,
-    totalBill: 4000,
-    totalPay: 3600,
-    margin: 400,
-    status: 'APPROVED',
-  },
-  {
-    id: 'TS-3005',
-    consultant: 'Emily Rodriguez',
-    placement: 'Mobile Dev — Velocity Talent',
-    weekEnding: '2026-02-20',
-    hours: 40,
-    billRate: 100,
-    payRate: 88,
-    totalBill: 4000,
-    totalPay: 3520,
-    margin: 480,
-    status: 'DRAFT',
-  },
-  {
-    id: 'TS-3006',
-    consultant: 'Sarah Chen',
-    placement: 'Sr. React Dev — TechStream',
-    weekEnding: '2026-02-13',
-    hours: 40,
-    billRate: 95,
-    payRate: 85,
-    totalBill: 3800,
-    totalPay: 3400,
-    margin: 400,
-    status: 'INVOICED',
-  },
-  {
-    id: 'TS-3007',
-    consultant: 'Ravi Patel',
-    placement: 'Cloud Engineer — Apex Staffing',
-    weekEnding: '2026-02-13',
-    hours: 32,
-    billRate: 110,
-    payRate: 95,
-    totalBill: 3520,
-    totalPay: 3040,
-    margin: 480,
-    status: 'INVOICED',
-  },
-  {
-    id: 'TS-3008',
-    consultant: 'Maria Garcia',
-    placement: 'Data Engineer — NovaTech',
-    weekEnding: '2026-02-13',
-    hours: 40,
-    billRate: 85,
-    payRate: 80,
-    totalBill: 3400,
-    totalPay: 3200,
-    margin: 200,
-    status: 'REJECTED',
-  },
-];
+interface Timesheet {
+  id: string;
+  consultant: {
+    firstName: string;
+    lastName: string;
+  };
+  assignment: {
+    jobReq: {
+      title: string;
+      vendor: string;
+    };
+  } | null;
+  weekStarting: string;
+  totalHours: number;
+  status: string;
+  payRate: number;
+  billRate: number;
+  notes: string | null;
+  createdAt: string;
+}
 
-type TSRow = (typeof TIMESHEETS)[number] & Record<string, unknown>;
+interface TimesheetRow extends Record<string, unknown> {
+  id: string;
+  consultantName: string;
+  placement: string;
+  weekStarting: string;
+  totalHours: number;
+  payRate: number;
+  billRate: number;
+  totalBill: number;
+  margin: number;
+  status: string;
+}
 
-const columns: Column<TSRow>[] = [
+const STATUS_TABS = [
+  { value: 'all', label: 'All' },
+  { value: 'DRAFT', label: 'Draft' },
+  { value: 'SUBMITTED', label: 'Submitted' },
+  { value: 'APPROVED', label: 'Approved' },
+  { value: 'REJECTED', label: 'Rejected' },
+  { value: 'INVOICED', label: 'Invoiced' },
+] as const;
+
+function toRow(ts: Timesheet): TimesheetRow {
+  const margin = (ts.billRate - ts.payRate) * ts.totalHours;
+  return {
+    id: ts.id,
+    consultantName: `${ts.consultant.firstName} ${ts.consultant.lastName}`,
+    placement: ts.assignment
+      ? `${ts.assignment.jobReq.title} — ${ts.assignment.jobReq.vendor}`
+      : 'Unassigned',
+    weekStarting: ts.weekStarting,
+    totalHours: ts.totalHours,
+    payRate: ts.payRate,
+    billRate: ts.billRate,
+    totalBill: ts.billRate * ts.totalHours,
+    margin,
+    status: ts.status,
+  };
+}
+
+const columns: Column<TimesheetRow>[] = [
   {
-    key: 'id',
-    header: 'ID',
-    sortable: true,
-    className: 'w-24',
-    render: (row) => (
-      <span className="font-mono text-xs text-gray-500">{row.id}</span>
-    ),
-  },
-  {
-    key: 'consultant',
+    key: 'consultantName',
     header: 'Consultant',
     sortable: true,
     render: (row) => (
       <div>
-        <p className="font-medium text-gray-900">{row.consultant}</p>
+        <p className="font-medium text-gray-900">{row.consultantName}</p>
         <p className="text-xs text-gray-500">{row.placement}</p>
       </div>
     ),
   },
   {
-    key: 'weekEnding',
-    header: 'Week Ending',
+    key: 'placement',
+    header: 'Placement',
+    sortable: true,
+    render: (row) => (
+      <span className="text-sm text-gray-700">{row.placement}</span>
+    ),
+  },
+  {
+    key: 'weekStarting',
+    header: 'Week',
     sortable: true,
     render: (row) => (
       <span className="text-sm text-gray-700">
-        {new Date(row.weekEnding).toLocaleDateString('en-US', {
+        {new Date(row.weekStarting).toLocaleDateString('en-US', {
           month: 'short',
           day: 'numeric',
         })}
@@ -157,23 +109,35 @@ const columns: Column<TSRow>[] = [
     ),
   },
   {
-    key: 'hours',
+    key: 'totalHours',
     header: 'Hours',
     sortable: true,
     className: 'text-center',
     render: (row) => (
-      <span className={`font-medium ${row.hours < 40 ? 'text-amber-600' : 'text-gray-900'}`}>
-        {row.hours}
+      <span
+        className={`font-medium ${row.totalHours < 40 ? 'text-amber-600' : 'text-gray-900'}`}
+      >
+        {row.totalHours}
       </span>
     ),
   },
   {
-    key: 'totalBill',
-    header: 'Bill Amount',
+    key: 'payRate',
+    header: 'Pay Rate',
+    sortable: true,
+    render: (row) => (
+      <span className="text-sm text-gray-700">
+        ${Number(row.payRate).toFixed(2)}/hr
+      </span>
+    ),
+  },
+  {
+    key: 'billRate',
+    header: 'Bill Rate',
     sortable: true,
     render: (row) => (
       <span className="font-medium text-gray-900">
-        ${row.totalBill.toLocaleString()}
+        ${Number(row.billRate).toFixed(2)}/hr
       </span>
     ),
   },
@@ -182,10 +146,13 @@ const columns: Column<TSRow>[] = [
     header: 'Margin',
     sortable: true,
     render: (row) => {
-      const pct = ((row.margin / row.totalBill) * 100).toFixed(1);
+      const totalBill = row.totalBill as number;
+      const pct = totalBill > 0 ? ((row.margin / totalBill) * 100).toFixed(1) : '0.0';
       return (
         <div>
-          <span className="font-medium text-emerald-600">${row.margin}</span>
+          <span className="font-medium text-emerald-600">
+            ${row.margin.toLocaleString()}
+          </span>
           <span className="ml-1 text-xs text-gray-400">({pct}%)</span>
         </div>
       );
@@ -199,23 +166,48 @@ const columns: Column<TSRow>[] = [
 ];
 
 export default function TimesheetsPage() {
+  const [rows, setRows] = useState<TimesheetRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
-  const filtered = TIMESHEETS.filter((ts) => {
+  const fetchTimesheets = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await api.get<Timesheet[]>('/timesheets');
+      setRows(data.map(toRow));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load timesheets');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTimesheets();
+  }, [fetchTimesheets]);
+
+  const filtered = rows.filter((ts) => {
     const matchesSearch =
       !search ||
-      ts.consultant.toLowerCase().includes(search.toLowerCase()) ||
+      ts.consultantName.toLowerCase().includes(search.toLowerCase()) ||
       ts.placement.toLowerCase().includes(search.toLowerCase());
 
     const matchesStatus = statusFilter === 'all' || ts.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
-  const totalHours = TIMESHEETS.reduce((sum, ts) => sum + ts.hours, 0);
-  const totalBilled = TIMESHEETS.reduce((sum, ts) => sum + ts.totalBill, 0);
-  const totalMargin = TIMESHEETS.reduce((sum, ts) => sum + ts.margin, 0);
-  const pendingApproval = TIMESHEETS.filter((ts) => ts.status === 'SUBMITTED').length;
+  const totalHours = rows.reduce((sum, ts) => sum + ts.totalHours, 0);
+  const totalBilled = rows.reduce((sum, ts) => sum + ts.totalBill, 0);
+  const totalMargin = rows.reduce((sum, ts) => sum + ts.margin, 0);
+  const pendingApproval = rows.filter((ts) => ts.status === 'SUBMITTED').length;
+
+  const statusCounts = rows.reduce<Record<string, number>>((acc, ts) => {
+    acc[ts.status] = (acc[ts.status] || 0) + 1;
+    return acc;
+  }, {});
 
   return (
     <>
@@ -223,9 +215,9 @@ export default function TimesheetsPage() {
         title="Timesheets"
         description="Review, approve, and track consultant timesheets"
         actions={
-          <button className="btn-primary">
+          <button className="btn-primary" onClick={fetchTimesheets}>
             <DocumentArrowUpIcon className="h-4 w-4" />
-            Bulk Approve
+            Refresh
           </button>
         }
       />
@@ -234,13 +226,13 @@ export default function TimesheetsPage() {
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           title="Total Hours (This Period)"
-          value={totalHours.toString()}
+          value={loading ? '—' : totalHours.toString()}
           subtitle="across all placements"
           icon={ClockIcon}
         />
         <KpiCard
           title="Total Billed"
-          value={`$${(totalBilled / 1000).toFixed(1)}K`}
+          value={loading ? '—' : `$${(totalBilled / 1000).toFixed(1)}K`}
           change="+8.2%"
           changeType="positive"
           subtitle="vs last period"
@@ -248,14 +240,18 @@ export default function TimesheetsPage() {
         />
         <KpiCard
           title="Total Margin"
-          value={`$${(totalMargin / 1000).toFixed(1)}K`}
-          change={`${((totalMargin / totalBilled) * 100).toFixed(1)}% avg`}
+          value={loading ? '—' : `$${(totalMargin / 1000).toFixed(1)}K`}
+          change={
+            totalBilled > 0
+              ? `${((totalMargin / totalBilled) * 100).toFixed(1)}% avg`
+              : '0.0% avg'
+          }
           changeType="positive"
           icon={CheckCircleIcon}
         />
         <KpiCard
           title="Pending Approval"
-          value={pendingApproval.toString()}
+          value={loading ? '—' : pendingApproval.toString()}
           subtitle="timesheets awaiting review"
           icon={ExclamationCircleIcon}
         />
@@ -273,26 +269,59 @@ export default function TimesheetsPage() {
             className="input pl-9"
           />
         </div>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="input w-44"
-        >
-          <option value="all">All Statuses</option>
-          <option value="DRAFT">Draft</option>
-          <option value="SUBMITTED">Submitted</option>
-          <option value="APPROVED">Approved</option>
-          <option value="REJECTED">Rejected</option>
-          <option value="INVOICED">Invoiced</option>
-        </select>
+        <div className="flex gap-1 rounded-lg bg-gray-100 p-1">
+          {STATUS_TABS.map((tab) => {
+            const isActive = statusFilter === tab.value;
+            const count =
+              tab.value === 'all' ? rows.length : statusCounts[tab.value] || 0;
+            return (
+              <button
+                key={tab.value}
+                onClick={() => setStatusFilter(tab.value)}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  isActive
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {tab.label}
+                <span
+                  className={`ml-1.5 text-xs ${isActive ? 'text-gray-500' : 'text-gray-400'}`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      <DataTable
-        columns={columns}
-        data={filtered as unknown as TSRow[]}
-        keyField="id"
-        emptyMessage="No timesheets match your filters"
-      />
+      {/* Content */}
+      {loading ? (
+        <div className="flex items-center justify-center rounded-xl border border-gray-200 bg-white py-24">
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200 border-t-blue-600" />
+            <p className="text-sm text-gray-500">Loading timesheets…</p>
+          </div>
+        </div>
+      ) : error ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-12 text-center">
+          <p className="text-sm text-red-600">{error}</p>
+          <button
+            onClick={fetchTimesheets}
+            className="mt-3 text-sm font-medium text-red-700 underline hover:text-red-800"
+          >
+            Try again
+          </button>
+        </div>
+      ) : (
+        <DataTable
+          columns={columns}
+          data={filtered}
+          keyField="id"
+          emptyMessage="No timesheets match your filters"
+        />
+      )}
     </>
   );
 }

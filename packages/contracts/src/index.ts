@@ -7,3 +7,4 @@ export * from './submissions';
 export * from './timesheets';
 export * from './invoices';
 export * from './trust';
+export * from './command-center';

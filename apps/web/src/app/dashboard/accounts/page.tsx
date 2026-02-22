@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { KpiCard } from '@/components/kpi-card';
 import { StatusBadge } from '@/components/status-badge';
@@ -11,106 +13,95 @@ import {
   BoltIcon,
 } from '@heroicons/react/24/outline';
 
-const INVOICES = [
-  {
-    id: 'INV-1042',
-    vendor: 'TechStream Solutions',
-    amount: 18400,
-    issueDate: '2026-01-12',
-    dueDate: '2026-02-11',
-    status: 'OVERDUE',
-    daysOutstanding: 45,
-  },
-  {
-    id: 'INV-1038',
-    vendor: 'ProConnect Inc.',
-    amount: 12200,
-    issueDate: '2026-01-18',
-    dueDate: '2026-02-17',
-    status: 'OVERDUE',
-    daysOutstanding: 38,
-  },
-  {
-    id: 'INV-1045',
-    vendor: 'Apex Staffing Group',
-    amount: 28600,
-    issueDate: '2026-01-25',
-    dueDate: '2026-02-24',
-    status: 'SENT',
-    daysOutstanding: 27,
-  },
-  {
-    id: 'INV-1048',
-    vendor: 'NovaTech Partners',
-    amount: 15800,
-    issueDate: '2026-02-01',
-    dueDate: '2026-03-03',
-    status: 'SENT',
-    daysOutstanding: 20,
-  },
-  {
-    id: 'INV-1050',
-    vendor: 'TechStream Solutions',
-    amount: 22400,
-    issueDate: '2026-02-05',
-    dueDate: '2026-03-07',
-    status: 'SENT',
-    daysOutstanding: 16,
-  },
-  {
-    id: 'INV-1052',
-    vendor: 'Velocity Talent',
-    amount: 8900,
-    issueDate: '2026-02-10',
-    dueDate: '2026-03-12',
-    status: 'DRAFT',
-    daysOutstanding: 11,
-  },
-  {
-    id: 'INV-1035',
-    vendor: 'NovaTech Partners',
-    amount: 22800,
-    issueDate: '2026-01-05',
-    dueDate: '2026-02-04',
-    status: 'PAID',
-    daysOutstanding: 0,
-  },
-  {
-    id: 'INV-1033',
-    vendor: 'Apex Staffing Group',
-    amount: 31200,
-    issueDate: '2025-12-28',
-    dueDate: '2026-01-27',
-    status: 'PAID',
-    daysOutstanding: 0,
-  },
-];
+interface Invoice {
+  id: string;
+  invoiceNumber: string;
+  vendor: { companyName: string };
+  totalAmount: number;
+  status: string;
+  dueDate: string | null;
+  sentAt: string | null;
+  paidAt: string | null;
+  paidAmount: number | null;
+  createdAt: string;
+  periodStart: string;
+  periodEnd: string;
+  _count: { payments: number };
+}
 
-const AR_AGING = [
-  { bucket: 'Current (0-30d)', amount: 66800, count: 3, color: 'bg-emerald-500' },
-  { bucket: '31-60 days', amount: 30600, count: 2, color: 'bg-amber-500' },
-  { bucket: '61-90 days', amount: 0, count: 0, color: 'bg-orange-500' },
-  { bucket: '90+ days', amount: 0, count: 0, color: 'bg-red-500' },
-];
+type InvoiceRow = {
+  id: string;
+  invoiceNumber: string;
+  vendor: string;
+  amount: number;
+  dueDate: string | null;
+  createdAt: string;
+  status: string;
+  daysOutstanding: number;
+} & Record<string, unknown>;
 
-const MARGIN_TREND = [
-  { month: 'Sep', margin: 21.2 },
-  { month: 'Oct', margin: 22.8 },
-  { month: 'Nov', margin: 23.1 },
-  { month: 'Dec', margin: 21.9 },
-  { month: 'Jan', margin: 22.4 },
-  { month: 'Feb', margin: 23.6 },
-];
+function daysBetween(a: Date, b: Date): number {
+  return Math.floor((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
+}
 
-type InvoiceRow = (typeof INVOICES)[number] & Record<string, unknown>;
+function computeArAging(invoices: Invoice[]) {
+  const now = new Date();
+  const unpaid = invoices.filter(
+    (i) => i.status !== 'PAID' && i.status !== 'DRAFT',
+  );
+
+  const buckets = [
+    { label: 'Current (0-30d)', min: 0, max: 30, color: 'bg-emerald-500', amount: 0, count: 0 },
+    { label: '31-60 days', min: 31, max: 60, color: 'bg-amber-500', amount: 0, count: 0 },
+    { label: '61-90 days', min: 61, max: 90, color: 'bg-orange-500', amount: 0, count: 0 },
+    { label: '90+ days', min: 91, max: Infinity, color: 'bg-red-500', amount: 0, count: 0 },
+  ];
+
+  for (const inv of unpaid) {
+    const issued = new Date(inv.createdAt);
+    const age = daysBetween(issued, now);
+    const bucket = buckets.find((b) => age >= b.min && age <= b.max);
+    if (bucket) {
+      bucket.amount += inv.totalAmount;
+      bucket.count += 1;
+    }
+  }
+
+  return buckets;
+}
+
+function toRows(invoices: Invoice[]): InvoiceRow[] {
+  const now = new Date();
+  return invoices.map((inv) => {
+    const isPaid = inv.status === 'PAID';
+    const isDraft = inv.status === 'DRAFT';
+    const age =
+      isPaid || isDraft
+        ? 0
+        : daysBetween(new Date(inv.createdAt), now);
+
+    return {
+      id: inv.id,
+      invoiceNumber: inv.invoiceNumber,
+      vendor: inv.vendor.companyName,
+      amount: inv.totalAmount,
+      dueDate: inv.dueDate,
+      createdAt: inv.createdAt,
+      status: inv.status,
+      daysOutstanding: Math.max(age, 0),
+    };
+  });
+}
 
 const invoiceColumns: Column<InvoiceRow>[] = [
   {
-    key: 'id',
+    key: 'invoiceNumber',
     header: 'Invoice',
     sortable: true,
     render: (row) => (
-      <span className="font-mono text-xs font-medium text-indigo-600">{row.id}</span>
+      <span className="font-mono text-xs font-medium text-indigo-600">
+        {row.invoiceNumber}
+      </span>
     ),
   },
   {
@@ -130,12 +121,15 @@ const invoiceColumns: Column<InvoiceRow>[] = [
     ),
   },
   {
-    key: 'issueDate',
+    key: 'createdAt',
     header: 'Issued',
     sortable: true,
     render: (row) => (
       <span className="text-gray-600">
-        {new Date(row.issueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+        {new Date(row.createdAt).toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+        })}
       </span>
     ),
   },
@@ -145,7 +139,12 @@ const invoiceColumns: Column<InvoiceRow>[] = [
     sortable: true,
     render: (row) => (
       <span className="text-gray-600">
-        {new Date(row.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+        {row.dueDate
+          ? new Date(row.dueDate).toLocaleDateString('en-US', {
+              month: 'short',
+              day: 'numeric',
+            })
+          : '—'}
       </span>
     ),
   },
@@ -159,9 +158,15 @@ const invoiceColumns: Column<InvoiceRow>[] = [
     header: 'Days Out',
     sortable: true,
     render: (row) => (
-      <span className={`text-sm font-medium ${
-        row.daysOutstanding > 30 ? 'text-red-600' : row.daysOutstanding > 15 ? 'text-amber-600' : 'text-gray-600'
-      }`}>
+      <span
+        className={`text-sm font-medium ${
+          row.daysOutstanding > 30
+            ? 'text-red-600'
+            : row.daysOutstanding > 15
+              ? 'text-amber-600'
+              : 'text-gray-600'
+        }`}
+      >
         {row.daysOutstanding > 0 ? `${row.daysOutstanding}d` : '—'}
       </span>
     ),
@@ -169,16 +174,90 @@ const invoiceColumns: Column<InvoiceRow>[] = [
 ];
 
 export default function AccountsPage() {
-  const totalOutstanding = INVOICES.filter(
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const data = await api.get<Invoice[]>('/invoices');
+        if (!cancelled) setInvoices(data);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load invoices');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  const unpaidInvoices = invoices.filter(
     (i) => i.status !== 'PAID' && i.status !== 'DRAFT',
-  ).reduce((sum, i) => sum + i.amount, 0);
-
-  const overdueTotal = INVOICES.filter((i) => i.status === 'OVERDUE').reduce(
-    (sum, i) => sum + i.amount,
-    0,
   );
+  const overdueInvoices = invoices.filter((i) => {
+    if (i.status === 'PAID' || i.status === 'DRAFT' || !i.dueDate) return false;
+    return new Date(i.dueDate) < new Date();
+  });
 
-  const totalAR = AR_AGING.reduce((sum, b) => sum + b.amount, 0);
+  const totalOutstanding = unpaidInvoices.reduce((s, i) => s + i.totalAmount, 0);
+  const overdueTotal = overdueInvoices.reduce((s, i) => s + i.totalAmount, 0);
+  const overdueCount = overdueInvoices.length;
+
+  const paidInvoices = invoices.filter((i) => i.status === 'PAID');
+  const totalRevenue = paidInvoices.reduce((s, i) => s + i.totalAmount, 0);
+
+  const avgDaysToPay = (() => {
+    const withDates = paidInvoices.filter((i) => i.sentAt && i.paidAt);
+    if (withDates.length === 0) return 0;
+    const total = withDates.reduce(
+      (s, i) => s + daysBetween(new Date(i.sentAt!), new Date(i.paidAt!)),
+      0,
+    );
+    return Math.round(total / withDates.length);
+  })();
+
+  const arAging = computeArAging(invoices);
+  const totalAR = arAging.reduce((s, b) => s + b.amount, 0);
+  const rows = toRows(invoices);
+
+  function formatCurrency(val: number): string {
+    if (val >= 1_000_000) return `$${(val / 1_000_000).toFixed(1)}M`;
+    if (val >= 1_000) return `$${(val / 1_000).toFixed(1)}K`;
+    return `$${val.toLocaleString()}`;
+  }
+
+  if (loading) {
+    return (
+      <>
+        <PageHeader
+          title="Accounts Dashboard"
+          description="AR aging, invoices, margins, and payment tracking"
+        />
+        <div className="flex items-center justify-center py-32">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200 border-t-indigo-600" />
+        </div>
+      </>
+    );
+  }
+
+  if (error) {
+    return (
+      <>
+        <PageHeader
+          title="Accounts Dashboard"
+          description="AR aging, invoices, margins, and payment tracking"
+        />
+        <div className="rounded-xl border border-red-200 bg-red-50 p-12 text-center">
+          <p className="text-sm font-medium text-red-700">{error}</p>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -197,54 +276,55 @@ export default function AccountsPage() {
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           title="Outstanding AR"
-          value={`$${(totalOutstanding / 1000).toFixed(1)}K`}
-          change="+$12.4K"
-          changeType="negative"
-          subtitle="vs last month"
+          value={formatCurrency(totalOutstanding)}
+          change={`${unpaidInvoices.length} invoices`}
+          changeType={totalOutstanding > 0 ? 'negative' : 'neutral'}
+          subtitle="unpaid"
           icon={BanknotesIcon}
         />
         <KpiCard
           title="Overdue Invoices"
-          value={`$${(overdueTotal / 1000).toFixed(1)}K`}
-          change="2 invoices"
-          changeType="negative"
-          subtitle="> 30 days"
+          value={formatCurrency(overdueTotal)}
+          change={`${overdueCount} invoice${overdueCount !== 1 ? 's' : ''}`}
+          changeType={overdueCount > 0 ? 'negative' : 'neutral'}
+          subtitle="past due"
           icon={ClockIcon}
         />
         <KpiCard
-          title="Margin Trend"
-          value="23.6%"
-          change="+1.2%"
-          changeType="positive"
-          subtitle="this month"
+          title="Total Revenue"
+          value={formatCurrency(totalRevenue)}
+          change={`${paidInvoices.length} paid`}
+          changeType={totalRevenue > 0 ? 'positive' : 'neutral'}
+          subtitle="collected"
           icon={ChartBarIcon}
         />
         <KpiCard
-          title="Payment Velocity"
-          value="18 days"
-          change="-3 days"
-          changeType="positive"
-          subtitle="avg collection"
+          title="Avg Days to Pay"
+          value={avgDaysToPay > 0 ? `${avgDaysToPay} days` : '—'}
+          change={paidInvoices.length > 0 ? `${paidInvoices.length} samples` : 'no data'}
+          changeType="neutral"
+          subtitle="sent → paid"
           icon={BoltIcon}
         />
       </div>
 
-      {/* AR Aging + Margin */}
+      {/* AR Aging */}
       <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* AR Aging */}
         <div className="rounded-xl border border-gray-200 bg-white p-6">
           <h3 className="text-sm font-semibold text-gray-900">AR Aging Summary</h3>
           <p className="text-xs text-gray-500">Receivables by aging bucket</p>
 
           <div className="mt-6 space-y-4">
-            {AR_AGING.map((bucket) => {
+            {arAging.map((bucket) => {
               const pct = totalAR > 0 ? (bucket.amount / totalAR) * 100 : 0;
               return (
-                <div key={bucket.bucket}>
+                <div key={bucket.label}>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="font-medium text-gray-700">{bucket.bucket}</span>
+                    <span className="font-medium text-gray-700">{bucket.label}</span>
                     <div className="flex items-center gap-3">
-                      <span className="text-xs text-gray-500">{bucket.count} invoices</span>
+                      <span className="text-xs text-gray-500">
+                        {bucket.count} invoice{bucket.count !== 1 ? 's' : ''}
+                      </span>
                       <span className="font-semibold text-gray-900">
                         ${bucket.amount.toLocaleString()}
                       </span>
@@ -262,29 +342,37 @@ export default function AccountsPage() {
           </div>
         </div>
 
-        {/* Margin Trend */}
+        {/* Revenue Summary */}
         <div className="rounded-xl border border-gray-200 bg-white p-6">
-          <h3 className="text-sm font-semibold text-gray-900">Margin Trend</h3>
-          <p className="text-xs text-gray-500">Gross margin % over last 6 months</p>
+          <h3 className="text-sm font-semibold text-gray-900">Invoice Breakdown</h3>
+          <p className="text-xs text-gray-500">By status</p>
 
-          <div className="mt-6 flex h-48 items-end gap-3">
-            {MARGIN_TREND.map((m) => {
-              const height = ((m.margin - 18) / 8) * 100;
-              return (
-                <div key={m.month} className="flex flex-1 flex-col items-center gap-1">
-                  <span className="text-xs font-semibold text-gray-700">
-                    {m.margin}%
-                  </span>
-                  <div
-                    className="w-full rounded-t-md bg-indigo-500 transition-all hover:bg-indigo-600"
-                    style={{ height: `${Math.max(height, 10)}%` }}
-                  />
-                  <span className="text-[10px] font-medium text-gray-500">
-                    {m.month}
-                  </span>
-                </div>
-              );
-            })}
+          <div className="mt-6 space-y-3">
+            {(['PAID', 'SENT', 'OVERDUE', 'DRAFT', 'PARTIAL', 'DISPUTED'] as const).map(
+              (status) => {
+                const group = invoices.filter((i) => i.status === status);
+                if (group.length === 0) return null;
+                const total = group.reduce((s, i) => s + i.totalAmount, 0);
+                return (
+                  <div key={status} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <StatusBadge status={status} />
+                      <span className="text-xs text-gray-500">
+                        {group.length} invoice{group.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <span className="text-sm font-semibold text-gray-900">
+                      ${total.toLocaleString()}
+                    </span>
+                  </div>
+                );
+              },
+            )}
+            {invoices.length === 0 && (
+              <p className="py-8 text-center text-sm text-gray-400">
+                No invoices yet
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -310,8 +398,9 @@ export default function AccountsPage() {
         </div>
         <DataTable
           columns={invoiceColumns}
-          data={INVOICES as unknown as InvoiceRow[]}
+          data={rows}
           keyField="id"
+          emptyMessage="No invoices yet. Create your first invoice to get started."
         />
       </div>
     </>

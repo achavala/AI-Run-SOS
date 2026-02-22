@@ -9,3 +9,5 @@ dist/
 *.log
 coverage/
 .DS_Store
+pst_out/
+storage/

@@ -1,120 +1,36 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable, type Column } from '@/components/data-table';
 import { PlusIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
-import { useState } from 'react';
+import { api } from '@/lib/api';
 
-const JOBS = [
-  {
-    id: 'J-1001',
-    title: 'Senior React Developer',
-    vendor: 'TechStream Solutions',
-    skills: ['React', 'TypeScript', 'Node.js'],
-    location: 'Remote',
-    locationType: 'REMOTE',
-    rateRange: '$85-95/hr',
-    status: 'OPEN',
-    submissions: 6,
-    closureLikelihood: 78,
-    createdAt: '2026-02-16',
-  },
-  {
-    id: 'J-1002',
-    title: 'Cloud Infrastructure Engineer',
-    vendor: 'Apex Staffing Group',
-    skills: ['AWS', 'Terraform', 'Kubernetes'],
-    location: 'Austin, TX',
-    locationType: 'HYBRID',
-    rateRange: '$90-110/hr',
-    status: 'OPEN',
-    submissions: 3,
-    closureLikelihood: 62,
-    createdAt: '2026-02-09',
-  },
-  {
-    id: 'J-1003',
-    title: 'Data Engineer',
-    vendor: 'NovaTech Partners',
-    skills: ['Python', 'Spark', 'Airflow', 'SQL'],
-    location: 'Remote',
-    locationType: 'REMOTE',
-    rateRange: '$75-85/hr',
-    status: 'OPEN',
-    submissions: 8,
-    closureLikelihood: 85,
-    createdAt: '2026-02-18',
-  },
-  {
-    id: 'J-1004',
-    title: 'Full Stack Developer',
-    vendor: 'ProConnect Inc.',
-    skills: ['Java', 'Spring Boot', 'Angular'],
-    location: 'New York, NY',
-    locationType: 'ONSITE',
-    rateRange: '$80-100/hr',
-    status: 'ON_HOLD',
-    submissions: 2,
-    closureLikelihood: 35,
-    createdAt: '2026-02-01',
-  },
-  {
-    id: 'J-1005',
-    title: 'DevOps Lead',
-    vendor: 'TechStream Solutions',
-    skills: ['CI/CD', 'Docker', 'AWS', 'Jenkins'],
-    location: 'Remote',
-    locationType: 'REMOTE',
-    rateRange: '$95-120/hr',
-    status: 'OPEN',
-    submissions: 4,
-    closureLikelihood: 71,
-    createdAt: '2026-02-14',
-  },
-  {
-    id: 'J-1006',
-    title: 'iOS Engineer',
-    vendor: 'Velocity Talent',
-    skills: ['Swift', 'UIKit', 'SwiftUI'],
-    location: 'Los Angeles, CA',
-    locationType: 'HYBRID',
-    rateRange: '$85-100/hr',
-    status: 'OPEN',
-    submissions: 1,
-    closureLikelihood: 44,
-    createdAt: '2026-02-20',
-  },
-  {
-    id: 'J-1007',
-    title: 'ML Platform Engineer',
-    vendor: 'GlobalBridge Corp',
-    skills: ['Python', 'MLOps', 'Kubernetes', 'PyTorch'],
-    location: 'Seattle, WA',
-    locationType: 'HYBRID',
-    rateRange: '$100-130/hr',
-    status: 'DRAFT',
-    submissions: 0,
-    closureLikelihood: 0,
-    createdAt: '2026-02-21',
-  },
-  {
-    id: 'J-0998',
-    title: 'QA Automation Lead',
-    vendor: 'Apex Staffing Group',
-    skills: ['Selenium', 'Cypress', 'Java'],
-    location: 'Remote',
-    locationType: 'REMOTE',
-    rateRange: '$70-85/hr',
-    status: 'FILLED',
-    submissions: 12,
-    closureLikelihood: 100,
-    createdAt: '2026-01-10',
-  },
-];
+interface Job {
+  id: string;
+  title: string;
+  vendorName: string;
+  skills: string[];
+  location: string | null;
+  locationType: string;
+  rateMin: number | null;
+  rateMax: number | null;
+  status: string;
+  closureLikelihood: number | null;
+  submissionCount: number;
+  createdAt: string;
+}
 
-type JobRow = (typeof JOBS)[number] & Record<string, unknown>;
+type JobRow = Job & Record<string, unknown>;
+
+function formatRate(min: number | null, max: number | null): string {
+  if (min != null && max != null) return `$${min}-${max}/hr`;
+  if (min != null) return `$${min}/hr`;
+  if (max != null) return `$${max}/hr`;
+  return '—';
+}
 
 const columns: Column<JobRow>[] = [
   {
@@ -127,7 +43,7 @@ const columns: Column<JobRow>[] = [
         href={`/dashboard/jobs/${row.id}`}
         className="font-mono text-xs font-medium text-indigo-600 hover:text-indigo-800"
       >
-        {row.id}
+        {row.id as string}
       </Link>
     ),
   },
@@ -138,38 +54,41 @@ const columns: Column<JobRow>[] = [
     render: (row) => (
       <div>
         <Link href={`/dashboard/jobs/${row.id}`} className="font-medium text-gray-900 hover:text-indigo-600">
-          {row.title}
+          {row.title as string}
         </Link>
-        <p className="text-xs text-gray-500">{row.vendor}</p>
+        <p className="text-xs text-gray-500">{row.vendorName as string}</p>
       </div>
     ),
   },
   {
     key: 'skills',
     header: 'Skills',
-    render: (row) => (
-      <div className="flex flex-wrap gap-1">
-        {row.skills.slice(0, 3).map((s) => (
-          <span
-            key={s}
-            className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700"
-          >
-            {s}
-          </span>
-        ))}
-        {row.skills.length > 3 && (
-          <span className="text-[10px] text-gray-400">+{row.skills.length - 3}</span>
-        )}
-      </div>
-    ),
+    render: (row) => {
+      const skills = row.skills as string[];
+      return (
+        <div className="flex flex-wrap gap-1">
+          {skills.slice(0, 3).map((s) => (
+            <span
+              key={s}
+              className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700"
+            >
+              {s}
+            </span>
+          ))}
+          {skills.length > 3 && (
+            <span className="text-[10px] text-gray-400">+{skills.length - 3}</span>
+          )}
+        </div>
+      );
+    },
   },
   {
     key: 'locationType',
     header: 'Location',
     render: (row) => (
       <div>
-        <StatusBadge status={row.locationType} />
-        <p className="mt-0.5 text-[10px] text-gray-500">{row.location}</p>
+        <StatusBadge status={row.locationType as string} />
+        <p className="mt-0.5 text-[10px] text-gray-500">{(row.location as string) ?? ''}</p>
       </div>
     ),
   },
@@ -177,21 +96,25 @@ const columns: Column<JobRow>[] = [
     key: 'rateRange',
     header: 'Rate',
     sortable: true,
-    render: (row) => <span className="font-medium">{row.rateRange}</span>,
+    render: (row) => (
+      <span className="font-medium">
+        {formatRate(row.rateMin as number | null, row.rateMax as number | null)}
+      </span>
+    ),
   },
   {
     key: 'status',
     header: 'Status',
-    render: (row) => <StatusBadge status={row.status} />,
+    render: (row) => <StatusBadge status={row.status as string} />,
   },
   {
-    key: 'submissions',
+    key: 'submissionCount',
     header: 'Subs',
     sortable: true,
     className: 'text-center',
     render: (row) => (
       <span className="inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-gray-100 px-1.5 text-xs font-semibold text-gray-700">
-        {row.submissions}
+        {row.submissionCount as number}
       </span>
     ),
   },
@@ -199,48 +122,95 @@ const columns: Column<JobRow>[] = [
     key: 'closureLikelihood',
     header: 'Closure',
     sortable: true,
-    render: (row) =>
-      row.closureLikelihood > 0 ? (
+    render: (row) => {
+      const likelihood = (row.closureLikelihood as number | null) ?? 0;
+      return likelihood > 0 ? (
         <div className="flex items-center gap-2">
           <div className="h-1.5 w-10 rounded-full bg-gray-200">
             <div
               className={`h-1.5 rounded-full ${
-                row.closureLikelihood >= 70 ? 'bg-emerald-500' : row.closureLikelihood >= 40 ? 'bg-amber-500' : 'bg-red-500'
+                likelihood >= 70 ? 'bg-emerald-500' : likelihood >= 40 ? 'bg-amber-500' : 'bg-red-500'
               }`}
-              style={{ width: `${row.closureLikelihood}%` }}
+              style={{ width: `${Math.min(likelihood, 100)}%` }}
             />
           </div>
-          <span className="text-xs text-gray-600">{row.closureLikelihood}%</span>
+          <span className="text-xs text-gray-600">{likelihood}%</span>
         </div>
       ) : (
         <span className="text-xs text-gray-400">—</span>
-      ),
+      );
+    },
   },
 ];
 
-const STATUS_OPTIONS = ['All', 'OPEN', 'ON_HOLD', 'FILLED', 'DRAFT', 'CANCELLED'] as const;
+const STATUS_OPTIONS = ['All', 'NEW', 'QUALIFYING', 'ACTIVE', 'ON_HOLD', 'FILLED', 'CANCELLED'] as const;
 
 export default function JobsPage() {
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
 
-  const filtered = JOBS.filter((job) => {
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api
+      .get<Job[]>('/jobs')
+      .then((data) => {
+        if (!cancelled) setJobs(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message ?? 'Failed to load jobs');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const filtered = jobs.filter((job) => {
+    const q = search.toLowerCase();
     const matchesSearch =
       !search ||
-      job.title.toLowerCase().includes(search.toLowerCase()) ||
-      job.vendor.toLowerCase().includes(search.toLowerCase()) ||
-      job.skills.some((s) => s.toLowerCase().includes(search.toLowerCase()));
+      job.title.toLowerCase().includes(q) ||
+      job.vendorName.toLowerCase().includes(q) ||
+      job.skills.some((s) => s.toLowerCase().includes(q));
 
     const matchesStatus = statusFilter === 'All' || job.status === statusFilter;
 
     return matchesSearch && matchesStatus;
   });
 
+  const uniqueVendors = new Set(jobs.map((j) => j.vendorName)).size;
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-32">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200 border-t-indigo-600" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-xl border border-red-200 bg-red-50 p-12 text-center">
+        <p className="text-sm text-red-600">{error}</p>
+        <button
+          onClick={() => window.location.reload()}
+          className="mt-4 text-sm font-medium text-indigo-600 hover:text-indigo-800"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
   return (
     <>
       <PageHeader
         title="Jobs"
-        description={`${JOBS.length} total positions across ${new Set(JOBS.map((j) => j.vendor)).size} vendors`}
+        description={`${jobs.length} total positions across ${uniqueVendors} vendor${uniqueVendors !== 1 ? 's' : ''}`}
         actions={
           <button className="btn-primary">
             <PlusIcon className="h-4 w-4" />
@@ -272,7 +242,7 @@ export default function JobsPage() {
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              {s === 'All' ? `All (${JOBS.length})` : s.replace('_', ' ')}
+              {s === 'All' ? `All (${jobs.length})` : s.replace('_', ' ')}
             </button>
           ))}
         </div>
@@ -280,7 +250,7 @@ export default function JobsPage() {
 
       <DataTable
         columns={columns}
-        data={filtered as unknown as JobRow[]}
+        data={filtered as JobRow[]}
         keyField="id"
         emptyMessage="No jobs match your filters"
       />

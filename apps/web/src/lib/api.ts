@@ -1,6 +1,6 @@
 import { useAuthStore } from './auth';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
 interface RequestOptions extends Omit<RequestInit, 'body'> {
   body?: unknown;
@@ -36,16 +36,24 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  if (response.status === 401) {
-    useAuthStore.getState().logout();
-    if (typeof window !== 'undefined') {
-      window.location.href = '/login';
-    }
-    throw new ApiError(401, 'Unauthorized');
-  }
-
   if (!response.ok) {
     const data = await response.json().catch(() => null);
+
+    if (response.status === 401) {
+      const isLoginRequest = endpoint === '/auth/login';
+      if (!isLoginRequest) {
+        useAuthStore.getState().logout();
+        if (typeof window !== 'undefined') {
+          window.location.href = '/login';
+        }
+      }
+      throw new ApiError(
+        401,
+        data?.message || 'Invalid credentials',
+        data,
+      );
+    }
+
     throw new ApiError(
       response.status,
       data?.message || `Request failed with status ${response.status}`,

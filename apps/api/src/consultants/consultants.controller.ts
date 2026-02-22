@@ -6,6 +6,7 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -21,8 +22,19 @@ export class ConsultantsController {
 
   @Get()
   @Roles('MANAGEMENT', 'RECRUITMENT', 'SALES', 'HR')
-  findAll(@CurrentTenant() tenantId: string) {
-    return this.consultantsService.findAll(tenantId);
+  findAll(
+    @CurrentTenant() tenantId: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('search') search?: string,
+    @Query('readiness') readiness?: string,
+  ) {
+    return this.consultantsService.findAll(tenantId, {
+      page: page ? parseInt(page, 10) : undefined,
+      pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
+      search,
+      readiness,
+    });
   }
 
   @Get(':id')

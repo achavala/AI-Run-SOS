@@ -85,6 +85,15 @@ export class JobsController {
     return this.jobsService.update(tenantId, id, body);
   }
 
+  @Get(':id/candidates')
+  @Roles('MANAGEMENT', 'RECRUITMENT', 'SALES')
+  findCandidateMatches(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+  ) {
+    return this.jobsService.findCandidateMatches(tenantId, id);
+  }
+
   @Delete(':id')
   @Roles('MANAGEMENT')
   remove(@CurrentTenant() tenantId: string, @Param('id') id: string) {

@@ -4,6 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { MarginGuardService } from '../margin-guard/margin-guard.service';
 
 interface ConsentPolicy {
   autoApproveVendors?: string[];
@@ -14,7 +15,10 @@ interface ConsentPolicy {
 
 @Injectable()
 export class SubmissionsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private marginGuard: MarginGuardService,
+  ) {}
 
   async findAll(tenantId: string) {
     const submissions = await this.prisma.submission.findMany({
@@ -64,6 +68,8 @@ export class SubmissionsService {
       resumeVersion?: string;
       rtrDocUrl?: string;
       notes?: string;
+      rateCardId?: string;
+      overrideMargin?: boolean;
     },
   ) {
     const job = await this.prisma.job.findFirst({
@@ -77,6 +83,25 @@ export class SubmissionsService {
     });
     if (!consultant) throw new NotFoundException('Consultant not found');
 
+    let marginApproved = false;
+    let marginOverrideBy: string | null = null;
+
+    if (data.rateCardId) {
+      const marginCheck = await this.marginGuard.checkSubmission(data.rateCardId);
+      if (marginCheck && !marginCheck.marginSafe) {
+        if (!data.overrideMargin) {
+          throw new BadRequestException({
+            message: `Margin $${marginCheck.netMarginHr.toFixed(2)}/hr is below $10/hr minimum`,
+            netMarginHr: marginCheck.netMarginHr,
+            suggestedBillRate: marginCheck.suggestedBillRate,
+            breakdown: marginCheck,
+          });
+        }
+        marginOverrideBy = userId;
+      }
+      marginApproved = true;
+    }
+
     const submission = await this.prisma.submission.create({
       data: {
         tenantId,
@@ -84,9 +109,12 @@ export class SubmissionsService {
         consultantId: data.consultantId,
         submittedById: userId,
         submitterType: 'USER',
-        resumeVersion: data.resumeVersion,
+        resumeVersionId: data.resumeVersion,
         rtrDocUrl: data.rtrDocUrl,
         notes: data.notes,
+        rateCardId: data.rateCardId,
+        marginApproved,
+        marginOverrideBy,
         status: 'DRAFT',
       },
     });
@@ -123,7 +151,7 @@ export class SubmissionsService {
 
     return this.prisma.submission.update({
       where: { id: submission.id },
-      data: { status: 'AWAITING_CONSENT' },
+      data: { status: 'CONSENT_PENDING' },
     });
   }
 
@@ -133,7 +161,7 @@ export class SubmissionsService {
     decision: { approved: boolean; consultantId: string },
   ) {
     const submission = await this.prisma.submission.findFirst({
-      where: { id, tenantId, status: 'AWAITING_CONSENT' },
+      where: { id, tenantId, status: 'CONSENT_PENDING' },
       include: { job: { include: { vendor: true } } },
     });
 

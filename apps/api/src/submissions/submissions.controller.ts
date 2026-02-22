@@ -44,6 +44,8 @@ export class SubmissionsController {
       resumeVersion?: string;
       rtrDocUrl?: string;
       notes?: string;
+      rateCardId?: string;
+      overrideMargin?: boolean;
     },
   ) {
     return this.submissionsService.create(tenantId, userId, body);

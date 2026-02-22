@@ -1,0 +1,19 @@
+{
+  "name": "@ai-run-sos/worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "pg-boss": "^10",
+    "@prisma/client": "^6",
+    "dotenv": "^16"
+  },
+  "devDependencies": {
+    "tsx": "^4",
+    "typescript": "^5"
+  }
+}

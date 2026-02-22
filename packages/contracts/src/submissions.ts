@@ -11,8 +11,8 @@ export type CreateSubmissionInput = z.infer<typeof CreateSubmissionSchema>;
 
 export const UpdateSubmissionStatusSchema = z.object({
   status: z.enum([
-    'DRAFT', 'PENDING_CONSENT', 'AWAITING_CONSENT',
-    'SUBMITTED', 'SHORTLISTED', 'REJECTED', 'WITHDRAWN',
+    'CONSENT_PENDING', 'SUBMITTED', 'INTERVIEWING', 'OFFERED',
+    'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'CLOSED',
   ]),
   vendorFeedback: z.string().optional(),
 });

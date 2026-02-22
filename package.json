@@ -13,7 +13,12 @@
     "lint": "turbo run lint",
     "db:generate": "npm run generate --workspace=packages/db",
     "db:migrate": "npm run migrate --workspace=packages/db",
-    "db:seed": "npm run seed --workspace=packages/db"
+    "db:seed": "npm run seed --workspace=packages/db",
+    "pst:ingest": "npx tsx apps/pst-ingest/src/cli.ts ingest",
+    "pst:extract": "npx tsx apps/pst-ingest/src/cli.ts extract",
+    "pst:report": "npx tsx apps/pst-ingest/src/cli.ts report",
+    "pst:all": "npx tsx apps/pst-ingest/src/cli.ts all",
+    "import:spreadsheets": "npx tsx apps/pst-ingest/src/cli.ts spreadsheets"
   },
   "devDependencies": {
     "turbo": "^2"

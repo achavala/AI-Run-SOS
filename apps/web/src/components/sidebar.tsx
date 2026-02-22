@@ -18,6 +18,9 @@ import {
   ChartBarIcon,
   FolderIcon,
   CreditCardIcon,
+  GlobeAltIcon,
+  EnvelopeIcon,
+  CircleStackIcon,
 } from '@heroicons/react/24/outline';
 import { useAuthStore, type UserRole } from '@/lib/auth';
 
@@ -31,6 +34,9 @@ const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
   MANAGEMENT: [
     { name: 'Command Center', href: '/dashboard/command-center', icon: HomeIcon },
     { name: 'Jobs', href: '/dashboard/jobs', icon: BriefcaseIcon },
+    { name: 'Vendor Reqs', href: '/dashboard/vendor-reqs', icon: EnvelopeIcon },
+    { name: 'Market Jobs', href: '/dashboard/market-jobs', icon: GlobeAltIcon },
+    { name: 'Email Intel', href: '/dashboard/pst-intel', icon: CircleStackIcon },
     { name: 'Consultants', href: '/dashboard/consultants', icon: UsersIcon },
     { name: 'Submissions', href: '/dashboard/submissions', icon: DocumentTextIcon },
     { name: 'Timesheets', href: '/dashboard/timesheets', icon: ClockIcon },
@@ -41,6 +47,9 @@ const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
   SUPERADMIN: [
     { name: 'Command Center', href: '/dashboard/command-center', icon: HomeIcon },
     { name: 'Jobs', href: '/dashboard/jobs', icon: BriefcaseIcon },
+    { name: 'Vendor Reqs', href: '/dashboard/vendor-reqs', icon: EnvelopeIcon },
+    { name: 'Market Jobs', href: '/dashboard/market-jobs', icon: GlobeAltIcon },
+    { name: 'Email Intel', href: '/dashboard/pst-intel', icon: CircleStackIcon },
     { name: 'Consultants', href: '/dashboard/consultants', icon: UsersIcon },
     { name: 'Submissions', href: '/dashboard/submissions', icon: DocumentTextIcon },
     { name: 'Timesheets', href: '/dashboard/timesheets', icon: ClockIcon },
@@ -51,12 +60,18 @@ const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
   RECRUITMENT: [
     { name: 'Dashboard', href: '/dashboard/recruitment', icon: HomeIcon },
     { name: 'Jobs', href: '/dashboard/jobs', icon: BriefcaseIcon },
+    { name: 'Vendor Reqs', href: '/dashboard/vendor-reqs', icon: EnvelopeIcon },
+    { name: 'Market Jobs', href: '/dashboard/market-jobs', icon: GlobeAltIcon },
+    { name: 'Email Intel', href: '/dashboard/pst-intel', icon: CircleStackIcon },
     { name: 'Consultants', href: '/dashboard/consultants', icon: UsersIcon },
     { name: 'Submissions', href: '/dashboard/submissions', icon: DocumentTextIcon },
   ],
   SALES: [
     { name: 'Dashboard', href: '/dashboard/sales', icon: HomeIcon },
     { name: 'Jobs', href: '/dashboard/jobs', icon: BriefcaseIcon },
+    { name: 'Vendor Reqs', href: '/dashboard/vendor-reqs', icon: EnvelopeIcon },
+    { name: 'Market Jobs', href: '/dashboard/market-jobs', icon: GlobeAltIcon },
+    { name: 'Email Intel', href: '/dashboard/pst-intel', icon: CircleStackIcon },
     { name: 'Vendors', href: '/dashboard/sales', icon: BuildingOfficeIcon },
     { name: 'Submissions', href: '/dashboard/submissions', icon: DocumentTextIcon },
   ],

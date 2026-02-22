@@ -1,7 +1,9 @@
 'use client';
 
 import { useParams } from 'next/navigation';
+import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable, type Column } from '@/components/data-table';
@@ -10,178 +12,241 @@ import {
   MapPinIcon,
   CurrencyDollarIcon,
   CalendarIcon,
-  ClockIcon,
+  SparklesIcon,
 } from '@heroicons/react/24/outline';
 
-const JOB = {
-  id: 'J-1001',
-  title: 'Senior React Developer',
-  vendor: 'TechStream Solutions',
-  vendorContact: 'David Park',
-  vendorEmail: 'david@techstream.io',
-  status: 'OPEN',
-  description:
-    'We are seeking an experienced Senior React Developer to join a fast-paced fintech team. The ideal candidate will have 5+ years of React experience, strong TypeScript skills, and experience building scalable SPA applications. This is a fully remote role with flexible working hours.',
-  skills: ['React', 'TypeScript', 'Node.js', 'GraphQL', 'REST APIs', 'Jest'],
-  location: 'Remote',
-  locationType: 'REMOTE',
-  rateMin: 85,
-  rateMax: 95,
-  rateType: 'HOURLY',
-  startDate: '2026-03-01',
-  durationMonths: 12,
-  closureLikelihood: 78,
-  createdAt: '2026-02-16',
-};
+interface Vendor {
+  name: string;
+  contactName: string;
+  contactEmail: string;
+}
 
-const SUBMISSIONS = [
-  {
-    id: 'S-2001',
-    consultant: 'Sarah Chen',
-    email: 'sarah.chen@email.com',
-    matchScore: 92,
-    status: 'SUBMITTED',
-    submittedAt: '2026-02-17',
-    skills: ['React', 'TypeScript', 'Node.js', 'GraphQL'],
-    rate: 88,
-    notes: 'Strong match. 6+ years React, fintech background.',
-  },
-  {
-    id: 'S-2002',
-    consultant: 'Alex Thompson',
-    email: 'alex.t@email.com',
-    matchScore: 85,
-    status: 'SHORTLISTED',
-    submittedAt: '2026-02-17',
-    skills: ['React', 'Vue.js', 'TypeScript', 'CSS'],
-    rate: 82,
-    notes: 'Great frontend skills. Slightly less backend experience.',
-  },
-  {
-    id: 'S-2003',
-    consultant: 'Jordan Blake',
-    email: 'jordan.b@email.com',
-    matchScore: 74,
-    status: 'SUBMITTED',
-    submittedAt: '2026-02-18',
-    skills: ['React', 'JavaScript', 'Node.js'],
-    rate: 78,
-    notes: 'Solid candidate, needs TypeScript ramp-up.',
-  },
-  {
-    id: 'S-2004',
-    consultant: 'Priya Sharma',
-    email: 'priya.sharma@email.com',
-    matchScore: 68,
-    status: 'PENDING_CONSENT',
-    submittedAt: '2026-02-19',
-    skills: ['React', 'Python', 'ML'],
-    rate: 95,
-    notes: 'Overqualified but interested. ML background is bonus.',
-  },
-  {
-    id: 'S-2005',
-    consultant: 'Derek Moss',
-    email: 'derek.m@email.com',
-    matchScore: 61,
-    status: 'REJECTED',
-    submittedAt: '2026-02-17',
-    skills: ['Angular', 'TypeScript', 'Java'],
-    rate: 80,
-    notes: 'Angular focus, limited React experience.',
-  },
-  {
-    id: 'S-2006',
-    consultant: 'Nina Patel',
-    email: 'nina.p@email.com',
-    matchScore: 88,
-    status: 'SUBMITTED',
-    submittedAt: '2026-02-20',
-    skills: ['React', 'TypeScript', 'GraphQL', 'Next.js'],
-    rate: 90,
-    notes: 'Excellent match. Previous fintech experience at Stripe.',
-  },
-];
+interface Submission {
+  id: string;
+  consultant: { firstName: string; lastName: string; email: string };
+  status: string;
+  matchScore: number | null;
+  payRate: number | null;
+  billRate: number | null;
+  submittedAt: string;
+}
 
-type SubRow = (typeof SUBMISSIONS)[number] & Record<string, unknown>;
+interface Job {
+  id: string;
+  title: string;
+  description: string | null;
+  vendor: Vendor | null;
+  skills: string[];
+  location: string | null;
+  locationType: string | null;
+  status: string;
+  billRateMin: number | null;
+  billRateMax: number | null;
+  payRateMin: number | null;
+  payRateMax: number | null;
+  pods: unknown[];
+  submissions: Submission[];
+  createdAt: string;
+}
 
-const subColumns: Column<SubRow>[] = [
-  {
-    key: 'id',
-    header: 'ID',
-    className: 'w-24',
-    render: (row) => (
-      <span className="font-mono text-xs text-gray-500">{row.id}</span>
-    ),
-  },
-  {
-    key: 'consultant',
-    header: 'Consultant',
-    sortable: true,
-    render: (row) => (
-      <div>
-        <p className="font-medium text-gray-900">{row.consultant}</p>
-        <p className="text-xs text-gray-500">{row.email}</p>
-      </div>
-    ),
-  },
-  {
-    key: 'matchScore',
-    header: 'Match',
-    sortable: true,
-    render: (row) => (
-      <div className="flex items-center gap-2">
-        <div className="h-1.5 w-12 rounded-full bg-gray-200">
-          <div
-            className={`h-1.5 rounded-full ${
-              row.matchScore >= 80 ? 'bg-emerald-500' : row.matchScore >= 60 ? 'bg-amber-500' : 'bg-red-500'
-            }`}
-            style={{ width: `${row.matchScore}%` }}
-          />
-        </div>
-        <span className="text-xs font-semibold text-gray-700">{row.matchScore}%</span>
-      </div>
-    ),
-  },
-  {
-    key: 'skills',
-    header: 'Skills',
-    render: (row) => (
-      <div className="flex flex-wrap gap-1">
-        {row.skills.map((s) => (
-          <span
-            key={s}
-            className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-              JOB.skills.includes(s)
-                ? 'bg-emerald-50 text-emerald-700'
-                : 'bg-gray-100 text-gray-600'
-            }`}
-          >
-            {s}
-          </span>
-        ))}
-      </div>
-    ),
-  },
-  {
-    key: 'rate',
-    header: 'Rate',
-    sortable: true,
-    render: (row) => <span className="font-medium">${row.rate}/hr</span>,
-  },
-  {
-    key: 'status',
-    header: 'Status',
-    render: (row) => <StatusBadge status={row.status} />,
-  },
-];
+interface Candidate {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  skills: string[];
+  matchScore: number;
+}
+
+type SubRow = Submission & Record<string, unknown>;
+
+function LoadingSpinner() {
+  return (
+    <div className="flex items-center justify-center py-24">
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200 border-t-indigo-600" />
+    </div>
+  );
+}
+
+function formatRate(min: number | null, max: number | null): string {
+  if (min != null && max != null) return `$${min}–$${max}/hr`;
+  if (min != null) return `$${min}+/hr`;
+  if (max != null) return `Up to $${max}/hr`;
+  return '—';
+}
 
 export default function JobDetailPage() {
   const params = useParams();
+  const id = params.id as string;
+
+  const [job, setJob] = useState<Job | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [candidatesLoading, setCandidatesLoading] = useState(false);
+  const [candidatesError, setCandidatesError] = useState<string | null>(null);
+  const [candidatesFetched, setCandidatesFetched] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+
+    async function fetchJob() {
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await api.get<Job>('/jobs/' + id);
+        if (!cancelled) {
+          const skills =
+            typeof data.skills === 'string' ? JSON.parse(data.skills) : data.skills ?? [];
+          setJob({ ...data, skills });
+        }
+      } catch (err: unknown) {
+        if (!cancelled) {
+          const message =
+            err instanceof Error ? err.message : 'Failed to load job';
+          setError(message);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    fetchJob();
+    return () => { cancelled = true; };
+  }, [id]);
+
+  const findCandidates = useCallback(async () => {
+    if (!id) return;
+    try {
+      setCandidatesLoading(true);
+      setCandidatesError(null);
+      const data = await api.get<Candidate[]>('/jobs/' + id + '/candidates');
+      setCandidates(data);
+      setCandidatesFetched(true);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to find candidates';
+      setCandidatesError(message);
+    } finally {
+      setCandidatesLoading(false);
+    }
+  }, [id]);
+
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24">
+        <p className="text-sm text-red-600">{error}</p>
+        <button
+          onClick={() => window.location.reload()}
+          className="mt-4 text-sm font-medium text-indigo-600 hover:text-indigo-800"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  if (!job) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24">
+        <p className="text-sm text-gray-500">Job not found</p>
+        <Link
+          href="/dashboard/jobs"
+          className="mt-4 text-sm font-medium text-indigo-600 hover:text-indigo-800"
+        >
+          Back to Jobs
+        </Link>
+      </div>
+    );
+  }
+
+  const submissions = job.submissions ?? [];
+  const jobSkills = job.skills ?? [];
+
+  const subColumns: Column<SubRow>[] = [
+    {
+      key: 'id',
+      header: 'ID',
+      className: 'w-24',
+      render: (row) => (
+        <span className="font-mono text-xs text-gray-500">{row.id}</span>
+      ),
+    },
+    {
+      key: 'consultant',
+      header: 'Consultant',
+      sortable: true,
+      render: (row) => (
+        <div>
+          <p className="font-medium text-gray-900">
+            {row.consultant.firstName} {row.consultant.lastName}
+          </p>
+          <p className="text-xs text-gray-500">{row.consultant.email}</p>
+        </div>
+      ),
+    },
+    {
+      key: 'matchScore',
+      header: 'Match',
+      sortable: true,
+      render: (row) => {
+        const score = row.matchScore ?? 0;
+        return (
+          <div className="flex items-center gap-2">
+            <div className="h-1.5 w-12 rounded-full bg-gray-200">
+              <div
+                className={`h-1.5 rounded-full ${
+                  score >= 80
+                    ? 'bg-emerald-500'
+                    : score >= 60
+                      ? 'bg-amber-500'
+                      : 'bg-red-500'
+                }`}
+                style={{ width: `${score}%` }}
+              />
+            </div>
+            <span className="text-xs font-semibold text-gray-700">
+              {score}%
+            </span>
+          </div>
+        );
+      },
+    },
+    {
+      key: 'payRate',
+      header: 'Pay Rate',
+      sortable: true,
+      render: (row) => (
+        <span className="font-medium">
+          {row.payRate != null ? `$${row.payRate}/hr` : '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'billRate',
+      header: 'Bill Rate',
+      sortable: true,
+      render: (row) => (
+        <span className="font-medium">
+          {row.billRate != null ? `$${row.billRate}/hr` : '—'}
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (row) => <StatusBadge status={row.status} />,
+    },
+  ];
 
   return (
     <>
-      {/* Back link */}
       <Link
         href="/dashboard/jobs"
         className="mb-4 inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700"
@@ -191,8 +256,8 @@ export default function JobDetailPage() {
       </Link>
 
       <PageHeader
-        title={JOB.title}
-        description={`${JOB.vendor} — Job ${params.id}`}
+        title={job.title}
+        description={`${job.vendor?.name ?? 'Unknown Vendor'} — Job ${job.id}`}
         actions={
           <div className="flex items-center gap-2">
             <button className="btn-secondary">Edit Job</button>
@@ -201,61 +266,56 @@ export default function JobDetailPage() {
         }
       />
 
-      {/* Job details */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-6">
           {/* Status + meta */}
           <div className="rounded-xl border border-gray-200 bg-white p-6">
             <div className="flex flex-wrap items-center gap-3">
-              <StatusBadge status={JOB.status} size="md" />
-              <StatusBadge status={JOB.locationType} size="md" />
-              <div className="ml-auto flex items-center gap-2">
-                <span className="text-sm text-gray-500">Closure likelihood:</span>
-                <div className="flex items-center gap-2">
-                  <div className="h-2 w-20 rounded-full bg-gray-200">
-                    <div
-                      className="h-2 rounded-full bg-emerald-500"
-                      style={{ width: `${JOB.closureLikelihood}%` }}
-                    />
-                  </div>
-                  <span className="text-sm font-semibold text-gray-900">{JOB.closureLikelihood}%</span>
-                </div>
-              </div>
+              <StatusBadge status={job.status} size="md" />
+              {job.locationType && (
+                <StatusBadge status={job.locationType} size="md" />
+              )}
             </div>
 
-            <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
               <div className="flex items-center gap-2">
                 <CurrencyDollarIcon className="h-4 w-4 text-gray-400" />
                 <div>
-                  <p className="text-xs text-gray-500">Rate</p>
-                  <p className="text-sm font-semibold">${JOB.rateMin}-{JOB.rateMax}/hr</p>
+                  <p className="text-xs text-gray-500">Bill Rate</p>
+                  <p className="text-sm font-semibold">
+                    {formatRate(job.billRateMin, job.billRateMax)}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <CurrencyDollarIcon className="h-4 w-4 text-gray-400" />
+                <div>
+                  <p className="text-xs text-gray-500">Pay Rate</p>
+                  <p className="text-sm font-semibold">
+                    {formatRate(job.payRateMin, job.payRateMax)}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <MapPinIcon className="h-4 w-4 text-gray-400" />
                 <div>
                   <p className="text-xs text-gray-500">Location</p>
-                  <p className="text-sm font-semibold">{JOB.location}</p>
+                  <p className="text-sm font-semibold">
+                    {job.location || '—'}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <CalendarIcon className="h-4 w-4 text-gray-400" />
                 <div>
-                  <p className="text-xs text-gray-500">Start Date</p>
+                  <p className="text-xs text-gray-500">Created</p>
                   <p className="text-sm font-semibold">
-                    {new Date(JOB.startDate).toLocaleDateString('en-US', {
+                    {new Date(job.createdAt).toLocaleDateString('en-US', {
                       month: 'short',
                       day: 'numeric',
                       year: 'numeric',
                     })}
                   </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <ClockIcon className="h-4 w-4 text-gray-400" />
-                <div>
-                  <p className="text-xs text-gray-500">Duration</p>
-                  <p className="text-sm font-semibold">{JOB.durationMonths} months</p>
                 </div>
               </div>
             </div>
@@ -265,36 +325,120 @@ export default function JobDetailPage() {
           <div className="rounded-xl border border-gray-200 bg-white p-6">
             <h3 className="text-sm font-semibold text-gray-900">Description</h3>
             <p className="mt-3 text-sm leading-relaxed text-gray-600">
-              {JOB.description}
+              {job.description || 'No description provided.'}
             </p>
-            <div className="mt-4">
-              <h4 className="text-xs font-semibold uppercase text-gray-500">Required Skills</h4>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {JOB.skills.map((s) => (
-                  <span
-                    key={s}
-                    className="rounded-md bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700"
-                  >
-                    {s}
-                  </span>
-                ))}
+            {jobSkills.length > 0 && (
+              <div className="mt-4">
+                <h4 className="text-xs font-semibold uppercase text-gray-500">
+                  Required Skills
+                </h4>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {jobSkills.map((s: string) => (
+                    <span
+                      key={s}
+                      className="rounded-md bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700"
+                    >
+                      {s}
+                    </span>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Submissions */}
           <div>
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900">
-                Submissions ({SUBMISSIONS.length})
+                Submissions ({submissions.length})
               </h2>
             </div>
             <DataTable
               columns={subColumns}
-              data={SUBMISSIONS as unknown as SubRow[]}
+              data={submissions as unknown as SubRow[]}
               keyField="id"
               emptyMessage="No submissions yet"
             />
+          </div>
+
+          {/* AI Candidate Matching */}
+          <div className="rounded-xl border border-gray-200 bg-white p-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-900">
+                AI Candidate Matching
+              </h3>
+              <button
+                onClick={findCandidates}
+                disabled={candidatesLoading}
+                className="btn-primary inline-flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <SparklesIcon className="h-4 w-4" />
+                {candidatesLoading
+                  ? 'Searching…'
+                  : 'Find Matching Consultants'}
+              </button>
+            </div>
+
+            {candidatesError && (
+              <p className="mt-4 text-sm text-red-600">{candidatesError}</p>
+            )}
+
+            {candidatesFetched && candidates.length === 0 && !candidatesError && (
+              <p className="mt-4 text-sm text-gray-500">
+                No matching consultants found.
+              </p>
+            )}
+
+            {candidates.length > 0 && (
+              <div className="mt-4 divide-y divide-gray-100">
+                {candidates.map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex items-center justify-between py-3 first:pt-0 last:pb-0"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">
+                        {c.firstName} {c.lastName}
+                      </p>
+                      <p className="text-xs text-gray-500">{c.email}</p>
+                      {c.skills?.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {c.skills.map((s: string) => (
+                            <span
+                              key={s}
+                              className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                                jobSkills.includes(s)
+                                  ? 'bg-emerald-50 text-emerald-700'
+                                  : 'bg-gray-100 text-gray-600'
+                              }`}
+                            >
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="h-1.5 w-12 rounded-full bg-gray-200">
+                        <div
+                          className={`h-1.5 rounded-full ${
+                            c.matchScore >= 80
+                              ? 'bg-emerald-500'
+                              : c.matchScore >= 60
+                                ? 'bg-amber-500'
+                                : 'bg-red-500'
+                          }`}
+                          style={{ width: `${c.matchScore}%` }}
+                        />
+                      </div>
+                      <span className="text-xs font-semibold text-gray-700">
+                        {c.matchScore}%
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -303,64 +447,87 @@ export default function JobDetailPage() {
           {/* Vendor card */}
           <div className="rounded-xl border border-gray-200 bg-white p-6">
             <h3 className="text-sm font-semibold text-gray-900">Vendor</h3>
-            <div className="mt-3 space-y-2">
-              <p className="text-sm font-medium text-gray-900">{JOB.vendor}</p>
-              <p className="text-sm text-gray-600">{JOB.vendorContact}</p>
-              <a
-                href={`mailto:${JOB.vendorEmail}`}
-                className="text-sm text-indigo-600 hover:text-indigo-800"
-              >
-                {JOB.vendorEmail}
-              </a>
-            </div>
+            {job.vendor ? (
+              <div className="mt-3 space-y-2">
+                <p className="text-sm font-medium text-gray-900">
+                  {job.vendor.name}
+                </p>
+                <p className="text-sm text-gray-600">
+                  {job.vendor.contactName}
+                </p>
+                <a
+                  href={`mailto:${job.vendor.contactEmail}`}
+                  className="text-sm text-indigo-600 hover:text-indigo-800"
+                >
+                  {job.vendor.contactEmail}
+                </a>
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-gray-500">No vendor assigned</p>
+            )}
           </div>
 
           {/* Submission stats */}
           <div className="rounded-xl border border-gray-200 bg-white p-6">
-            <h3 className="text-sm font-semibold text-gray-900">Submission Summary</h3>
+            <h3 className="text-sm font-semibold text-gray-900">
+              Submission Summary
+            </h3>
             <div className="mt-4 space-y-3">
               {[
-                { label: 'Total', count: SUBMISSIONS.length, color: 'bg-gray-500' },
-                { label: 'Shortlisted', count: SUBMISSIONS.filter((s) => s.status === 'SHORTLISTED').length, color: 'bg-blue-500' },
-                { label: 'Submitted', count: SUBMISSIONS.filter((s) => s.status === 'SUBMITTED').length, color: 'bg-emerald-500' },
-                { label: 'Pending Consent', count: SUBMISSIONS.filter((s) => s.status === 'PENDING_CONSENT').length, color: 'bg-amber-500' },
-                { label: 'Rejected', count: SUBMISSIONS.filter((s) => s.status === 'REJECTED').length, color: 'bg-red-500' },
+                {
+                  label: 'Total',
+                  count: submissions.length,
+                  color: 'bg-gray-500',
+                },
+                {
+                  label: 'Interviewing',
+                  count: submissions.filter(
+                    (s) => s.status === 'INTERVIEWING',
+                  ).length,
+                  color: 'bg-blue-500',
+                },
+                {
+                  label: 'Submitted',
+                  count: submissions.filter((s) => s.status === 'SUBMITTED')
+                    .length,
+                  color: 'bg-emerald-500',
+                },
+                {
+                  label: 'Pending Consent',
+                  count: submissions.filter(
+                    (s) => s.status === 'CONSENT_PENDING',
+                  ).length,
+                  color: 'bg-amber-500',
+                },
+                {
+                  label: 'Rejected',
+                  count: submissions.filter((s) => s.status === 'REJECTED')
+                    .length,
+                  color: 'bg-red-500',
+                },
               ].map((stat) => (
-                <div key={stat.label} className="flex items-center justify-between">
+                <div
+                  key={stat.label}
+                  className="flex items-center justify-between"
+                >
                   <div className="flex items-center gap-2">
                     <div className={`h-2 w-2 rounded-full ${stat.color}`} />
                     <span className="text-sm text-gray-600">{stat.label}</span>
                   </div>
-                  <span className="text-sm font-semibold text-gray-900">{stat.count}</span>
+                  <span className="text-sm font-semibold text-gray-900">
+                    {stat.count}
+                  </span>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Timeline */}
+          {/* Activity */}
           <div className="rounded-xl border border-gray-200 bg-white p-6">
             <h3 className="text-sm font-semibold text-gray-900">Activity</h3>
-            <div className="mt-4 space-y-4">
-              {[
-                { action: 'Nina Patel submitted', date: 'Feb 20, 2026' },
-                { action: 'Priya Sharma added (pending consent)', date: 'Feb 19, 2026' },
-                { action: 'Alex Thompson shortlisted', date: 'Feb 18, 2026' },
-                { action: 'Derek Moss rejected', date: 'Feb 18, 2026' },
-                { action: 'Sarah Chen & Jordan Blake submitted', date: 'Feb 17, 2026' },
-                { action: 'Job created', date: 'Feb 16, 2026' },
-              ].map((event, i, arr) => (
-                <div key={i} className="flex gap-3">
-                  <div className="flex flex-col items-center">
-                    <div className="h-2 w-2 rounded-full bg-indigo-500" />
-                    {i < arr.length - 1 && <div className="mt-1 h-full w-px bg-gray-200" />}
-                  </div>
-                  <div className="-mt-0.5 pb-2">
-                    <p className="text-xs text-gray-700">{event.action}</p>
-                    <p className="text-[10px] text-gray-400">{event.date}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <p className="mt-4 text-sm text-gray-500">
+              No activity recorded yet
+            </p>
           </div>
         </div>
       </div>

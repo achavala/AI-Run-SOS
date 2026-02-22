@@ -130,7 +130,7 @@ export class JobsService {
         skills: parsed.skills,
         location: parsed.location,
         locationType: 'REMOTE',
-        status: 'DRAFT',
+        status: 'NEW',
       },
     });
   }
@@ -162,6 +162,59 @@ export class JobsService {
         parsedAt: new Date().toISOString(),
       },
     };
+  }
+
+  async findCandidateMatches(tenantId: string, jobId: string) {
+    const job = await this.ensureExists(tenantId, jobId);
+
+    const skills = Array.isArray(job.skills) ? (job.skills as string[]) : [];
+
+    const consultants = await this.prisma.consultant.findMany({
+      where: {
+        tenantId,
+        readiness: { in: ['SUBMISSION_READY', 'VERIFIED'] },
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        skills: true,
+        pods: true,
+        desiredRate: true,
+        readiness: true,
+      },
+    });
+
+    const matches = consultants
+      .map((c) => {
+        const consultantSkills = Array.isArray(c.skills) ? (c.skills as string[]) : [];
+        const normalizedJobSkills = skills.map((s) => s.toLowerCase());
+        const normalizedConsultantSkills = consultantSkills.map((s) =>
+          typeof s === 'string' ? s.toLowerCase() : '',
+        );
+
+        const matchingSkills = normalizedJobSkills.filter((s) =>
+          normalizedConsultantSkills.some((cs) => cs.includes(s) || s.includes(cs)),
+        );
+
+        const matchScore =
+          normalizedJobSkills.length > 0
+            ? Math.round((matchingSkills.length / normalizedJobSkills.length) * 100)
+            : 0;
+
+        return {
+          ...c,
+          matchScore,
+          matchingSkills,
+          totalJobSkills: normalizedJobSkills.length,
+        };
+      })
+      .filter((c) => c.matchScore > 0)
+      .sort((a, b) => b.matchScore - a.matchScore)
+      .slice(0, 20);
+
+    return { job: { id: job.id, title: job.title }, candidates: matches };
   }
 
   private async ensureExists(tenantId: string, id: string) {
