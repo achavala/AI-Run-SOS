@@ -18,7 +18,11 @@
     "pst:extract": "npx tsx apps/pst-ingest/src/cli.ts extract",
     "pst:report": "npx tsx apps/pst-ingest/src/cli.ts report",
     "pst:all": "npx tsx apps/pst-ingest/src/cli.ts all",
-    "import:spreadsheets": "npx tsx apps/pst-ingest/src/cli.ts spreadsheets"
+    "import:spreadsheets": "npx tsx apps/pst-ingest/src/cli.ts spreadsheets",
+    "mail:sync": "cd apps/mail-sync && npx tsx src/index.ts",
+    "mail:daemon": "cd apps/mail-sync && npx tsx src/daemon.ts",
+    "mail:extract": "cd apps/mail-sync && npx tsx src/extract/runAll.ts",
+    "mail:cleanup": "cd apps/mail-sync && npx tsx src/cleanup.ts"
   },
   "devDependencies": {
     "turbo": "^2"
@@ -26,5 +30,10 @@
   "engines": {
     "node": ">=20"
   },
-  "packageManager": "npm@10.0.0"
+  "packageManager": "npm@10.0.0",
+  "dependencies": {
+    "axios": "^1.13.5",
+    "dotenv": "^17.3.1",
+    "pg": "^8.18.0"
+  }
 }

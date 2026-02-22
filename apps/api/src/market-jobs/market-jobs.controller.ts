@@ -12,11 +12,15 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentTenant } from '../common/tenant.decorator';
 import { MarketJobsService } from './market-jobs.service';
+import { JobBoardFetcherService } from './job-board-fetcher.service';
 
 @Controller('market-jobs')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class MarketJobsController {
-  constructor(private marketJobsService: MarketJobsService) {}
+  constructor(
+    private marketJobsService: MarketJobsService,
+    private jobBoardFetcher: JobBoardFetcherService,
+  ) {}
 
   @Get()
   @Roles('MANAGEMENT', 'RECRUITMENT', 'SALES')
@@ -62,6 +66,12 @@ export class MarketJobsController {
   @Roles('MANAGEMENT', 'RECRUITMENT', 'SALES')
   findOne(@Param('id') id: string) {
     return this.marketJobsService.findOne(id);
+  }
+
+  @Post('fetch-boards')
+  @Roles('MANAGEMENT', 'SUPERADMIN')
+  fetchFromBoards() {
+    return this.jobBoardFetcher.fetchAll();
   }
 
   @Post(':id/convert')

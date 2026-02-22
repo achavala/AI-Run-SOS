@@ -19,6 +19,9 @@ import { MarketJobsModule } from './market-jobs/market-jobs.module';
 import { VendorReqsModule } from './vendor-reqs/vendor-reqs.module';
 import { PstIntelModule } from './pst-intel/pst-intel.module';
 import { AiModule } from './ai/ai.module';
+import { MailIntelModule } from './mail-intel/mail-intel.module';
+import { VendorTrustModule } from './vendor-trust/vendor-trust.module';
+import { CommandCenterModule } from './command-center/command-center.module';
 import { AuditInterceptor } from './common/audit.interceptor';
 
 @Module({
@@ -41,6 +44,9 @@ import { AuditInterceptor } from './common/audit.interceptor';
     VendorReqsModule,
     PstIntelModule,
     AiModule,
+    MailIntelModule,
+    VendorTrustModule,
+    CommandCenterModule,
   ],
   providers: [
     {
