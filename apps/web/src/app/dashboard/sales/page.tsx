@@ -130,8 +130,43 @@ const vendorColumns: Column<VendorRow>[] = [
   },
 ];
 
+interface DealPipeline {
+  [status: string]: number;
+}
+
+interface SalesDashboard {
+  vendorStats: Array<{
+    id: string;
+    companyName: string;
+    msaStatus: string | null;
+    trustScore: number | null;
+    paySpeedDays: number | null;
+    ghostRate: number | null;
+    activeJobs: number;
+    totalInvoices: number;
+    activePlacements: number;
+  }>;
+  dealPipeline: DealPipeline;
+  monthlyProjection: {
+    estimatedRevenue: number;
+    estimatedMargin: number;
+    activePlacements: number;
+  };
+}
+
+const PIPELINE_STAGES = [
+  { key: 'NEW', label: 'New', color: 'bg-gray-400' },
+  { key: 'QUALIFYING', label: 'Qualifying', color: 'bg-blue-400' },
+  { key: 'ACTIVE', label: 'Active', color: 'bg-indigo-500' },
+  { key: 'ON_HOLD', label: 'On Hold', color: 'bg-amber-400' },
+  { key: 'FILLED', label: 'Filled', color: 'bg-emerald-500' },
+  { key: 'CANCELLED', label: 'Cancelled', color: 'bg-red-400' },
+];
+
 export default function SalesPage() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [dealPipeline, setDealPipeline] = useState<DealPipeline>({});
+  const [monthlyProjection, setMonthlyProjection] = useState<{ estimatedRevenue: number; estimatedMargin: number; activePlacements: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -141,8 +176,15 @@ export default function SalesPage() {
 
     async function load() {
       try {
-        const data = await api.get<Vendor[]>('/vendors');
-        if (!cancelled) setVendors(data);
+        const [vendorData, salesData] = await Promise.all([
+          api.get<Vendor[]>('/vendors'),
+          api.get<SalesDashboard>('/dashboard/sales'),
+        ]);
+        if (!cancelled) {
+          setVendors(vendorData);
+          setDealPipeline(salesData.dealPipeline || {});
+          setMonthlyProjection(salesData.monthlyProjection || null);
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load vendors');
       } finally {
@@ -277,17 +319,52 @@ export default function SalesPage() {
         />
       </div>
 
-      {/* Deal Pipeline - empty state until real deal data is available */}
+      {/* Deal Pipeline */}
       <div className="mt-8 rounded-xl border border-gray-200 bg-white p-6">
-        <h3 className="text-sm font-semibold text-gray-900">Deal Pipeline</h3>
-        <p className="text-xs text-gray-500">Active vendor negotiations</p>
-        <div className="flex items-center justify-center py-12 text-center">
+        <div className="flex items-center justify-between">
           <div>
-            <ChartBarIcon className="mx-auto h-8 w-8 text-gray-300" />
-            <p className="mt-2 text-sm text-gray-400">No active deals</p>
-            <p className="text-xs text-gray-300">Deals will appear here when tracked</p>
+            <h3 className="text-sm font-semibold text-gray-900">Deal Pipeline</h3>
+            <p className="text-xs text-gray-500">Job status distribution across vendors</p>
           </div>
+          {monthlyProjection && monthlyProjection.activePlacements > 0 && (
+            <div className="text-right">
+              <p className="text-sm font-semibold text-gray-900">
+                ${(monthlyProjection.estimatedRevenue / 1000).toFixed(0)}K
+                <span className="ml-1 text-xs font-normal text-gray-400">projected/mo</span>
+              </p>
+              <p className="text-xs text-emerald-600">
+                ${(monthlyProjection.estimatedMargin / 1000).toFixed(0)}K margin
+                &middot; {monthlyProjection.activePlacements} placements
+              </p>
+            </div>
+          )}
         </div>
+        {Object.keys(dealPipeline).length === 0 ? (
+          <div className="flex items-center justify-center py-12 text-center">
+            <div>
+              <ChartBarIcon className="mx-auto h-8 w-8 text-gray-300" />
+              <p className="mt-2 text-sm text-gray-400">No jobs in pipeline yet</p>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4 flex gap-3">
+            {PIPELINE_STAGES.map((stage) => {
+              const count = dealPipeline[stage.key] || 0;
+              const total = Object.values(dealPipeline).reduce((s, v) => s + v, 0);
+              const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+              return (
+                <div key={stage.key} className="flex-1 rounded-lg border border-gray-100 p-3 text-center">
+                  <div className={`mx-auto mb-2 h-2 w-full rounded-full bg-gray-100`}>
+                    <div className={`h-2 rounded-full ${stage.color}`} style={{ width: `${Math.max(pct, count > 0 ? 8 : 0)}%` }} />
+                  </div>
+                  <p className="text-lg font-bold text-gray-900">{count}</p>
+                  <p className="text-xs text-gray-500">{stage.label}</p>
+                  {pct > 0 && <p className="text-[10px] text-gray-400">{pct}%</p>}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </>
   );

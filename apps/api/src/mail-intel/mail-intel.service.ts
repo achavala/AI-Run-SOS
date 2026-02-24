@@ -646,6 +646,32 @@ export class MailIntelService {
     ` as any[];
     return status;
   }
+
+  async getMailboxes() {
+    const mailboxes = await this.prisma.$queryRaw`
+      SELECT m.email,
+        m.last_synced_at as "lastSynced",
+        (SELECT COUNT(*)::int FROM raw_email_message WHERE mailbox_email = m.email) as "emailCount"
+      FROM mailbox m ORDER BY email
+    ` as any[];
+    return mailboxes;
+  }
+
+  async addMailbox(email: string) {
+    if (!email || !email.includes('@')) {
+      throw new Error('Invalid email address');
+    }
+    const existing = await this.prisma.$queryRaw`
+      SELECT id FROM mailbox WHERE email = ${email}
+    ` as any[];
+    if (existing.length > 0) {
+      return { message: 'Mailbox already registered', email };
+    }
+    await this.prisma.$executeRaw`
+      INSERT INTO mailbox (id, email) VALUES (gen_random_uuid(), ${email})
+    `;
+    return { message: 'Mailbox added successfully. It will sync on the next daemon cycle.', email };
+  }
 }
 
 function toCsv(rows: any[], columns: string[]): string {

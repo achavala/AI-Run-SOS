@@ -123,4 +123,10 @@ export class MailIntelController {
     res.setHeader('Content-Disposition', `attachment; filename=${type}-contacts.csv`);
     res.send(csv);
   }
+
+  @Get('mailboxes')
+  getMailboxes() { return this.svc.getMailboxes(); }
+
+  @Post('mailboxes')
+  addMailbox(@Body() body: { email: string }) { return this.svc.addMailbox(body.email); }
 }

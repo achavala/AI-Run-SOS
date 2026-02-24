@@ -204,6 +204,20 @@ export default function TimesheetsPage() {
   const totalMargin = rows.reduce((sum, ts) => sum + ts.margin, 0);
   const pendingApproval = rows.filter((ts) => ts.status === 'SUBMITTED').length;
 
+  const billedChange = (() => {
+    if (rows.length === 0) return { text: '—', type: 'neutral' as const };
+    const weeks = [...new Set(rows.map(r => r.weekStarting))].sort().reverse();
+    if (weeks.length < 2) return { text: 'first period', type: 'neutral' as const };
+    const currentWeek = rows.filter(r => r.weekStarting === weeks[0]).reduce((s, r) => s + r.totalBill, 0);
+    const prevWeek = rows.filter(r => r.weekStarting === weeks[1]).reduce((s, r) => s + r.totalBill, 0);
+    if (prevWeek === 0) return { text: 'new', type: 'positive' as const };
+    const pct = ((currentWeek - prevWeek) / prevWeek * 100).toFixed(1);
+    return {
+      text: `${Number(pct) >= 0 ? '+' : ''}${pct}%`,
+      type: (Number(pct) >= 0 ? 'positive' : 'negative') as 'positive' | 'negative',
+    };
+  })();
+
   const statusCounts = rows.reduce<Record<string, number>>((acc, ts) => {
     acc[ts.status] = (acc[ts.status] || 0) + 1;
     return acc;
@@ -233,9 +247,9 @@ export default function TimesheetsPage() {
         <KpiCard
           title="Total Billed"
           value={loading ? '—' : `$${(totalBilled / 1000).toFixed(1)}K`}
-          change="+8.2%"
-          changeType="positive"
-          subtitle="vs last period"
+          change={billedChange.text}
+          changeType={billedChange.type}
+          subtitle="vs prior week"
           icon={CheckCircleIcon}
         />
         <KpiCard

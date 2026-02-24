@@ -15,6 +15,8 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const CONSECUTIVE_EMPTY_PAGES_TO_STOP = 3;
+
 async function syncFolder(
   email: string,
   folderId: string,
@@ -24,6 +26,7 @@ async function syncFolder(
 ): Promise<number> {
   let totalInserted = 0;
   let pageCount = 0;
+  let consecutiveEmptyPages = 0;
 
   let url: string | null =
     `https://graph.microsoft.com/v1.0/users/${email}/mailFolders/${folderId}/messages` +
@@ -45,6 +48,7 @@ async function syncFolder(
       const messages = response.data.value || [];
       if (messages.length === 0) break;
 
+      let pageInserts = 0;
       for (const msg of messages) {
         const result = await client.query(
           `INSERT INTO raw_email_message
@@ -66,7 +70,18 @@ async function syncFolder(
         );
         if (result.rowCount && result.rowCount > 0) {
           totalInserted++;
+          pageInserts++;
         }
+      }
+
+      if (pageInserts === 0) {
+        consecutiveEmptyPages++;
+        if (consecutiveEmptyPages >= CONSECUTIVE_EMPTY_PAGES_TO_STOP) {
+          console.log(`    ${folderName}: caught up (${consecutiveEmptyPages} consecutive pages with no new msgs)`);
+          break;
+        }
+      } else {
+        consecutiveEmptyPages = 0;
       }
 
       url = response.data["@odata.nextLink"] || null;

@@ -161,7 +161,7 @@ export function classifyEmail(
 }
 
 export async function classifyAllEmails(pool: Pool): Promise<void> {
-  console.log("\n=== Email Classification ===\n");
+  console.log("\n=== Email Classification (full) ===\n");
 
   const client = await pool.connect();
   try {
@@ -193,6 +193,55 @@ export async function classifyAllEmails(pool: Pool): Promise<void> {
     }
 
     console.log(`  Classified ${processed} emails:\n`);
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    for (const [cat, cnt] of sorted) {
+      const pct = ((cnt / processed) * 100).toFixed(1);
+      console.log(`    ${cat.padEnd(15)} ${String(cnt).padStart(6)}  (${pct}%)`);
+    }
+  } finally {
+    client.release();
+  }
+}
+
+export async function classifyNewEmails(pool: Pool): Promise<void> {
+  console.log("\n=== Email Classification (incremental) ===\n");
+
+  const client = await pool.connect();
+  try {
+    const result = await client.query(`
+      SELECT id, from_email, from_name, subject, body_preview, to_emails
+      FROM raw_email_message
+      WHERE category IS NULL
+      ORDER BY sent_at DESC
+    `);
+
+    if (result.rows.length === 0) {
+      console.log("  No unclassified emails found");
+      return;
+    }
+
+    const counts: Record<string, number> = {};
+    let processed = 0;
+
+    for (const row of result.rows) {
+      const category = classifyEmail(
+        row.from_email || "",
+        row.from_name || "",
+        row.subject || "",
+        row.body_preview || "",
+        row.to_emails || []
+      );
+
+      await client.query(
+        "UPDATE raw_email_message SET category = $1 WHERE id = $2",
+        [category, row.id]
+      );
+
+      counts[category] = (counts[category] || 0) + 1;
+      processed++;
+    }
+
+    console.log(`  Classified ${processed} new emails:\n`);
     const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
     for (const [cat, cnt] of sorted) {
       const pct = ((cnt / processed) * 100).toFixed(1);

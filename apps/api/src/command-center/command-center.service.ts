@@ -219,50 +219,59 @@ export class CommandCenterService {
   /* ═══════ Actionability Scoring for Req Signals ═══════ */
 
   async computeActionabilityScores() {
-    this.logger.log('Computing actionability scores for req signals...');
+    this.logger.log('Computing actionability scores in batches (chunk-safe for 7M+ rows)...');
 
-    const result = await this.prisma.$executeRaw`
-      UPDATE vendor_req_signal vrs SET
-        actionability_score = (
-          -- Base: has title (20 pts)
-          CASE WHEN title IS NOT NULL AND title != '' THEN 20 ELSE 0 END
-          -- Has vendor contact email (20 pts)
-          + CASE WHEN vendor_contact_id IS NOT NULL THEN 20 ELSE 0 END
-          -- Has rate (15 pts)
-          + CASE WHEN rate_text IS NOT NULL THEN 15 ELSE 0 END
-          -- Has location (10 pts)
-          + CASE WHEN location IS NOT NULL AND location != '' THEN 10 ELSE 0 END
-          -- Has skills (10 pts)
-          + CASE WHEN skills IS NOT NULL AND array_length(skills, 1) > 0 THEN 10 ELSE 0 END
-          -- C2C or W2 identified (10 pts)
-          + CASE WHEN employment_type IN ('C2C', 'W2', 'CONTRACT') THEN 10 ELSE 0 END
-          -- Fresh (last 3 days) (10 pts)
-          + CASE WHEN created_at >= NOW() - interval '3 days' THEN 10 ELSE 0 END
-          -- Vendor trust boost (5 pts)
-          + CASE WHEN EXISTS (
-              SELECT 1 FROM vendor_trust_score vts
-              WHERE vts.vendor_company_id = vrs.vendor_company_id
-                AND vts.trust_score >= 60
-            ) THEN 5 ELSE 0 END
-          -- Penalty: "no third party" / "no c2c"
-          - CASE WHEN title ILIKE '%no third party%' OR title ILIKE '%no c2c%' THEN 30 ELSE 0 END
-        ),
-        engagement_model = CASE
-          WHEN title ILIKE '%c2c%' OR title ILIKE '%corp to corp%' OR title ILIKE '%corp-to-corp%' THEN 'C2C'
-          WHEN title ILIKE '%w2%' THEN 'W2'
-          WHEN title ILIKE '%1099%' THEN '1099'
-          WHEN title ILIKE '%full time%' OR title ILIKE '%fte%' OR title ILIKE '%permanent%' THEN 'FTE'
-          ELSE 'UNKNOWN'
-        END,
-        employment_nature = CASE
-          WHEN title ILIKE '%contract to hire%' OR title ILIKE '%c2h%' OR title ILIKE '%contract-to-hire%' THEN 'C2H'
-          WHEN title ILIKE '%contract%' OR employment_type IN ('CONTRACT', 'C2C', 'W2', '1099') THEN 'CONTRACT'
-          WHEN title ILIKE '%perm%' OR title ILIKE '%full time%' OR title ILIKE '%fte%' THEN 'PERM'
-          ELSE 'UNKNOWN'
-        END
-    `;
+    const BATCH_SIZE = 100000;
+    let totalUpdated = 0;
+    let batchNum = 0;
 
-    this.logger.log(`Updated actionability scores for ${result} req signals`);
+    // Process in batches using ID ranges to avoid locking the entire table
+    while (true) {
+      batchNum++;
+      const result = await this.prisma.$executeRaw`
+        UPDATE vendor_req_signal vrs SET
+          actionability_score = (
+            CASE WHEN title IS NOT NULL AND title != '' THEN 20 ELSE 0 END
+            + CASE WHEN vendor_contact_id IS NOT NULL THEN 20 ELSE 0 END
+            + CASE WHEN rate_text IS NOT NULL THEN 15 ELSE 0 END
+            + CASE WHEN location IS NOT NULL AND location != '' THEN 10 ELSE 0 END
+            + CASE WHEN skills IS NOT NULL AND array_length(skills, 1) > 0 THEN 10 ELSE 0 END
+            + CASE WHEN employment_type IN ('C2C', 'W2', 'CONTRACT') THEN 10 ELSE 0 END
+            + CASE WHEN created_at >= NOW() - interval '3 days' THEN 10 ELSE 0 END
+            + CASE WHEN EXISTS (
+                SELECT 1 FROM vendor_trust_score vts
+                WHERE vts.vendor_company_id = vrs.vendor_company_id
+                  AND vts.trust_score >= 60
+              ) THEN 5 ELSE 0 END
+            - CASE WHEN title ILIKE '%no third party%' OR title ILIKE '%no c2c%' OR title ILIKE '%w2 only%' THEN 30 ELSE 0 END
+          ),
+          engagement_model = CASE
+            WHEN title ILIKE '%c2c%' OR title ILIKE '%corp to corp%' OR title ILIKE '%corp-to-corp%' THEN 'C2C'
+            WHEN title ILIKE '%w2%' THEN 'W2'
+            WHEN title ILIKE '%1099%' THEN '1099'
+            WHEN title ILIKE '%full time%' OR title ILIKE '%fte%' OR title ILIKE '%permanent%' THEN 'FTE'
+            ELSE 'UNKNOWN'
+          END,
+          employment_nature = CASE
+            WHEN title ILIKE '%contract to hire%' OR title ILIKE '%c2h%' OR title ILIKE '%contract-to-hire%' THEN 'C2H'
+            WHEN title ILIKE '%contract%' OR employment_type IN ('CONTRACT', 'C2C', 'W2', '1099') THEN 'CONTRACT'
+            WHEN title ILIKE '%perm%' OR title ILIKE '%full time%' OR title ILIKE '%fte%' THEN 'PERM'
+            ELSE 'UNKNOWN'
+          END
+        WHERE vrs.id IN (
+          SELECT id FROM vendor_req_signal
+          WHERE actionability_score IS NULL OR actionability_score = 0
+          LIMIT ${BATCH_SIZE}
+        )
+      `;
+
+      totalUpdated += Number(result);
+      this.logger.log(`Batch ${batchNum}: scored ${result} rows (total: ${totalUpdated})`);
+
+      if (Number(result) < BATCH_SIZE) break;
+    }
+
+    this.logger.log(`Completed: scored ${totalUpdated} req signals total`);
 
     const distribution = await this.prisma.$queryRaw`
       SELECT
@@ -283,6 +292,6 @@ export class CommandCenterService {
       ORDER BY count DESC
     ` as any[];
 
-    return { updated: result, distribution: distribution[0], engagementBreakdown };
+    return { updated: totalUpdated, distribution: distribution[0], engagementBreakdown };
   }
 }

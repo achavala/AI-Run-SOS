@@ -22,6 +22,8 @@ import { AiModule } from './ai/ai.module';
 import { MailIntelModule } from './mail-intel/mail-intel.module';
 import { VendorTrustModule } from './vendor-trust/vendor-trust.module';
 import { CommandCenterModule } from './command-center/command-center.module';
+import { AnalyticsModule } from './analytics/analytics.module';
+import { AiAgentsModule } from './ai-agents/ai-agents.module';
 import { AuditInterceptor } from './common/audit.interceptor';
 
 @Module({
@@ -47,6 +49,8 @@ import { AuditInterceptor } from './common/audit.interceptor';
     MailIntelModule,
     VendorTrustModule,
     CommandCenterModule,
+    AnalyticsModule,
+    AiAgentsModule,
   ],
   providers: [
     {

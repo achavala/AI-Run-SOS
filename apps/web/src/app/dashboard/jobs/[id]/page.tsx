@@ -98,8 +98,10 @@ export default function JobDetailPage() {
         setError(null);
         const data = await api.get<Job>('/jobs/' + id);
         if (!cancelled) {
-          const skills =
-            typeof data.skills === 'string' ? JSON.parse(data.skills) : data.skills ?? [];
+          let skills: string[] = [];
+          try {
+            skills = typeof data.skills === 'string' ? JSON.parse(data.skills) : (Array.isArray(data.skills) ? data.skills : []);
+          } catch { skills = []; }
           setJob({ ...data, skills });
         }
       } catch (err: unknown) {

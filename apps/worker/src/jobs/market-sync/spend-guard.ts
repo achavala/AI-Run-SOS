@@ -123,7 +123,7 @@ export async function checkWeeklyBudget(
 
 function getDefaultMaxRequests(provider: string): number {
   switch (provider) {
-    case 'JSEARCH': return 50;
+    case 'JSEARCH': return 1600; // $75 Ultra plan = 50K/mo ≈ 1,666/day
     case 'ADZUNA': return 80;
     case 'JOOBLE': return 100;
     case 'CAREERJET': return 100;

@@ -91,9 +91,9 @@ export default function CommandCenterPage() {
     return <div className="p-8 text-gray-400">Failed to load autopilot plan</div>;
   }
 
-  const morning = plan.morning;
-  const midday = plan.midday;
-  const evening = plan.evening;
+  const morning = plan.morning || {};
+  const midday = plan.midday || {};
+  const evening = plan.evening || {};
 
   return (
     <div className="space-y-6 p-6">
@@ -293,7 +293,7 @@ export default function CommandCenterPage() {
                       <div key={s.id} className="flex items-center justify-between rounded-lg border border-red-100 bg-red-50 p-3">
                         <div>
                           <p className="text-sm font-medium text-gray-900">Submission {s.id.slice(0, 8)}</p>
-                          <p className="text-xs text-red-600">Stuck for {Math.round(s.stuckHours)}h</p>
+                          <p className="text-xs text-red-600">Stuck for {Math.round(s.stuckHours || 0)}h</p>
                         </div>
                         <button className="rounded bg-red-100 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-200">
                           Escalate
@@ -307,7 +307,7 @@ export default function CommandCenterPage() {
           </div>
 
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-6">
-            <p className="text-sm text-amber-800">{midday.message}</p>
+            <p className="text-sm text-amber-800">{midday.message || 'Review midday progress and follow up on pending items.'}</p>
           </div>
         </div>
       )}
@@ -318,14 +318,14 @@ export default function CommandCenterPage() {
           {/* Today's Activity */}
           <div className="grid grid-cols-4 gap-4">
             {[
-              { label: 'Submissions Sent', value: evening.todayActivity?.submissionsSent || 0, color: 'indigo' },
-              { label: 'Responses', value: evening.todayActivity?.responsesReceived || 0, color: 'green' },
-              { label: 'Interviews', value: evening.todayActivity?.interviewsScheduled || 0, color: 'purple' },
-              { label: 'Closure Prob.', value: `${evening.closureProbability || 0}%`, color: 'amber' },
+              { label: 'Submissions Sent', value: evening?.todayActivity?.submissionsSent || 0, cls: 'text-indigo-600' },
+              { label: 'Responses', value: evening?.todayActivity?.responsesReceived || 0, cls: 'text-green-600' },
+              { label: 'Interviews', value: evening?.todayActivity?.interviewsScheduled || 0, cls: 'text-purple-600' },
+              { label: 'Closure Prob.', value: `${evening?.closureProbability || 0}%`, cls: 'text-amber-600' },
             ].map((stat) => (
               <div key={stat.label} className="rounded-xl border border-gray-200 bg-white p-5">
                 <p className="text-sm text-gray-500">{stat.label}</p>
-                <p className={`mt-1 text-2xl font-bold text-${stat.color}-600`}>{stat.value}</p>
+                <p className={`mt-1 text-2xl font-bold ${stat.cls}`}>{stat.value}</p>
               </div>
             ))}
           </div>
@@ -384,7 +384,7 @@ export default function CommandCenterPage() {
           </div>
 
           <div className="rounded-xl border border-rose-200 bg-rose-50 p-6">
-            <p className="text-sm text-rose-800">{evening.message}</p>
+            <p className="text-sm text-rose-800">{evening.message || 'End-of-day summary — review progress and plan tomorrow.'}</p>
           </div>
         </div>
       )}

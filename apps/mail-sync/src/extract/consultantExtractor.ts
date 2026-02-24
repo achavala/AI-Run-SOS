@@ -89,15 +89,19 @@ function guessName(fromName: string | null, subject: string): string | null {
   return null;
 }
 
-export async function extractConsultants(pool: Pool): Promise<void> {
-  console.log("\n=== Consultant Extraction ===\n");
+export async function extractConsultants(pool: Pool, incrementalOnly = false): Promise<void> {
+  console.log(`\n=== Consultant Extraction${incrementalOnly ? ' (incremental)' : ''} ===\n`);
 
   const client = await pool.connect();
   try {
+    const whereClause = incrementalOnly
+      ? "WHERE from_email IS NOT NULL AND created_at >= NOW() - interval '2 hours'"
+      : "WHERE from_email IS NOT NULL";
+
     const result = await client.query(`
       SELECT id, from_email, from_name, subject, body_preview, sent_at
       FROM raw_email_message
-      WHERE from_email IS NOT NULL
+      ${whereClause}
       ORDER BY sent_at DESC
     `);
 

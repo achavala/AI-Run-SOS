@@ -22,6 +22,11 @@ import {
   EnvelopeIcon,
   CircleStackIcon,
   InboxStackIcon,
+  SparklesIcon,
+  PresentationChartBarIcon,
+  QueueListIcon,
+  FireIcon,
+  SignalIcon,
 } from '@heroicons/react/24/outline';
 import { useAuthStore, type UserRole } from '@/lib/auth';
 
@@ -34,6 +39,11 @@ interface NavItem {
 const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
   MANAGEMENT: [
     { name: 'Command Center', href: '/dashboard/command-center', icon: HomeIcon },
+    { name: 'Closure Engine', href: '/dashboard/closure-engine', icon: FireIcon },
+    { name: 'Work Queue', href: '/dashboard/work-queue', icon: QueueListIcon },
+    { name: 'AI Agents', href: '/dashboard/ai-agents', icon: SparklesIcon },
+    { name: 'Recruiter Analytics', href: '/dashboard/recruiter-analytics', icon: PresentationChartBarIcon },
+    { name: 'Live Feed', href: '/dashboard/live-feed', icon: SignalIcon },
     { name: 'Jobs', href: '/dashboard/jobs', icon: BriefcaseIcon },
     { name: 'Vendor Reqs', href: '/dashboard/vendor-reqs', icon: EnvelopeIcon },
     { name: 'Market Jobs', href: '/dashboard/market-jobs', icon: GlobeAltIcon },
@@ -48,6 +58,11 @@ const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
   ],
   SUPERADMIN: [
     { name: 'Command Center', href: '/dashboard/command-center', icon: HomeIcon },
+    { name: 'Closure Engine', href: '/dashboard/closure-engine', icon: FireIcon },
+    { name: 'Work Queue', href: '/dashboard/work-queue', icon: QueueListIcon },
+    { name: 'AI Agents', href: '/dashboard/ai-agents', icon: SparklesIcon },
+    { name: 'Recruiter Analytics', href: '/dashboard/recruiter-analytics', icon: PresentationChartBarIcon },
+    { name: 'Live Feed', href: '/dashboard/live-feed', icon: SignalIcon },
     { name: 'Jobs', href: '/dashboard/jobs', icon: BriefcaseIcon },
     { name: 'Vendor Reqs', href: '/dashboard/vendor-reqs', icon: EnvelopeIcon },
     { name: 'Market Jobs', href: '/dashboard/market-jobs', icon: GlobeAltIcon },
@@ -62,6 +77,9 @@ const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
   ],
   RECRUITMENT: [
     { name: 'Dashboard', href: '/dashboard/recruitment', icon: HomeIcon },
+    { name: 'Closure Engine', href: '/dashboard/closure-engine', icon: FireIcon },
+    { name: 'Work Queue', href: '/dashboard/work-queue', icon: QueueListIcon },
+    { name: 'Live Feed', href: '/dashboard/live-feed', icon: SignalIcon },
     { name: 'Jobs', href: '/dashboard/jobs', icon: BriefcaseIcon },
     { name: 'Vendor Reqs', href: '/dashboard/vendor-reqs', icon: EnvelopeIcon },
     { name: 'Market Jobs', href: '/dashboard/market-jobs', icon: GlobeAltIcon },
@@ -72,6 +90,7 @@ const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
   ],
   SALES: [
     { name: 'Dashboard', href: '/dashboard/sales', icon: HomeIcon },
+    { name: 'Live Feed', href: '/dashboard/live-feed', icon: SignalIcon },
     { name: 'Jobs', href: '/dashboard/jobs', icon: BriefcaseIcon },
     { name: 'Vendor Reqs', href: '/dashboard/vendor-reqs', icon: EnvelopeIcon },
     { name: 'Market Jobs', href: '/dashboard/market-jobs', icon: GlobeAltIcon },

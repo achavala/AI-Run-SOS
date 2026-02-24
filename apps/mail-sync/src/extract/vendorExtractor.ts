@@ -26,15 +26,19 @@ function guessCompanyName(domain: string): string {
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
-export async function extractVendors(pool: Pool): Promise<void> {
-  console.log("\n=== Vendor Extraction ===\n");
+export async function extractVendors(pool: Pool, incrementalOnly = false): Promise<void> {
+  console.log(`\n=== Vendor Extraction${incrementalOnly ? ' (incremental)' : ''} ===\n`);
 
   const client = await pool.connect();
   try {
+    const whereClause = incrementalOnly
+      ? "WHERE from_email IS NOT NULL AND from_email != '' AND category IS NOT NULL AND created_at >= NOW() - interval '2 hours'"
+      : "WHERE from_email IS NOT NULL AND from_email != ''";
+
     const result = await client.query(`
       SELECT from_email, from_name, MIN(sent_at) as first_seen, MAX(sent_at) as last_seen, COUNT(*) as cnt
       FROM raw_email_message
-      WHERE from_email IS NOT NULL AND from_email != ''
+      ${whereClause}
       GROUP BY from_email, from_name
       ORDER BY cnt DESC
     `);

@@ -57,9 +57,9 @@ export class JobBoardFetcherService {
   }
 
   private async fetchJSearch(queries: string[]): Promise<{ source: string; fetched: number; stored: number }> {
-    const apiKey = this.config.get<string>('JSEARCH_API_KEY');
+    const apiKey = this.config.get<string>('RAPIDAPI_KEY');
     if (!apiKey) {
-      this.logger.warn('JSEARCH_API_KEY not set, skipping JSearch');
+      this.logger.warn('RAPIDAPI_KEY not set, skipping JSearch');
       return { source: 'JSEARCH', fetched: 0, stored: 0 };
     }
 
@@ -69,8 +69,8 @@ export class JobBoardFetcherService {
         const url = `https://jsearch.p.rapidapi.com/search?query=${encodeURIComponent(query)}&page=1&num_pages=2&country=us&date_posted=today`;
         const res = await fetch(url, {
           headers: {
-            'x-rapidapi-host': 'jsearch.p.rapidapi.com',
-            'x-rapidapi-key': apiKey,
+            'X-RapidAPI-Host': 'jsearch.p.rapidapi.com',
+            'X-RapidAPI-Key': apiKey,
           },
         });
         const data: any = await res.json();

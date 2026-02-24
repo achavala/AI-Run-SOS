@@ -83,7 +83,7 @@ function toRows(invoices: Invoice[]): InvoiceRow[] {
     return {
       id: inv.id,
       invoiceNumber: inv.invoiceNumber,
-      vendor: inv.vendor.companyName,
+      vendor: inv.vendor?.companyName ?? 'Unknown',
       amount: inv.totalAmount,
       dueDate: inv.dueDate,
       createdAt: inv.createdAt,

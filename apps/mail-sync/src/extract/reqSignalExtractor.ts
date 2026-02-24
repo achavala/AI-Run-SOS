@@ -95,25 +95,27 @@ function extractTitle(subject: string, body: string): string | null {
   return null;
 }
 
-export async function extractReqSignals(pool: Pool): Promise<void> {
-  console.log("\n=== Req Signal Extraction ===\n");
+export async function extractReqSignals(pool: Pool, incrementalOnly = false): Promise<void> {
+  console.log(`\n=== Req Signal Extraction${incrementalOnly ? ' (incremental)' : ''} ===\n`);
 
   const client = await pool.connect();
   try {
-    // Pre-load vendor contact lookup
     const contactRows = await client.query("SELECT id, email FROM vendor_contact");
     const contactMap = new Map<string, string>();
     for (const c of contactRows.rows) contactMap.set(c.email.toLowerCase(), c.id);
 
-    // Pre-load vendor company lookup by domain
     const companyRows = await client.query("SELECT id, domain FROM vendor_company");
     const companyMap = new Map<string, string>();
     for (const c of companyRows.rows) companyMap.set(c.domain.toLowerCase(), c.id);
 
+    const whereClause = incrementalOnly
+      ? "WHERE from_email IS NOT NULL AND created_at >= NOW() - interval '2 hours'"
+      : "WHERE from_email IS NOT NULL";
+
     const result = await client.query(`
       SELECT id, from_email, subject, body_preview, sent_at
       FROM raw_email_message
-      WHERE from_email IS NOT NULL
+      ${whereClause}
       ORDER BY sent_at DESC
     `);
 

@@ -10,11 +10,13 @@ function guessCompanyName(domain: string): string {
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
-export async function extractClients(pool: Pool): Promise<void> {
-  console.log("\n=== Client Extraction ===\n");
+export async function extractClients(pool: Pool, incrementalOnly = false): Promise<void> {
+  console.log(`\n=== Client Extraction${incrementalOnly ? ' (incremental)' : ''} ===\n`);
 
   const client = await pool.connect();
   try {
+    const timeFilter = incrementalOnly ? " AND created_at >= NOW() - interval '2 hours'" : "";
+
     const result = await client.query(`
       SELECT from_email, from_name,
              MIN(sent_at) as first_seen, MAX(sent_at) as last_seen,
@@ -22,6 +24,7 @@ export async function extractClients(pool: Pool): Promise<void> {
       FROM raw_email_message
       WHERE category = 'CLIENT'
         AND from_email IS NOT NULL AND from_email != ''
+        ${timeFilter}
       GROUP BY from_email, from_name
       ORDER BY cnt DESC
     `);
