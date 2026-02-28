@@ -10,6 +10,7 @@ import {
   ExclamationTriangleIcon,
   ArrowPathIcon,
   SparklesIcon,
+  ChevronDownIcon,
   ChevronRightIcon,
   ShieldCheckIcon,
   MapPinIcon,
@@ -18,6 +19,10 @@ import {
   UserGroupIcon,
   FireIcon,
   CheckCircleIcon,
+  WrenchScrewdriverIcon,
+  CalendarIcon,
+  GlobeAltIcon,
+  ClipboardDocumentIcon,
 } from '@heroicons/react/24/outline';
 
 function fmtDate(d: string | null) {
@@ -59,6 +64,7 @@ export default function CommandCenterPage() {
   const [topVendors, setTopVendors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState<'morning' | 'midday' | 'evening'>('morning');
+  const [expandedReqId, setExpandedReqId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -158,45 +164,175 @@ export default function CommandCenterPage() {
               </div>
             </div>
             <div className="divide-y divide-gray-50">
-              {(morning.actionableReqs || []).slice(0, 15).map((req: any) => (
-                <div key={req.id} className="flex items-center gap-4 px-6 py-3 hover:bg-gray-50 transition-colors">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-gray-900 truncate">{req.title}</span>
-                      <EmpBadge type={req.employmentType} />
-                      <ScoreBadge score={req.actionabilityScore} label={`${req.actionabilityScore}pts`} />
-                    </div>
-                    <div className="mt-1 flex items-center gap-4 text-xs text-gray-500">
-                      {req.vendorName && (
-                        <span className="flex items-center gap-1">
-                          <ShieldCheckIcon className="h-3 w-3" />
-                          {req.vendorName}
-                          {req.vendorTier && <TierBadge tier={req.vendorTier} />}
-                        </span>
-                      )}
-                      {req.location && (
-                        <span className="flex items-center gap-1">
-                          <MapPinIcon className="h-3 w-3" />
-                          {req.location}
-                        </span>
-                      )}
-                      {req.rateText && (
-                        <span className="flex items-center gap-1">
-                          <CurrencyDollarIcon className="h-3 w-3" />
-                          {req.rateText}
-                        </span>
-                      )}
-                      {req.contactEmail && (
-                        <span className="flex items-center gap-1">
-                          <EnvelopeIcon className="h-3 w-3" />
-                          {req.contactEmail}
-                        </span>
-                      )}
-                    </div>
+              {(morning.actionableReqs || []).slice(0, 50).map((req: any) => {
+                const isOpen = expandedReqId === req.id;
+                return (
+                  <div key={req.id}>
+                    <button
+                      type="button"
+                      onClick={() => setExpandedReqId(isOpen ? null : req.id)}
+                      className="flex w-full items-center gap-4 px-6 py-3 text-left hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-gray-900 truncate">{req.title}</span>
+                          <EmpBadge type={req.employmentType} />
+                          <ScoreBadge score={req.actionabilityScore} label={`${req.actionabilityScore}pts`} />
+                          {req.source === 'JSEARCH' && (
+                            <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700">JSEARCH</span>
+                          )}
+                          {req.source === 'CORPTOCORP' && (
+                            <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-semibold text-purple-700">C2C BOARD</span>
+                          )}
+                          {req.source === 'EMAIL' && (
+                            <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600">EMAIL</span>
+                          )}
+                        </div>
+                        <div className="mt-1 flex items-center gap-4 text-xs text-gray-500">
+                          {req.vendorName && (
+                            <span className="flex items-center gap-1">
+                              <ShieldCheckIcon className="h-3 w-3" />
+                              {req.vendorName}
+                              {req.vendorTier && <TierBadge tier={req.vendorTier} />}
+                            </span>
+                          )}
+                          {req.location && (
+                            <span className="flex items-center gap-1">
+                              <MapPinIcon className="h-3 w-3" />
+                              {req.location}
+                            </span>
+                          )}
+                          {req.rateText && (
+                            <span className="flex items-center gap-1">
+                              <CurrencyDollarIcon className="h-3 w-3" />
+                              {req.rateText}
+                            </span>
+                          )}
+                          {req.contactEmail && (
+                            <span className="flex items-center gap-1">
+                              <EnvelopeIcon className="h-3 w-3" />
+                              {req.contactEmail}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {isOpen
+                        ? <ChevronDownIcon className="h-4 w-4 shrink-0 text-indigo-500" />
+                        : <ChevronRightIcon className="h-4 w-4 shrink-0 text-gray-400" />}
+                    </button>
+
+                    {isOpen && (
+                      <div className="border-t border-gray-100 bg-gray-50/60 px-6 py-4 text-sm animate-in fade-in slide-in-from-top-1 duration-150">
+                        <div className="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-4">
+                          <div>
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Title</p>
+                            <p className="mt-0.5 font-medium text-gray-900">{req.title || '—'}</p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Employment</p>
+                            <p className="mt-0.5">{req.employmentType || '—'}</p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Location</p>
+                            <p className="mt-0.5 flex items-center gap-1 text-gray-700">
+                              <MapPinIcon className="h-3.5 w-3.5 text-gray-400" />
+                              {req.location || '—'}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Rate</p>
+                            <p className="mt-0.5 flex items-center gap-1 text-gray-700">
+                              <CurrencyDollarIcon className="h-3.5 w-3.5 text-gray-400" />
+                              {req.rateText || '—'}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Vendor</p>
+                            <p className="mt-0.5 flex items-center gap-1 text-gray-700">
+                              <ShieldCheckIcon className="h-3.5 w-3.5 text-gray-400" />
+                              {req.vendorName || '—'}
+                              {req.vendorTier && <TierBadge tier={req.vendorTier} />}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Vendor Domain</p>
+                            <p className="mt-0.5 flex items-center gap-1 text-gray-700">
+                              <GlobeAltIcon className="h-3.5 w-3.5 text-gray-400" />
+                              {req.vendorDomain || '—'}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Vendor Trust</p>
+                            <p className="mt-0.5">
+                              {req.vendorTrustScore != null
+                                ? <ScoreBadge score={req.vendorTrustScore} label={`${req.vendorTrustScore} / 100`} />
+                                : '—'}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Score</p>
+                            <p className="mt-0.5">
+                              <ScoreBadge score={req.actionabilityScore} label={`${req.actionabilityScore} pts`} />
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Contact Name</p>
+                            <p className="mt-0.5 text-gray-700">{req.contactName || '—'}</p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                              {req.source === 'JSEARCH' || req.source === 'CORPTOCORP' ? 'Job Link' : 'Contact Email'}
+                            </p>
+                            {req.contactEmail ? (
+                              <a
+                                href={req.contactEmail.startsWith('http') ? req.contactEmail : `mailto:${req.contactEmail}`}
+                                target={req.contactEmail.startsWith('http') ? '_blank' : undefined}
+                                rel={req.contactEmail.startsWith('http') ? 'noopener noreferrer' : undefined}
+                                className="mt-0.5 flex items-center gap-1 text-indigo-600 hover:underline truncate"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <EnvelopeIcon className="h-3.5 w-3.5 shrink-0" />
+                                {req.contactEmail.startsWith('http') ? 'View Job Posting' : req.contactEmail}
+                              </a>
+                            ) : (
+                              <p className="mt-0.5 text-gray-700">—</p>
+                            )}
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Received</p>
+                            <p className="mt-0.5 flex items-center gap-1 text-gray-700">
+                              <CalendarIcon className="h-3.5 w-3.5 text-gray-400" />
+                              {fmtDate(req.createdAt)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Actionability</p>
+                            <p className="mt-0.5">{req.vendorTier || '—'}</p>
+                          </div>
+                        </div>
+
+                        {req.skills && req.skills.length > 0 && (
+                          <div className="mt-3 border-t border-gray-200 pt-3">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400 mb-1.5 flex items-center gap-1">
+                              <WrenchScrewdriverIcon className="h-3.5 w-3.5" />
+                              Skills
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {req.skills.map((s: string, i: number) => (
+                                <span key={i} className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-medium text-indigo-700">
+                                  {s}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <ChevronRightIcon className="h-4 w-4 text-gray-400" />
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 

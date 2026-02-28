@@ -1,15 +1,34 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+interface CacheEntry { data: any; expiresAt: number; }
+
 @Injectable()
 export class AnalyticsService {
   private readonly logger = new Logger(AnalyticsService.name);
+  private cache = new Map<string, CacheEntry>();
 
   constructor(private prisma: PrismaService) {}
+
+  private getCached<T>(key: string): T | null {
+    const entry = this.cache.get(key);
+    if (!entry || Date.now() > entry.expiresAt) {
+      this.cache.delete(key);
+      return null;
+    }
+    return entry.data as T;
+  }
+
+  private setCache(key: string, data: any, ttlMs = 120_000) {
+    this.cache.set(key, { data, expiresAt: Date.now() + ttlMs });
+  }
 
   /* ═══════ 1. Recruiter Email Activity ═══════ */
 
   async getRecruiterActivity() {
+    const cached = this.getCached('recruiterActivity');
+    if (cached) return cached;
+
     const recruiters = await this.prisma.$queryRaw`
       SELECT
         mailbox_email as "email",
@@ -52,12 +71,16 @@ export class AnalyticsService {
       ORDER BY day DESC, total DESC
     ` as any[];
 
-    return { recruiters, dailyActivity };
+    const result = { recruiters, dailyActivity };
+    this.setCache('recruiterActivity', result, 300_000);
+    return result;
   }
 
   /* ═══════ 2. Email Pipeline Tracker (openings → submitted → replies → interviews) ═══════ */
 
   async getEmailPipeline() {
+    const cached = this.getCached('emailPipeline');
+    if (cached) return cached;
     const pipeline = await this.prisma.$queryRaw`
       SELECT
         mailbox_email as "email",
@@ -126,12 +149,16 @@ export class AnalyticsService {
       ORDER BY "week" DESC, "openings" DESC
     ` as any[];
 
-    return { pipeline, weeklyTrend };
+    const pipelineResult = { pipeline, weeklyTrend };
+    this.setCache('emailPipeline', pipelineResult, 300_000);
+    return pipelineResult;
   }
 
   /* ═══════ 3. ML Email Quality Scoring ═══════ */
 
   async getEmailQualityAnalysis() {
+    const cached = this.getCached('emailQuality');
+    if (cached) return cached;
     const qualityBreakdown = await this.prisma.$queryRaw`
       WITH scored AS (
         SELECT
@@ -198,12 +225,16 @@ export class AnalyticsService {
 
     const qualityStrategy = this.generateQualityStrategy(qualityBreakdown, junkPatterns);
 
-    return { qualityBreakdown, junkPatterns, qualityStrategy };
+    const qualityResult = { qualityBreakdown, junkPatterns, qualityStrategy };
+    this.setCache('emailQuality', qualityResult, 300_000);
+    return qualityResult;
   }
 
   /* ═══════ 4. Recruiter Efficiency Table (validated metrics) ═══════ */
 
   async getRecruiterEfficiencyTable() {
+    const cached = this.getCached('recruiterEfficiency');
+    if (cached) return cached;
     const daily = await this.prisma.$queryRaw`
       SELECT
         mailbox_email as "email",
@@ -266,7 +297,9 @@ export class AnalyticsService {
       ORDER BY "totalVerifiedSubmissions" DESC
     ` as any[];
 
-    return { daily, allTime };
+    const effResult = { daily, allTime };
+    this.setCache('recruiterEfficiency', effResult, 300_000);
+    return effResult;
   }
 
   /* ═══════ 5. Top 30 Actionable Queue (Enforced Work Surface) ═══════ */
@@ -540,6 +573,9 @@ export class AnalyticsService {
   /* ═══════ 8. RECRUITER WORKLOAD OPTIMIZATION ═══════ */
 
   async getRecruiterWorkload() {
+    const cached = this.getCached('recruiterWorkload');
+    if (cached) return cached;
+
     const workload = await this.prisma.$queryRaw`
       SELECT
         m.email as "recruiterEmail",
@@ -563,7 +599,9 @@ export class AnalyticsService {
       ORDER BY "remainingCapacity" DESC
     ` as any[];
 
-    return { workload, maxQueueSize: 30, date: new Date().toISOString().split('T')[0] };
+    const wlResult = { workload, maxQueueSize: 30, date: new Date().toISOString().split('T')[0] };
+    this.setCache('recruiterWorkload', wlResult, 120_000);
+    return wlResult;
   }
 
   async autoAssignQueue() {
@@ -662,6 +700,9 @@ export class AnalyticsService {
   /* ═══════ 9. VENDOR CONVERSION FEEDBACK LOOPS ═══════ */
 
   async getVendorFeedbackLoop() {
+    const cached = this.getCached('vendorFeedback');
+    if (cached) return cached;
+
     const feedbackByVendor = await this.prisma.$queryRaw`
       WITH sub_events AS (
         SELECT
@@ -751,12 +792,17 @@ export class AnalyticsService {
       FROM raw_email_message
     ` as any[];
 
-    return { vendors: feedbackByVendor, summary: summary[0] || {} };
+    const fbResult = { vendors: feedbackByVendor, summary: summary[0] || {} };
+    this.setCache('vendorFeedback', fbResult, 300_000);
+    return fbResult;
   }
 
   /* ═══════ 10. BENCH READINESS AUTOMATION ═══════ */
 
   async computeBenchReadiness() {
+    const cached = this.getCached('benchReadiness');
+    if (cached) return cached;
+
     const consultants = await this.prisma.$queryRaw`
       SELECT
         c.id,
@@ -908,7 +954,9 @@ export class AnalyticsService {
       total: scored.length,
     };
 
-    return { consultants: scored, summary: tierSummary };
+    const brResult = { consultants: scored, summary: tierSummary };
+    this.setCache('benchReadiness', brResult, 300_000);
+    return brResult;
   }
 
   private generateQualityStrategy(breakdown: any[], junkPatterns: any[]): string[] {
@@ -1235,6 +1283,9 @@ export class AnalyticsService {
   /* ═══════ 15. VENDOR WHITELIST / BLACKLIST ═══════ */
 
   async computeVendorWhitelistBlacklist() {
+    const cached = this.getCached('vendorReputation');
+    if (cached) return cached;
+
     const summary = await this.prisma.$queryRaw`
       SELECT list_status as "status", COUNT(*)::int as "count"
       FROM vendor_reputation GROUP BY 1 ORDER BY 2 DESC
@@ -1259,12 +1310,16 @@ export class AnalyticsService {
       SELECT COUNT(*)::int as "total" FROM vendor_reputation
     ` as any[];
 
-    return { total: total[0]?.total || 0, summary, topWhitelist, topBlacklist };
+    const repResult = { total: total[0]?.total || 0, summary, topWhitelist, topBlacklist };
+    this.setCache('vendorReputation', repResult, 300_000);
+    return repResult;
   }
 
   /* ═══════ 16. RATE INTELLIGENCE ═══════ */
 
   async buildRateIntelligence() {
+    const cached = this.getCached('rateIntelligence');
+    if (cached) return cached;
     await this.prisma.$executeRaw`
       CREATE TABLE IF NOT EXISTS rate_intelligence (
         id SERIAL PRIMARY KEY,
@@ -1338,7 +1393,9 @@ export class AnalyticsService {
       FROM rate_intelligence ORDER BY sample_count DESC LIMIT 30
     ` as any[];
 
-    return { totalRateCards: inserted, topRates };
+    const rateResult = { totalRateCards: inserted, topRates };
+    this.setCache('rateIntelligence', rateResult, 300_000);
+    return rateResult;
   }
 
   /* ═══════ 17. SKILL POD ASSIGNMENT ═══════ */
@@ -1470,6 +1527,9 @@ export class AnalyticsService {
   /* ═══════ 18. CLOSURE MODEL TRAINING ═══════ */
 
   async trainClosureModel() {
+    const cached = this.getCached('closureModel');
+    if (cached) return cached;
+
     await this.prisma.$executeRaw`
       CREATE TABLE IF NOT EXISTS closure_model_weights (
         id SERIAL PRIMARY KEY,
@@ -1575,13 +1635,15 @@ export class AnalyticsService {
       `;
     }
 
-    return {
+    const modelResult = {
       modelType: 'data-driven',
       samples: corr.samples,
       correlations: corr,
       weights: normalizedWeights,
       submissionStats: stats,
     };
+    this.setCache('closureModel', modelResult, 600_000);
+    return modelResult;
   }
 
   /* ═══════ 19. SUBMISSION TEMPLATE A/B TESTING ═══════ */
@@ -1634,6 +1696,10 @@ export class AnalyticsService {
   /* ═══════ 20. LIVE JOB FEED — Last 24h C2C/W2/Contract ═══════ */
 
   async getLiveJobFeed(hours = 24, limit = 500, offset = 0) {
+    const cacheKey = `liveFeed:${hours}:${limit}:${offset}`;
+    const cached = this.getCached(cacheKey);
+    if (cached) return cached;
+
     const cutoff = new Date(Date.now() - hours * 3600 * 1000);
 
     const feed = await this.prisma.$queryRaw`
@@ -1664,7 +1730,7 @@ export class AnalyticsService {
       WHERE rem.sent_at >= ${cutoff}
         AND vrs.employment_type IN ('C2C', 'W2', 'CONTRACT', 'C2H')
         AND vrs.title IS NOT NULL AND vrs.title != ''
-        AND vrs.actionability_score >= 30
+        AND COALESCE(vrs.actionability_score, 50) >= 30
       ORDER BY vrs.title, rem.mailbox_email, rem.sent_at DESC
     ` as any[];
 
@@ -1695,7 +1761,8 @@ export class AnalyticsService {
         COALESCE("sourceUrl", '') as "sourceUrl"
       FROM "MarketJob"
       WHERE "discoveredAt" >= ${cutoff}
-        AND "employmentType"::text IN ('C2C', 'W2', 'CONTRACT', 'C2H', 'CONTRACTOR')
+        AND "employmentType"::text IN ('C2C', 'W2', 'CONTRACT', 'C2H', 'CONTRACTOR', 'FULLTIME', 'UNKNOWN')
+        AND COALESCE(("rawPayload"->>'isHighPaid')::boolean, false) = false
         AND (
           location ~ ', [A-Z]{2}$'
           OR location ~* ', USA'
@@ -1704,10 +1771,10 @@ export class AnalyticsService {
           OR location ~* 'Remote'
           OR location ~* ', US$'
           OR location IS NULL
-          OR source::text IN ('CORPTOCORP', 'JSEARCH', 'DICE')
+          OR source::text IN ('CORPTOCORP', 'JSEARCH', 'DICE', 'ARBEITNOW')
         )
       ORDER BY "discoveredAt" DESC
-      LIMIT 200
+      LIMIT 500
     ` as any[];
 
     const combined = [...paginatedFeed, ...marketJobs]
@@ -1734,12 +1801,589 @@ export class AnalyticsService {
       { source: 'Other', count: marketJobs.filter((j: any) => !['JSEARCH','DICE','ARBEITNOW','REMOTEOK'].includes(j.source)).length },
     ].filter(s => s.count > 0);
 
-    return {
+    const liveFeedResult = {
       jobs: combined,
       total: combined.length,
       stats,
       sourceBreakdown,
       generatedAt: new Date().toISOString(),
     };
+    this.setCache(cacheKey, liveFeedResult, 120_000);
+    return liveFeedResult;
+  }
+
+  /* ═══════ High-Paid FAANG/Tech Feed ═══════ */
+
+  private static readonly FAANG_COMPANIES = [
+    'Google', 'Apple', 'Amazon', 'Meta', 'Netflix', 'Microsoft', 'Nvidia',
+    'Stripe', 'Airbnb', 'Databricks', 'Snowflake', 'Palantir', 'Cloudflare',
+    'Pinterest', 'DoorDash', 'Coinbase', 'Robinhood', 'Figma', 'Discord',
+    'Reddit', 'Block (Square)', 'Twilio', 'Datadog', 'MongoDB', 'CrowdStrike',
+    'ServiceNow', 'Roblox', 'Notion', 'Plaid', 'OpenAI', 'Anthropic',
+    'Scale AI', 'Salesforce', 'Oracle', 'Adobe', 'Intel', 'AMD',
+    'Uber', 'Lyft', 'Shopify', 'Atlassian', 'Spotify', 'Tesla',
+    'Cisco', 'VMware', 'Qualcomm', 'Broadcom', 'Palo Alto Networks',
+    'HashiCorp', 'Elastic', 'Cockroach Labs', 'Airtable', 'Instacart',
+    'NerdWallet', 'Gusto', 'Rippling', 'Brex', 'Duolingo', 'Anduril',
+  ];
+
+  private static readonly BASE_CONTEXT_RE = /\b(base\s+(?:salary|pay|compensation)|salary\s+range|annual\s+(?:base|salary)|base\s+range|base\s+pay\s+range)\b/i;
+  private static readonly TOTAL_CONTEXT_RE = /\b(total\s+(?:comp|compensation)|on[- ]?target\s+earn|ote|total\s+annual|overall\s+comp|expected\s+annual\s+comp)\b/i;
+  private static readonly DOLLAR_RANGE_RE = /\$\s*([\d,]+)\s*(?:[-–—to]+\s*\$?\s*([\d,]+))?/g;
+  private static readonly ELITE_TITLE_RE = /\b(staff|principal|distinguished|director|vp|vice president|head of|chief|fellow)\b/i;
+
+  async getHighPaidFeed(minSalary = 200_000, limit = 300) {
+    const cacheKey = `highPaid:${minSalary}:${limit}`;
+    const cached = this.getCached(cacheKey);
+    if (cached) return cached;
+
+    const minHourly = Math.round(minSalary / 2080);
+
+    const JOB_COLUMNS = `
+      id::text as id, title, company, location,
+      "rateText", "employmentType"::text as "employmentType",
+      skills, "actionabilityScore", "realnessScore",
+      "discoveredAt" as "postedAt",
+      source::text as source,
+      COALESCE("applyUrl", '') as "applyUrl",
+      COALESCE("sourceUrl", '') as "sourceUrl",
+      COALESCE("recruiterName", '') as "recruiterName",
+      COALESCE("recruiterEmail", '') as "recruiterEmail",
+      COALESCE("companyDomain", '') as "companyDomain",
+      "rateMin", "rateMax", "hourlyRateMin", "hourlyRateMax",
+      "compPeriod"::text as "compPeriod",
+      "rawPayload", "locationType"::text as "locationType"
+    `;
+
+    // Query 1: Jobs with explicit annual salary >= $200K base
+    const annualJobs = await this.prisma.$queryRaw`
+      SELECT
+        id::text as id, title, company, location,
+        "rateText", "employmentType"::text as "employmentType",
+        skills, "actionabilityScore", "realnessScore",
+        "discoveredAt" as "postedAt",
+        source::text as source,
+        COALESCE("applyUrl", '') as "applyUrl",
+        COALESCE("sourceUrl", '') as "sourceUrl",
+        COALESCE("recruiterName", '') as "recruiterName",
+        COALESCE("recruiterEmail", '') as "recruiterEmail",
+        COALESCE("companyDomain", '') as "companyDomain",
+        "rateMin", "rateMax", "hourlyRateMin", "hourlyRateMax",
+        "compPeriod"::text as "compPeriod",
+        "rawPayload", "locationType"::text as "locationType"
+      FROM "MarketJob"
+      WHERE status = 'ACTIVE'
+        AND (
+          ("compPeriod"::text = 'YEAR' AND COALESCE("rateMax", "rateMin", 0) >= ${minSalary})
+          OR ("compPeriod"::text = 'HOUR' AND COALESCE("hourlyRateMax", "hourlyRateMin", 0) >= ${minHourly})
+          OR ("rateMax" >= ${minSalary} AND "compPeriod"::text != 'HOUR')
+        )
+      ORDER BY COALESCE("rateMax", "rateMin", 0) DESC, "discoveredAt" DESC
+      LIMIT ${limit}
+    ` as any[];
+
+    // Query 2: Jobs from curated FAANG/tech (marked by provider)
+    const faangJobs = await this.prisma.$queryRaw`
+      SELECT
+        id::text as id, title, company, location,
+        "rateText", "employmentType"::text as "employmentType",
+        skills, "actionabilityScore", "realnessScore",
+        "discoveredAt" as "postedAt",
+        source::text as source,
+        COALESCE("applyUrl", '') as "applyUrl",
+        COALESCE("sourceUrl", '') as "sourceUrl",
+        COALESCE("recruiterName", '') as "recruiterName",
+        COALESCE("recruiterEmail", '') as "recruiterEmail",
+        COALESCE("companyDomain", '') as "companyDomain",
+        "rateMin", "rateMax", "hourlyRateMin", "hourlyRateMax",
+        "compPeriod"::text as "compPeriod",
+        "rawPayload", "locationType"::text as "locationType"
+      FROM "MarketJob"
+      WHERE status = 'ACTIVE'
+        AND COALESCE(("rawPayload"->>'isHighPaid')::boolean, false) = true
+        AND title ~* '(senior|staff|principal|distinguished|director|vp|head|chief|fellow|architect|lead|manager)'
+      ORDER BY COALESCE("rateMax", "rateMin", 0) DESC, "discoveredAt" DESC
+      LIMIT ${limit}
+    ` as any[];
+
+    const seen = new Set<string>();
+    const merged: any[] = [];
+    for (const job of [...annualJobs, ...faangJobs]) {
+      if (seen.has(job.id)) continue;
+      seen.add(job.id);
+
+      const payload = typeof job.rawPayload === 'string' ? JSON.parse(job.rawPayload) : job.rawPayload;
+      const compIntel = payload?.compIntel;
+
+      // Use compIntel from provider if available, else fallback to raw rates
+      const baseMin = compIntel?.baseMin ?? this.toAnnual(job.rateMin, job.hourlyRateMin, job.compPeriod);
+      const baseMax = compIntel?.baseMax ?? this.toAnnual(job.rateMax, job.hourlyRateMax, job.compPeriod);
+      const totalMin = compIntel?.totalMin ?? Math.round(baseMin * 1.4);
+      const totalMax = compIntel?.totalMax ?? Math.round(baseMax * 1.4);
+      const compType: string = compIntel?.compType ?? 'UNSPECIFIED';
+      const hasEquity: boolean = compIntel?.hasEquity ?? false;
+      const opportunityScore: number = payload?.opportunityScore ?? 50;
+
+      const isFaang = this.isFaangCompany(job.company);
+      const tier = this.compTier(baseMax);
+
+      merged.push({
+        ...job,
+        annualMin: baseMin,
+        annualMax: baseMax,
+        baseMin,
+        baseMax,
+        totalMin,
+        totalMax,
+        compType,
+        hasEquity,
+        compDisplay: this.formatCompDetailed(baseMin, baseMax, compType),
+        faangSource: payload?.faangSource ?? job.source,
+        companyTier: payload?.companyTier ?? (isFaang ? 'FAANG' : 'HIGH_GROWTH'),
+        isFaang,
+        tier,
+        opportunityScore,
+        totalCompDisplay: totalMax > baseMax ? `${this.fmtK(totalMin)} – ${this.fmtK(totalMax)} est. total` : null,
+      });
+    }
+
+    // Sort by OpportunityScore first, then base comp
+    merged.sort((a, b) => (b.opportunityScore - a.opportunityScore) || (b.baseMax - a.baseMax));
+
+    // Compensation buckets (based on BASE, not total)
+    const compBuckets = [
+      { label: '$200K–$300K Base', min: 200_000, max: 300_000, count: 0 },
+      { label: '$300K–$400K Base', min: 300_000, max: 400_000, count: 0 },
+      { label: '$400K–$500K Base', min: 400_000, max: 500_000, count: 0 },
+      { label: '$500K+ Base', min: 500_000, max: Infinity, count: 0 },
+    ];
+    for (const job of merged) {
+      const sal = job.baseMax || job.baseMin || 0;
+      for (const bucket of compBuckets) {
+        if (sal >= bucket.min && sal < bucket.max) { bucket.count++; break; }
+      }
+    }
+
+    const companyCounts: Record<string, number> = {};
+    for (const job of merged) {
+      companyCounts[job.company] = (companyCounts[job.company] || 0) + 1;
+    }
+    const topCompanies = Object.entries(companyCounts)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 25)
+      .map(([company, count]) => ({ company, count }));
+
+    const avgOpportunityScore = merged.length > 0
+      ? Math.round(merged.reduce((s, j) => s + j.opportunityScore, 0) / merged.length)
+      : 0;
+
+    const result = {
+      jobs: merged.slice(0, limit),
+      total: merged.length,
+      compBuckets,
+      topCompanies,
+      avgOpportunityScore,
+      compIntelSummary: {
+        baseSalaryRoles: merged.filter((j) => j.compType === 'BASE').length,
+        totalCompRoles: merged.filter((j) => j.compType === 'TOTAL').length,
+        unspecifiedRoles: merged.filter((j) => j.compType === 'UNSPECIFIED').length,
+        withEquity: merged.filter((j) => j.hasEquity).length,
+      },
+      generatedAt: new Date().toISOString(),
+    };
+
+    this.setCache(cacheKey, result, 300_000);
+    return result;
+  }
+
+  private fmtK(n: number): string {
+    if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `$${Math.round(n / 1_000)}K`;
+    return `$${n}`;
+  }
+
+  private formatCompDetailed(baseMin: number, baseMax: number, compType: string): string {
+    if (!baseMin && !baseMax) return 'Comp not disclosed';
+    const label = compType === 'BASE' ? ' base' : compType === 'TOTAL' ? ' est. base' : '';
+    if (baseMin === baseMax || !baseMin) return `${this.fmtK(baseMax || baseMin)}${label}/yr`;
+    return `${this.fmtK(baseMin)} – ${this.fmtK(baseMax)}${label}/yr`;
+  }
+
+  private toAnnual(rate: number | null, hourlyRate: number | null, compPeriod: string | null): number {
+    if (compPeriod === 'YEAR' && rate) return rate;
+    if (compPeriod === 'HOUR' && hourlyRate) return hourlyRate * 2080;
+    if (compPeriod === 'HOUR' && rate) return rate * 2080;
+    if (rate && rate >= 50_000) return rate;
+    if (hourlyRate && hourlyRate >= 50) return hourlyRate * 2080;
+    return rate || 0;
+  }
+
+  private formatComp(min: number, max: number): string {
+    const fmt = (n: number) => {
+      if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+      if (n >= 1_000) return `$${Math.round(n / 1_000)}K`;
+      return `$${n}`;
+    };
+    if (!min && !max) return 'Comp not disclosed';
+    if (min === max || !min) return `${fmt(max || min)}/yr`;
+    return `${fmt(min)} – ${fmt(max)}/yr`;
+  }
+
+  private isFaangCompany(company: string): boolean {
+    const lower = (company || '').toLowerCase();
+    return AnalyticsService.FAANG_COMPANIES.some(
+      (f) => lower.includes(f.toLowerCase()),
+    );
+  }
+
+  private compTier(baseSalary: number): string {
+    if (baseSalary >= 400_000) return 'MEGA';
+    if (baseSalary >= 300_000) return 'ELITE';
+    if (baseSalary >= 250_000) return 'PREMIUM';
+    if (baseSalary >= 200_000) return 'HIGH';
+    return 'STANDARD';
+  }
+
+  /* ═══════ On-Demand FAANG Career Crawl ═══════ */
+
+  private static readonly GREENHOUSE_BOARDS: { slug: string; company: string; tier: string }[] = [
+    { slug: 'meta', company: 'Meta', tier: 'FAANG' },
+    { slug: 'openai', company: 'OpenAI', tier: 'AI_INFRA' },
+    { slug: 'anthropic', company: 'Anthropic', tier: 'AI_INFRA' },
+    { slug: 'databricks', company: 'Databricks', tier: 'AI_INFRA' },
+    { slug: 'snowflakecomputing', company: 'Snowflake', tier: 'AI_INFRA' },
+    { slug: 'scaleai', company: 'Scale AI', tier: 'AI_INFRA' },
+    { slug: 'stripe', company: 'Stripe', tier: 'HIGH_GROWTH' },
+    { slug: 'airbnb', company: 'Airbnb', tier: 'HIGH_GROWTH' },
+    { slug: 'palantirtechnologies', company: 'Palantir', tier: 'HIGH_GROWTH' },
+    { slug: 'cloudflare', company: 'Cloudflare', tier: 'HIGH_GROWTH' },
+    { slug: 'pinterest', company: 'Pinterest', tier: 'HIGH_GROWTH' },
+    { slug: 'doordash', company: 'DoorDash', tier: 'HIGH_GROWTH' },
+    { slug: 'coinbase', company: 'Coinbase', tier: 'HIGH_GROWTH' },
+    { slug: 'robinhood', company: 'Robinhood', tier: 'HIGH_GROWTH' },
+    { slug: 'figma', company: 'Figma', tier: 'HIGH_GROWTH' },
+    { slug: 'discord', company: 'Discord', tier: 'HIGH_GROWTH' },
+    { slug: 'reddit', company: 'Reddit', tier: 'HIGH_GROWTH' },
+    { slug: 'block', company: 'Block (Square)', tier: 'HIGH_GROWTH' },
+    { slug: 'roblox', company: 'Roblox', tier: 'HIGH_GROWTH' },
+    { slug: 'notion', company: 'Notion', tier: 'HIGH_GROWTH' },
+    { slug: 'plaid', company: 'Plaid', tier: 'HIGH_GROWTH' },
+    { slug: 'twilio', company: 'Twilio', tier: 'MEGA_TECH' },
+    { slug: 'datadog', company: 'Datadog', tier: 'MEGA_TECH' },
+    { slug: 'mongodb', company: 'MongoDB', tier: 'MEGA_TECH' },
+    { slug: 'crowdstrike', company: 'CrowdStrike', tier: 'MEGA_TECH' },
+    { slug: 'servicenow', company: 'ServiceNow', tier: 'MEGA_TECH' },
+    { slug: 'paloaltonetworks', company: 'Palo Alto Networks', tier: 'MEGA_TECH' },
+    { slug: 'hashicorp', company: 'HashiCorp', tier: 'MEGA_TECH' },
+    { slug: 'elastic', company: 'Elastic', tier: 'MEGA_TECH' },
+    { slug: 'cockroachlabs', company: 'Cockroach Labs', tier: 'HIGH_GROWTH' },
+    { slug: 'airtable', company: 'Airtable', tier: 'HIGH_GROWTH' },
+    { slug: 'instacart', company: 'Instacart', tier: 'HIGH_GROWTH' },
+    { slug: 'nerdwallet', company: 'NerdWallet', tier: 'HIGH_GROWTH' },
+    { slug: 'gusto', company: 'Gusto', tier: 'HIGH_GROWTH' },
+    { slug: 'rippling', company: 'Rippling', tier: 'HIGH_GROWTH' },
+    { slug: 'brex', company: 'Brex', tier: 'HIGH_GROWTH' },
+    { slug: 'duolingo', company: 'Duolingo', tier: 'HIGH_GROWTH' },
+    { slug: 'anduril', company: 'Anduril', tier: 'HIGH_GROWTH' },
+  ];
+
+  private static readonly LEVER_BOARDS: { slug: string; company: string; tier: string }[] = [
+    { slug: 'netflix', company: 'Netflix', tier: 'FAANG' },
+  ];
+
+  private static readonly SENIOR_RE = /\b(senior|staff|principal|distinguished|director|vp|vice president|head of|chief|fellow|architect|lead|manager|sr\.?)\b/i;
+
+  private parseCompIntel(text: string, title: string): {
+    baseMin: number; baseMax: number;
+    totalMin: number; totalMax: number;
+    compType: 'BASE' | 'TOTAL' | 'UNSPECIFIED';
+    hasEquity: boolean;
+  } | null {
+    if (!text) return null;
+
+    const hasEquity = /\b(rsu|stock|equity|shares|vest|restricted stock)\b/i.test(text);
+    const isElite = AnalyticsService.ELITE_TITLE_RE.test(title);
+
+    const ranges: { low: number; high: number; context: string }[] = [];
+    const matches = [...text.matchAll(AnalyticsService.DOLLAR_RANGE_RE)];
+    for (const m of matches) {
+      const low = parseInt((m[1] ?? '0').replace(/,/g, ''), 10);
+      const high = m[2] ? parseInt(m[2].replace(/,/g, ''), 10) : low;
+      if (low < 80_000 || low > 1_500_000) continue;
+      const idx = m.index ?? 0;
+      const context = text.slice(Math.max(0, idx - 100), idx + (m[0]?.length ?? 0) + 100);
+      ranges.push({ low, high, context });
+    }
+
+    if (ranges.length === 0) return null;
+
+    let compType: 'BASE' | 'TOTAL' | 'UNSPECIFIED' = 'UNSPECIFIED';
+    let best = ranges[0]!;
+    for (const r of ranges) {
+      if (AnalyticsService.BASE_CONTEXT_RE.test(r.context)) { compType = 'BASE'; best = r; break; }
+      if (AnalyticsService.TOTAL_CONTEXT_RE.test(r.context)) { compType = 'TOTAL'; best = r; }
+    }
+    if (compType === 'UNSPECIFIED') {
+      compType = (best.high > 450_000 && hasEquity) ? 'TOTAL' : 'BASE';
+    }
+
+    let baseMin: number, baseMax: number, totalMin: number, totalMax: number;
+    if (compType === 'BASE') {
+      baseMin = best.low; baseMax = best.high;
+      const eqMult = isElite ? 1.6 : 1.35;
+      totalMin = Math.round(baseMin * eqMult); totalMax = Math.round(baseMax * eqMult);
+    } else {
+      totalMin = best.low; totalMax = best.high;
+      const baseFrac = isElite ? 0.50 : 0.60;
+      baseMin = Math.round(totalMin * baseFrac); baseMax = Math.round(totalMax * baseFrac);
+    }
+    baseMax = Math.min(baseMax, 500_000);
+    baseMin = Math.min(baseMin, baseMax);
+
+    return { baseMin, baseMax, totalMin, totalMax, compType, hasEquity };
+  }
+
+  private stripHtml(html: string): string {
+    return html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  async crawlFaangCareers(): Promise<{ inserted: number; updated: number; skipped: number; companies: string[] }> {
+    let inserted = 0, updated = 0, skipped = 0;
+    const companiesCrawled: string[] = [];
+
+    for (const board of AnalyticsService.GREENHOUSE_BOARDS) {
+      try {
+        const count = await this.crawlGreenhouse(board.slug, board.company, board.tier);
+        inserted += count.inserted;
+        updated += count.updated;
+        skipped += count.skipped;
+        if (count.inserted + count.updated > 0) companiesCrawled.push(board.company);
+        await new Promise((r) => setTimeout(r, 400));
+      } catch (err) {
+        this.logger.warn(`Greenhouse ${board.company} failed: ${err}`);
+      }
+    }
+
+    for (const board of AnalyticsService.LEVER_BOARDS) {
+      try {
+        const count = await this.crawlLever(board.slug, board.company, board.tier);
+        inserted += count.inserted;
+        updated += count.updated;
+        skipped += count.skipped;
+        if (count.inserted + count.updated > 0) companiesCrawled.push(board.company);
+        await new Promise((r) => setTimeout(r, 400));
+      } catch (err) {
+        this.logger.warn(`Lever ${board.company} failed: ${err}`);
+      }
+    }
+
+    this.cache.delete('highPaid:200000:300');
+    this.logger.log(`FAANG crawl complete: ${inserted} inserted, ${updated} updated, ${skipped} skipped from ${companiesCrawled.length} companies`);
+    return { inserted, updated, skipped, companies: companiesCrawled };
+  }
+
+  private computeOppScore(baseMax: number, tier: string, isRemote: boolean, hasEquity: boolean, isElite: boolean): number {
+    const compScore = Math.min(100, Math.round(baseMax / 5000));
+    const tierW: Record<string, number> = { FAANG: 1.3, AI_INFRA: 1.25, MEGA_TECH: 1.1, HIGH_GROWTH: 1.0 };
+    const raw = (compScore * (tierW[tier] ?? 1.0)) + (isRemote ? 5 : 0) + (hasEquity ? 5 : 0) + (isElite ? 10 : 0);
+    return Math.min(100, Math.round(raw));
+  }
+
+  private async crawlGreenhouse(slug: string, company: string, tier: string): Promise<{ inserted: number; updated: number; skipped: number }> {
+    const url = `https://boards-api.greenhouse.io/v1/boards/${slug}/jobs?content=true`;
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return { inserted: 0, updated: 0, skipped: 0 };
+
+    const data = await res.json() as { jobs?: any[] };
+    let inserted = 0, updated = 0, skipped = 0;
+
+    for (const job of data.jobs ?? []) {
+      if (!AnalyticsService.SENIOR_RE.test(job.title ?? '')) { skipped++; continue; }
+
+      const desc = job.content ? this.stripHtml(job.content) : '';
+      const comp = this.parseCompIntel(desc, job.title ?? '');
+      const isHighPaid = comp && comp.baseMax >= 200_000;
+      const isElite = AnalyticsService.ELITE_TITLE_RE.test(job.title ?? '');
+
+      const extId = `gh-${slug}-${job.id}`;
+      const existingStale = !isHighPaid && !isElite
+        ? await this.prisma.marketJob.findUnique({
+            where: { source_externalId: { source: 'OTHER', externalId: extId } },
+            select: { id: true },
+          })
+        : null;
+
+      if (!isHighPaid && !isElite && !existingStale) { skipped++; continue; }
+
+      const location = job.location?.name ?? null;
+      const isRemote = /remote/i.test(location ?? '');
+      const oppScore = comp
+        ? this.computeOppScore(comp.baseMax, tier, isRemote, comp.hasEquity, isElite)
+        : isElite ? 65 : 50;
+
+      const result = await this.upsertHighPaidJob({
+        externalId: extId,
+        title: job.title,
+        company,
+        description: desc.slice(0, 5000),
+        location,
+        locationType: isRemote ? 'REMOTE' : 'ONSITE',
+        applyUrl: job.absolute_url,
+        sourceUrl: `https://boards.greenhouse.io/${slug}/jobs/${job.id}`,
+        postedAt: job.updated_at ? new Date(job.updated_at) : new Date(),
+        compIntel: comp,
+        faangSource: 'GREENHOUSE',
+        boardSlug: slug,
+        companyTier: tier,
+        opportunityScore: oppScore,
+      });
+      if (result === 'inserted') inserted++;
+      else if (result === 'updated') updated++;
+    }
+
+    this.logger.log(`Greenhouse ${company}: ${inserted} new, ${updated} updated from ${data.jobs?.length ?? 0} total`);
+    return { inserted, updated, skipped };
+  }
+
+  private async crawlLever(slug: string, company: string, tier: string): Promise<{ inserted: number; updated: number; skipped: number }> {
+    const url = `https://api.lever.co/v0/postings/${slug}?mode=json`;
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return { inserted: 0, updated: 0, skipped: 0 };
+
+    const postings = await res.json() as any[];
+    let inserted = 0, updated = 0, skipped = 0;
+
+    for (const posting of postings) {
+      if (!AnalyticsService.SENIOR_RE.test(posting.text ?? '')) { skipped++; continue; }
+
+      const descParts = [
+        posting.descriptionPlain || this.stripHtml(posting.description || ''),
+        ...(posting.lists ?? []).map((l: any) => this.stripHtml(l.content)),
+      ];
+      const fullDesc = descParts.join(' ').slice(0, 5000);
+      const comp = this.parseCompIntel(fullDesc, posting.text ?? '');
+      const isHighPaid = comp && comp.baseMax >= 200_000;
+      const isElite = AnalyticsService.ELITE_TITLE_RE.test(posting.text ?? '');
+
+      const extId = `lv-${slug}-${posting.id}`;
+      const existingStale = !isHighPaid && !isElite
+        ? await this.prisma.marketJob.findUnique({
+            where: { source_externalId: { source: 'OTHER', externalId: extId } },
+            select: { id: true },
+          })
+        : null;
+
+      if (!isHighPaid && !isElite && !existingStale) { skipped++; continue; }
+
+      const location = posting.categories?.location ?? null;
+      const isRemote = /remote/i.test(location ?? '');
+      const oppScore = comp
+        ? this.computeOppScore(comp.baseMax, tier, isRemote, comp.hasEquity, isElite)
+        : isElite ? 65 : 50;
+
+      const result = await this.upsertHighPaidJob({
+        externalId: extId,
+        title: posting.text,
+        company,
+        description: fullDesc,
+        location,
+        locationType: isRemote ? 'REMOTE' : 'ONSITE',
+        applyUrl: posting.hostedUrl,
+        sourceUrl: posting.hostedUrl,
+        postedAt: posting.createdAt ? new Date(posting.createdAt) : new Date(),
+        compIntel: comp,
+        faangSource: 'LEVER',
+        boardSlug: slug,
+        companyTier: tier,
+        opportunityScore: oppScore,
+      });
+      if (result === 'inserted') inserted++;
+      else if (result === 'updated') updated++;
+    }
+
+    this.logger.log(`Lever ${company}: ${inserted} new, ${updated} updated from ${postings.length} total`);
+    return { inserted, updated, skipped };
+  }
+
+  private async upsertHighPaidJob(job: {
+    externalId: string; title: string; company: string; description: string;
+    location: string | null; locationType: string; applyUrl?: string; sourceUrl?: string;
+    postedAt: Date;
+    compIntel: { baseMin: number; baseMax: number; totalMin: number; totalMax: number; compType: string; hasEquity: boolean } | null;
+    faangSource: string; boardSlug: string; companyTier: string; opportunityScore: number;
+  }): Promise<'inserted' | 'updated' | 'skipped'> {
+    const existing = await this.prisma.marketJob.findUnique({
+      where: { source_externalId: { source: 'OTHER', externalId: job.externalId } },
+      select: { id: true },
+    });
+
+    const baseMin = job.compIntel?.baseMin ?? null;
+    const baseMax = job.compIntel?.baseMax ?? null;
+    const hourlyMin = baseMin ? Math.round(baseMin / 2080) : null;
+    const hourlyMax = baseMax ? Math.round(baseMax / 2080) : null;
+
+    const rateText = baseMin && baseMax
+      ? `$${Math.round(baseMin / 1000)}K – $${Math.round(baseMax / 1000)}K base/yr`
+      : baseMax ? `$${Math.round(baseMax / 1000)}K base/yr` : null;
+
+    const jobData = {
+      title: job.title,
+      company: job.company,
+      description: job.description,
+      location: job.location,
+      locationType: job.locationType as any,
+      employmentType: 'FULLTIME' as any,
+      classificationConfidence: 0.95,
+      negativeSignals: [],
+      rateText,
+      rateMin: baseMin,
+      rateMax: baseMax,
+      compPeriod: 'YEAR' as any,
+      hourlyRateMin: hourlyMin,
+      hourlyRateMax: hourlyMax,
+      skills: [],
+      applyUrl: job.applyUrl,
+      sourceUrl: job.sourceUrl,
+      postedAt: job.postedAt,
+      sourcePostedAt: job.postedAt,
+      lastSeenAt: new Date(),
+      status: 'ACTIVE' as any,
+      realnessScore: 95,
+      realnessReasons: ['Direct from company career page'],
+      actionabilityScore: baseMax && baseMax >= 200_000 ? 90 : 70,
+      actionabilityReasons: ['FAANG/Top Tech', 'Direct career page'],
+      rawPayload: {
+        faangSource: job.faangSource,
+        boardSlug: job.boardSlug,
+        companyTier: job.companyTier,
+        isHighPaid: true,
+        compIntel: job.compIntel ? {
+          baseMin: job.compIntel.baseMin, baseMax: job.compIntel.baseMax,
+          totalMin: job.compIntel.totalMin, totalMax: job.compIntel.totalMax,
+          compType: job.compIntel.compType,
+          hasEquity: job.compIntel.hasEquity,
+        } : null,
+        opportunityScore: job.opportunityScore,
+      },
+    };
+
+    try {
+      if (existing) {
+        await this.prisma.marketJob.update({ where: { id: existing.id }, data: jobData });
+        return 'updated';
+      }
+      await this.prisma.marketJob.create({
+        data: { externalId: job.externalId, source: 'OTHER', ...jobData },
+      });
+      return 'inserted';
+    } catch {
+      return 'skipped';
+    }
   }
 }

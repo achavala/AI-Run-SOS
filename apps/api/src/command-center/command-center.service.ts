@@ -1,13 +1,31 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+interface CacheEntry { data: any; expiresAt: number; }
+
 @Injectable()
 export class CommandCenterService {
   private readonly logger = new Logger(CommandCenterService.name);
+  private cache = new Map<string, CacheEntry>();
 
   constructor(private prisma: PrismaService) {}
 
+  private getCached<T>(key: string): T | null {
+    const entry = this.cache.get(key);
+    if (!entry || Date.now() > entry.expiresAt) {
+      this.cache.delete(key);
+      return null;
+    }
+    return entry.data as T;
+  }
+
+  private setCache(key: string, data: any, ttlMs = 120_000) {
+    this.cache.set(key, { data, expiresAt: Date.now() + ttlMs });
+  }
+
   async getAutopilotPlan(tenantId: string) {
+    const cached = this.getCached(`autopilot:${tenantId}`);
+    if (cached) return cached;
     const [
       actionableReqs,
       benchMatches,
@@ -17,7 +35,7 @@ export class CommandCenterService {
       todayActivity,
       vendorLeaderboard,
     ] = await Promise.all([
-      this.getActionableReqs(30),
+      this.getActionableReqs(50),
       this.getBenchMatchReqs(10),
       this.getSubmissionPipelineStats(tenantId),
       this.getDueFollowups(),
@@ -28,7 +46,7 @@ export class CommandCenterService {
 
     const submissionQuota = this.calculateDailyQuota(submissionStats);
 
-    return {
+    const plan = {
       generatedAt: new Date().toISOString(),
       morning: {
         title: 'Morning Sprint (9 AM)',
@@ -51,31 +69,74 @@ export class CommandCenterService {
         message: `Today: ${todayActivity.submissionsSent} sent, ${todayActivity.responsesReceived} responses. Closure probability: ${this.estimateClosureProbability(submissionStats)}%`,
       },
     };
+    this.setCache(`autopilot:${tenantId}`, plan, 120_000);
+    return plan;
   }
 
   private async getActionableReqs(limit: number) {
-    return this.prisma.$queryRaw`
-      SELECT vrs.id, vrs.title, vrs.location, vrs.rate_text as "rateText",
-             vrs.employment_type as "employmentType", vrs.skills,
-             vrs.actionability_score as "actionabilityScore",
-             vrs.created_at as "createdAt",
+    const emailReqs = await this.prisma.$queryRaw`
+      WITH top_signals AS (
+        SELECT id, title, location, rate_text, employment_type, skills,
+               COALESCE(actionability_score, 50) as actionability_score, created_at,
+               vendor_company_id, vendor_contact_id
+        FROM vendor_req_signal
+        WHERE title IS NOT NULL AND title != '' AND length(title) > 15
+          AND employment_type = 'C2C'
+          AND title !~* '(unsubscribe|no third party|no c2c|w2 only|hot.?list|bench|available|looking for|h1b)'
+        ORDER BY created_at DESC
+        LIMIT 500
+      )
+      SELECT ts.id::text, ts.title, ts.location, ts.rate_text as "rateText",
+             ts.employment_type as "employmentType", ts.skills,
+             ts.actionability_score as "actionabilityScore",
+             ts.created_at as "createdAt",
              vc.name as "vendorName", vc.domain as "vendorDomain",
              vct.email as "contactEmail", vct.name as "contactName",
-             vts.trust_score as "vendorTrustScore",
-             vts.actionability_tier as "vendorTier"
-      FROM vendor_req_signal vrs
-      LEFT JOIN vendor_company vc ON vc.id = vrs.vendor_company_id
-      LEFT JOIN vendor_contact vct ON vct.id = vrs.vendor_contact_id
+             COALESCE(vts.trust_score, 30) as "vendorTrustScore",
+             vts.actionability_tier as "vendorTier",
+             'EMAIL' as "source"
+      FROM top_signals ts
+      LEFT JOIN vendor_company vc ON vc.id = ts.vendor_company_id
+      LEFT JOIN vendor_contact vct ON vct.id = ts.vendor_contact_id
       LEFT JOIN vendor_trust_score vts ON vts.vendor_company_id = vc.id
-      WHERE vrs.created_at >= NOW() - interval '3 days'
-        AND vrs.title IS NOT NULL AND vrs.title != ''
-        AND vrs.employment_type IN ('C2C', 'W2', 'CONTRACT', 'C2H')
-      ORDER BY
-        COALESCE(vts.trust_score, 30) DESC,
-        COALESCE(vrs.actionability_score, 50) DESC,
-        vrs.created_at DESC
-      LIMIT ${limit}
-    ` as Promise<any[]>;
+      ORDER BY ts.created_at DESC
+      LIMIT 100
+    ` as any[];
+
+    const marketJobs = await this.prisma.$queryRaw`
+      SELECT
+        m.id::text, m.title, m.location, 
+        COALESCE(m."rateText", CASE WHEN m."rateMax" > 0 THEN '$' || m."rateMin"::int || '-$' || m."rateMax"::int ELSE NULL END) as "rateText",
+        COALESCE(m."employmentType"::text, 'C2C') as "employmentType",
+        CASE WHEN m.skills IS NOT NULL THEN ARRAY(SELECT jsonb_array_elements_text(m.skills)) ELSE ARRAY[]::text[] END as skills,
+        COALESCE(m."actionabilityScore", 70) as "actionabilityScore",
+        m."postedAt" as "createdAt",
+        m.company as "vendorName",
+        m.source::text as "vendorDomain",
+        COALESCE(m."applyUrl", m."sourceUrl") as "contactEmail",
+        m."recruiterName" as "contactName",
+        COALESCE(m."realnessScore", 80) as "vendorTrustScore",
+        'HIGH' as "vendorTier",
+        m.source::text as "source"
+      FROM "MarketJob" m
+      WHERE m."postedAt" >= NOW() - interval '3 days'
+        AND m.title IS NOT NULL AND m.title != ''
+        AND m.source IN ('JSEARCH', 'CORPTOCORP')
+      ORDER BY m."postedAt" DESC
+      LIMIT 50
+    ` as any[];
+
+    const combined = [
+      ...marketJobs.map((j: any) => ({ ...j, _sortPriority: j.source === 'JSEARCH' ? 1 : 2 })),
+      ...emailReqs.map((r: any) => ({ ...r, _sortPriority: 3 })),
+    ];
+
+    combined.sort((a, b) => {
+      if (a._sortPriority !== b._sortPriority) return a._sortPriority - b._sortPriority;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+
+    return combined.slice(0, limit).map(({ _sortPriority, ...rest }) => rest);
   }
 
   private async getBenchMatchReqs(limit: number) {
@@ -84,18 +145,18 @@ export class CommandCenterService {
         SELECT vrs.id, vrs.title, vrs.location, vrs.rate_text as "rateText",
                vrs.employment_type as "employmentType", vrs.skills,
                vrs.created_at as "createdAt",
-               vc.name as "vendorName",
-               vct.email as "contactEmail"
+               vrs.vendor_company_id, vrs.vendor_contact_id
         FROM vendor_req_signal vrs
-        LEFT JOIN vendor_company vc ON vc.id = vrs.vendor_company_id
-        LEFT JOIN vendor_contact vct ON vct.id = vrs.vendor_contact_id
         WHERE vrs.created_at >= NOW() - interval '2 days'
           AND vrs.skills IS NOT NULL AND array_length(vrs.skills, 1) > 0
-        ORDER BY vrs.created_at DESC
-        LIMIT 200
+          AND COALESCE(vrs.actionability_score, 50) >= 40
+        ORDER BY COALESCE(vrs.actionability_score, 50) DESC, vrs.created_at DESC
+        LIMIT 50
       ),
       matched AS (
         SELECT rr.*,
+               vc.name as "vendorName",
+               vct.email as "contactEmail",
                c.id as "consultantId", c.full_name as "consultantName",
                c.primary_skills as "consultantSkills",
                array_length(
@@ -103,6 +164,8 @@ export class CommandCenterService {
                  1
                ) as skill_overlap
         FROM recent_reqs rr
+        LEFT JOIN vendor_company vc ON vc.id = rr.vendor_company_id
+        LEFT JOIN vendor_contact vct ON vct.id = rr.vendor_contact_id
         CROSS JOIN LATERAL (
           SELECT c.id, c.full_name, c.primary_skills
           FROM consultant c

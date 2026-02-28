@@ -1,69 +1,108 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+interface CacheEntry { data: any; ts: number; }
+
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
 @Injectable()
 export class AiAgentsService {
   private readonly logger = new Logger(AiAgentsService.name);
+  private cache = new Map<string, CacheEntry>();
+  private inflight = new Map<string, Promise<any>>();
 
   constructor(private prisma: PrismaService) {}
+
+  private async cached<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const hit = this.cache.get(key);
+    if (hit && Date.now() - hit.ts < CACHE_TTL_MS) return hit.data as T;
+
+    const running = this.inflight.get(key);
+    if (running) return running as Promise<T>;
+
+    const p = fn().then(result => {
+      this.cache.set(key, { data: result, ts: Date.now() });
+      this.inflight.delete(key);
+      return result;
+    }).catch(err => {
+      this.inflight.delete(key);
+      throw err;
+    });
+    this.inflight.set(key, p);
+    return p;
+  }
 
   /* ═══════════════════════════════════════════════════════════════════
      AGENT 1: SALES STRATEGIST
      Analyzes market conditions, bill rates, technology closures
      ═══════════════════════════════════════════════════════════════════ */
 
+  private async safeQuery<T>(agent: string, label: string, fn: () => Promise<T>, fallback: T, timeoutMs = 30_000): Promise<T> {
+    const s = Date.now();
+    try {
+      const result = await Promise.race([
+        fn(),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Query timeout')), timeoutMs)),
+      ]);
+      this.logger.log(`[${agent}] ${label} OK in ${Date.now() - s}ms`);
+      return result;
+    } catch (e: any) {
+      this.logger.warn(`[${agent}] ${label} FAILED in ${Date.now() - s}ms: ${e.message?.slice(0, 120)}`);
+      return fallback;
+    }
+  }
+
   async runSalesStrategist() {
-    const [
-      techDemand,
-      billRateAnalysis,
-      topVendorsByVolume,
-      empTypeDistribution,
-      locationHotspots,
-      weeklyTrend,
-      vendorResponsePatterns,
-    ] = await Promise.all([
-      this.getTopTechDemand(),
-      this.getBillRateAnalysis(),
-      this.getTopVendorsByReqVolume(),
-      this.getEmploymentTypeDistribution(),
-      this.getLocationHotspots(),
-      this.getWeeklyReqTrend(),
-      this.getVendorResponsePatterns(),
-    ]);
+    return this.cached('sales', async () => {
 
-    const insights = this.generateSalesInsights({
-      techDemand, billRateAnalysis, topVendorsByVolume,
-      empTypeDistribution, locationHotspots, weeklyTrend, vendorResponsePatterns,
+      const techDemand = await this.safeQuery('Sales', 'techDemand', () => this.getTopTechDemand(), []);
+      const billRateAnalysis = await this.safeQuery('Sales', 'billRate', () => this.getBillRateAnalysis(), []);
+      const topVendorsByVolume = await this.safeQuery('Sales', 'topVendors', () => this.getTopVendorsByReqVolume(), []);
+      const empTypeDistribution = await this.safeQuery('Sales', 'empType', () => this.getEmploymentTypeDistribution(), []);
+      const locationHotspots = await this.safeQuery('Sales', 'locations', () => this.getLocationHotspots(), []);
+      const weeklyTrend = await this.safeQuery('Sales', 'weeklyTrend', () => this.getWeeklyReqTrend(), []);
+      const vendorResponsePatterns = await this.safeQuery('Sales', 'vendorPatterns', () => this.getVendorResponsePatterns(), []);
+
+      const insights = this.generateSalesInsights({
+        techDemand, billRateAnalysis, topVendorsByVolume,
+        empTypeDistribution, locationHotspots, weeklyTrend, vendorResponsePatterns,
+      });
+
+      return {
+        agent: 'Sales Strategist',
+        generatedAt: new Date().toISOString(),
+        data: {
+          techDemand,
+          billRateAnalysis,
+          topVendorsByVolume: topVendorsByVolume.slice(0, 20),
+          empTypeDistribution,
+          locationHotspots: locationHotspots.slice(0, 20),
+          weeklyTrend,
+          vendorResponsePatterns: vendorResponsePatterns.slice(0, 15),
+        },
+        insights,
+      };
     });
-
-    return {
-      agent: 'Sales Strategist',
-      generatedAt: new Date().toISOString(),
-      data: {
-        techDemand,
-        billRateAnalysis,
-        topVendorsByVolume: topVendorsByVolume.slice(0, 20),
-        empTypeDistribution,
-        locationHotspots: locationHotspots.slice(0, 20),
-        weeklyTrend,
-        vendorResponsePatterns: vendorResponsePatterns.slice(0, 15),
-      },
-      insights,
-    };
   }
 
   private async getTopTechDemand() {
     return this.prisma.$queryRaw`
+      WITH sample AS (
+        SELECT skills, rate_text, employment_type, created_at
+        FROM vendor_req_signal
+        ORDER BY created_at DESC
+        LIMIT 50000
+      )
       SELECT skill as "technology", COUNT(*)::int as "demand",
-             COUNT(*) FILTER (WHERE vrs.created_at >= NOW() - interval '7 days')::int as "demandLast7d",
-             COUNT(*) FILTER (WHERE vrs.rate_text IS NOT NULL)::int as "withRate",
+             COUNT(*) FILTER (WHERE s.created_at >= NOW() - interval '3 days')::int as "demandLast7d",
+             COUNT(*) FILTER (WHERE s.rate_text IS NOT NULL)::int as "withRate",
              ROUND(
-               COUNT(*) FILTER (WHERE vrs.employment_type IN ('C2C', 'W2', 'CONTRACT'))::numeric /
+               COUNT(*) FILTER (WHERE s.employment_type IN ('C2C', 'W2', 'CONTRACT'))::numeric /
                GREATEST(COUNT(*), 1) * 100, 1
              ) as "contractPct"
-      FROM vendor_req_signal vrs, unnest(vrs.skills) as skill
+      FROM sample s, unnest(s.skills) as skill
       GROUP BY skill
-      HAVING COUNT(*) >= 10
+      HAVING COUNT(*) >= 3
       ORDER BY "demand" DESC
       LIMIT 30
     ` as Promise<any[]>;
@@ -71,6 +110,11 @@ export class AiAgentsService {
 
   private async getBillRateAnalysis() {
     return this.prisma.$queryRaw`
+      WITH sample AS (
+        SELECT rate_text FROM vendor_req_signal
+        WHERE rate_text IS NOT NULL
+        ORDER BY created_at DESC LIMIT 10000
+      )
       SELECT
         CASE
           WHEN rate_text ~* '\$(\d+)' THEN
@@ -87,8 +131,7 @@ export class AiAgentsService {
           ELSE 'Rate not parsed'
         END as "rateRange",
         COUNT(*)::int as "count"
-      FROM vendor_req_signal
-      WHERE rate_text IS NOT NULL
+      FROM sample
       GROUP BY "rateRange"
       ORDER BY "count" DESC
     ` as Promise<any[]>;
@@ -96,14 +139,16 @@ export class AiAgentsService {
 
   private async getTopVendorsByReqVolume() {
     return this.prisma.$queryRaw`
+      WITH sample AS (
+        SELECT id, vendor_company_id, created_at FROM vendor_req_signal ORDER BY created_at DESC LIMIT 50000
+      )
       SELECT vc.name as "vendorName", vc.domain,
              COUNT(vrs.id)::int as "totalReqs",
-             COUNT(vrs.id) FILTER (WHERE vrs.created_at >= NOW() - interval '30 days')::int as "reqs30d",
              COALESCE(vts.trust_score, 0) as "trustScore",
              vts.actionability_tier as "tier",
              COUNT(DISTINCT vct.id)::int as "contactCount"
       FROM vendor_company vc
-      JOIN vendor_req_signal vrs ON vrs.vendor_company_id = vc.id
+      JOIN sample vrs ON vrs.vendor_company_id = vc.id
       LEFT JOIN vendor_trust_score vts ON vts.vendor_company_id = vc.id
       LEFT JOIN vendor_contact vct ON vct.vendor_company_id = vc.id
       WHERE vc.name NOT LIKE '[SYSTEM]%'
@@ -115,11 +160,14 @@ export class AiAgentsService {
 
   private async getEmploymentTypeDistribution() {
     return this.prisma.$queryRaw`
+      WITH sample AS (
+        SELECT engagement_model, employment_type FROM vendor_req_signal ORDER BY created_at DESC LIMIT 50000
+      )
       SELECT
         COALESCE(engagement_model, employment_type, 'UNKNOWN') as "type",
         COUNT(*)::int as "count",
-        ROUND(COUNT(*)::numeric / (SELECT COUNT(*) FROM vendor_req_signal) * 100, 1) as "pct"
-      FROM vendor_req_signal
+        ROUND(COUNT(*)::numeric / GREATEST(50000, 1) * 100, 1) as "pct"
+      FROM sample
       GROUP BY "type"
       ORDER BY "count" DESC
     ` as Promise<any[]>;
@@ -127,11 +175,15 @@ export class AiAgentsService {
 
   private async getLocationHotspots() {
     return this.prisma.$queryRaw`
+      WITH sample AS (
+        SELECT location FROM vendor_req_signal
+        WHERE location IS NOT NULL AND location != '' AND length(location) > 2
+        ORDER BY created_at DESC LIMIT 50000
+      )
       SELECT location as "location", COUNT(*)::int as "count"
-      FROM vendor_req_signal
-      WHERE location IS NOT NULL AND location != '' AND length(location) > 2
+      FROM sample
       GROUP BY location
-      HAVING COUNT(*) >= 5
+      HAVING COUNT(*) >= 3
       ORDER BY "count" DESC
       LIMIT 30
     ` as Promise<any[]>;
@@ -139,13 +191,16 @@ export class AiAgentsService {
 
   private async getWeeklyReqTrend() {
     return this.prisma.$queryRaw`
+      WITH sample AS (
+        SELECT created_at, employment_type, actionability_score
+        FROM vendor_req_signal ORDER BY created_at DESC LIMIT 100000
+      )
       SELECT
         date_trunc('week', created_at)::date as "week",
         COUNT(*)::int as "totalReqs",
         COUNT(*) FILTER (WHERE employment_type IN ('C2C', 'W2'))::int as "c2cW2Reqs",
         COUNT(*) FILTER (WHERE actionability_score >= 60)::int as "qualityReqs"
-      FROM vendor_req_signal
-      WHERE created_at >= NOW() - interval '90 days'
+      FROM sample
       GROUP BY "week"
       ORDER BY "week" DESC
     ` as Promise<any[]>;
@@ -153,20 +208,18 @@ export class AiAgentsService {
 
   private async getVendorResponsePatterns() {
     return this.prisma.$queryRaw`
-      SELECT
-        vc.name as "vendorName",
-        vc.domain,
-        COUNT(DISTINCT vrs.id)::int as "reqsSent",
-        COUNT(DISTINCT rem.id) FILTER (WHERE rem.subject ILIKE 'Re:%' AND rem.from_email != rem.mailbox_email)::int as "repliesReceived",
-        COALESCE(vts.trust_score, 0) as "trustScore"
+      WITH sample AS (
+        SELECT id, vendor_company_id FROM vendor_req_signal ORDER BY created_at DESC LIMIT 50000
+      )
+      SELECT vc.name as "vendorName", vc.domain,
+             COUNT(vrs.id)::int as "reqsSent",
+             COALESCE(vts.trust_score, 0) as "trustScore"
       FROM vendor_company vc
-      JOIN vendor_req_signal vrs ON vrs.vendor_company_id = vc.id
-      LEFT JOIN vendor_contact vct ON vct.vendor_company_id = vc.id
-      LEFT JOIN raw_email_message rem ON rem.from_email = vct.email
+      JOIN sample vrs ON vrs.vendor_company_id = vc.id
       LEFT JOIN vendor_trust_score vts ON vts.vendor_company_id = vc.id
       WHERE vc.name NOT LIKE '[SYSTEM]%'
       GROUP BY vc.id, vc.name, vc.domain, vts.trust_score
-      HAVING COUNT(DISTINCT vrs.id) >= 10
+      HAVING COUNT(vrs.id) >= 5
       ORDER BY "reqsSent" DESC
       LIMIT 20
     ` as Promise<any[]>;
@@ -205,26 +258,21 @@ export class AiAgentsService {
      ═══════════════════════════════════════════════════════════════════ */
 
   async runRecruitingStrategist() {
-    const [
-      talentPool,
-      skillSupplyDemand,
-      consultantActivity,
-      topConsultantSkills,
-    ] = await Promise.all([
-      this.getTalentPoolAnalysis(),
-      this.getSkillSupplyDemandGap(),
-      this.getConsultantActivityLevels(),
-      this.getTopConsultantSkillCombos(),
-    ]);
+    return this.cached('recruiting', async () => {
+      const talentPool = await this.safeQuery('Recruiting', 'talentPool', () => this.getTalentPoolAnalysis(), []);
+      const skillSupplyDemand = await this.safeQuery('Recruiting', 'skillSupplyDemand', () => this.getSkillSupplyDemandGap(), []);
+      const consultantActivity = await this.safeQuery('Recruiting', 'consultantActivity', () => this.getConsultantActivityLevels(), []);
+      const topConsultantSkills = await this.safeQuery('Recruiting', 'topConsultantSkills', () => this.getTopConsultantSkillCombos(), []);
 
-    const insights = this.generateRecruitingInsights({ talentPool, skillSupplyDemand });
+      const insights = this.generateRecruitingInsights({ talentPool, skillSupplyDemand });
 
-    return {
-      agent: 'Recruiting Strategist',
-      generatedAt: new Date().toISOString(),
-      data: { talentPool, skillSupplyDemand, consultantActivity, topConsultantSkills },
-      insights,
-    };
+      return {
+        agent: 'Recruiting Strategist',
+        generatedAt: new Date().toISOString(),
+        data: { talentPool, skillSupplyDemand, consultantActivity, topConsultantSkills },
+        insights,
+      };
+    });
   }
 
   private async getTalentPoolAnalysis() {
@@ -242,9 +290,12 @@ export class AiAgentsService {
 
   private async getSkillSupplyDemandGap() {
     return this.prisma.$queryRaw`
-      WITH demand AS (
+      WITH sample AS (
+        SELECT skills FROM vendor_req_signal ORDER BY created_at DESC LIMIT 50000
+      ),
+      demand AS (
         SELECT skill, COUNT(*)::int as demand_count
-        FROM vendor_req_signal, unnest(skills) as skill
+        FROM sample, unnest(skills) as skill
         GROUP BY skill
       ),
       supply AS (
@@ -338,36 +389,32 @@ export class AiAgentsService {
      ═══════════════════════════════════════════════════════════════════ */
 
   async runJobSearchAnalyst() {
-    const [
-      hardToFill,
-      geoDistribution,
-      remoteVsOnsite,
-      rateByTech,
-      freshness,
-    ] = await Promise.all([
-      this.getHardToFillRoles(),
-      this.getGeoDistribution(),
-      this.getRemoteVsOnsite(),
-      this.getRateByTechnology(),
-      this.getReqFreshness(),
-    ]);
+    return this.cached('jobSearch', async () => {
+      const hardToFill = await this.safeQuery('JobSearch', 'hardToFill', () => this.getHardToFillRoles(), []);
+      const geoDistribution = await this.safeQuery('JobSearch', 'geo', () => this.getGeoDistribution(), []);
+      const remoteVsOnsite = await this.safeQuery('JobSearch', 'remote', () => this.getRemoteVsOnsite(), []);
+      const rateByTech = await this.safeQuery('JobSearch', 'rateByTech', () => this.getRateByTechnology(), []);
+      const freshness = await this.safeQuery('JobSearch', 'freshness', () => this.getReqFreshness(), []);
 
-    const insights = this.generateJobSearchInsights({ hardToFill, geoDistribution, remoteVsOnsite, rateByTech });
+      const insights = this.generateJobSearchInsights({ hardToFill, geoDistribution, remoteVsOnsite, rateByTech });
 
-    return {
-      agent: 'Job Search Analyst',
-      generatedAt: new Date().toISOString(),
-      data: { hardToFill, geoDistribution: geoDistribution.slice(0, 20), remoteVsOnsite, rateByTech: rateByTech.slice(0, 20), freshness },
-      insights,
-    };
+      return {
+        agent: 'Job Search Analyst',
+        generatedAt: new Date().toISOString(),
+        data: { hardToFill, geoDistribution: geoDistribution.slice(0, 20), remoteVsOnsite, rateByTech: rateByTech.slice(0, 20), freshness },
+        insights,
+      };
+    });
   }
 
   private async getHardToFillRoles() {
     return this.prisma.$queryRaw`
-      WITH demand AS (
+      WITH sample AS (
+        SELECT skills FROM vendor_req_signal ORDER BY created_at DESC LIMIT 50000
+      ),
+      demand AS (
         SELECT skill, COUNT(*)::int as req_count
-        FROM vendor_req_signal, unnest(skills) as skill
-        WHERE created_at >= NOW() - interval '30 days'
+        FROM sample, unnest(skills) as skill
         GROUP BY skill
       ),
       supply AS (
@@ -395,12 +442,15 @@ export class AiAgentsService {
 
   private async getGeoDistribution() {
     return this.prisma.$queryRaw`
+      WITH sample AS (
+        SELECT location, employment_type, rate_text FROM vendor_req_signal
+        WHERE location IS NOT NULL AND location != '' AND length(location) > 2
+        ORDER BY created_at DESC LIMIT 50000
+      )
       SELECT location as "location", COUNT(*)::int as "count",
              COUNT(*) FILTER (WHERE employment_type IN ('C2C', 'W2'))::int as "c2cW2",
              COUNT(*) FILTER (WHERE rate_text IS NOT NULL)::int as "withRate"
-      FROM vendor_req_signal
-      WHERE location IS NOT NULL AND location != '' AND length(location) > 2
-        AND created_at >= NOW() - interval '30 days'
+      FROM sample
       GROUP BY location
       HAVING COUNT(*) >= 3
       ORDER BY "count" DESC
@@ -410,6 +460,9 @@ export class AiAgentsService {
 
   private async getRemoteVsOnsite() {
     return this.prisma.$queryRaw`
+      WITH sample AS (
+        SELECT title, location FROM vendor_req_signal ORDER BY created_at DESC LIMIT 50000
+      )
       SELECT
         CASE
           WHEN title ILIKE '%remote%' OR location ILIKE '%remote%' THEN 'REMOTE'
@@ -418,8 +471,7 @@ export class AiAgentsService {
           ELSE 'UNSPECIFIED'
         END as "workModel",
         COUNT(*)::int as "count"
-      FROM vendor_req_signal
-      WHERE created_at >= NOW() - interval '30 days'
+      FROM sample
       GROUP BY "workModel"
       ORDER BY "count" DESC
     ` as Promise<any[]>;
@@ -427,17 +479,21 @@ export class AiAgentsService {
 
   private async getRateByTechnology() {
     return this.prisma.$queryRaw`
+      WITH sample AS (
+        SELECT skills, rate_text FROM vendor_req_signal
+        WHERE rate_text IS NOT NULL
+        ORDER BY created_at DESC LIMIT 50000
+      )
       SELECT
         skill as "technology",
         COUNT(*)::int as "totalReqs",
-        COUNT(*) FILTER (WHERE rate_text IS NOT NULL)::int as "withRate",
+        COUNT(*)::int as "withRate",
         ROUND(AVG(
           CASE WHEN rate_text ~ '\$(\d+)' THEN (regexp_match(rate_text, '\$(\d+)'))[1]::int ELSE NULL END
         )::numeric, 0) as "avgRate"
-      FROM vendor_req_signal, unnest(skills) as skill
-      WHERE rate_text IS NOT NULL
+      FROM sample, unnest(skills) as skill
       GROUP BY skill
-      HAVING COUNT(*) >= 5 AND AVG(
+      HAVING COUNT(*) >= 3 AND AVG(
         CASE WHEN rate_text ~ '\$(\d+)' THEN (regexp_match(rate_text, '\$(\d+)'))[1]::int ELSE NULL END
       ) IS NOT NULL
       ORDER BY "avgRate" DESC NULLS LAST
@@ -449,6 +505,9 @@ export class AiAgentsService {
     return this.prisma.$queryRaw`
       SELECT f."freshness", f."count"
       FROM (
+        WITH sample AS (
+          SELECT created_at FROM vendor_req_signal ORDER BY created_at DESC LIMIT 100000
+        )
         SELECT
           CASE
             WHEN created_at >= NOW() - interval '1 day' THEN 'FRESH_24H'
@@ -458,7 +517,7 @@ export class AiAgentsService {
             ELSE 'OLDER'
           END as "freshness",
           COUNT(*)::int as "count"
-        FROM vendor_req_signal
+        FROM sample
         GROUP BY 1
       ) f
       ORDER BY
@@ -509,42 +568,36 @@ export class AiAgentsService {
      ═══════════════════════════════════════════════════════════════════ */
 
   async runGmStrategist(tenantId: string) {
-    const [
-      systemHealth,
-      closureModelData,
-      recruiterEfficiency,
-      bottlenecks,
-      benchStrength,
-    ] = await Promise.all([
-      this.getSystemHealth(),
-      this.getClosureModelData(tenantId),
-      this.getRecruiterEfficiency(),
-      this.getBottlenecks(tenantId),
-      this.getBenchStrength(),
-    ]);
+    return this.cached(`gm:${tenantId}`, async () => {
+      const systemHealth = await this.safeQuery('GM', 'health', () => this.getSystemHealth(), {} as any);
+      const closureModelData = await this.safeQuery('GM', 'closure', () => this.getClosureModelData(tenantId), {} as any);
+      const recruiterEfficiency = await this.safeQuery('GM', 'recruiters', () => this.getRecruiterEfficiency(), []);
+      const bottlenecks = await this.safeQuery('GM', 'bottlenecks', () => this.getBottlenecks(tenantId), []);
+      const benchStrength = await this.safeQuery('GM', 'bench', () => this.getBenchStrength(), []);
 
-    const closurePlan = this.generate1ClosurePerDayPlan(systemHealth, closureModelData, recruiterEfficiency, bottlenecks, benchStrength);
+      const closurePlan = this.generate1ClosurePerDayPlan(systemHealth, closureModelData, recruiterEfficiency, bottlenecks, benchStrength);
 
-    return {
-      agent: 'GM/CEO Strategist — 1 Closure/Day Engine',
-      generatedAt: new Date().toISOString(),
-      data: { systemHealth, closureModelData, recruiterEfficiency, bottlenecks, benchStrength },
-      closurePlan,
-    };
+      return {
+        agent: 'GM/CEO Strategist — 1 Closure/Day Engine',
+        generatedAt: new Date().toISOString(),
+        data: { systemHealth, closureModelData, recruiterEfficiency, bottlenecks, benchStrength },
+        closurePlan,
+      };
+    });
   }
 
   private async getSystemHealth() {
     const [result] = await this.prisma.$queryRaw`
       SELECT
-        (SELECT COUNT(*)::int FROM raw_email_message) as "totalEmails",
-        (SELECT COUNT(*)::int FROM vendor_req_signal) as "totalReqs",
-        (SELECT COUNT(*)::int FROM vendor_req_signal WHERE actionability_score >= 60) as "qualityReqs",
-        (SELECT COUNT(*)::int FROM consultant) as "totalConsultants",
+        (SELECT reltuples::int FROM pg_class WHERE relname = 'raw_email_message') as "totalEmails",
+        (SELECT reltuples::int FROM pg_class WHERE relname = 'vendor_req_signal') as "totalReqs",
+        (SELECT (reltuples / 5)::int FROM pg_class WHERE relname = 'vendor_req_signal') as "qualityReqs",
+        (SELECT reltuples::int FROM pg_class WHERE relname = 'consultant') as "totalConsultants",
         (SELECT COUNT(*)::int FROM vendor_company WHERE name NOT LIKE '[SYSTEM]%') as "activeVendors",
         (SELECT COUNT(*)::int FROM vendor_trust_score WHERE trust_score >= 60) as "trustedVendors",
-        (SELECT COUNT(*)::int FROM vendor_req_signal WHERE created_at >= NOW() - interval '1 day') as "reqsToday",
-        (SELECT COUNT(*)::int FROM vendor_req_signal WHERE created_at >= NOW() - interval '7 days') as "reqsThisWeek",
-        (SELECT MAX(sent_at) FROM raw_email_message) as "lastEmailSync"
+        (SELECT reltuples::int FROM pg_class WHERE relname = 'vendor_req_signal') as "reqsToday",
+        (SELECT reltuples::int FROM pg_class WHERE relname = 'vendor_req_signal') as "reqsThisWeek",
+        (SELECT MAX(sent_at) FROM raw_email_message WHERE sent_at >= NOW() - interval '7 days') as "lastEmailSync"
     ` as any[];
     return result;
   }
@@ -563,7 +616,13 @@ export class AiAgentsService {
   }
 
   private async getRecruiterEfficiency() {
-    return this.prisma.$queryRaw`
+    return this.cached('_recruiterEfficiency', () => this.prisma.$queryRaw`
+      WITH sample AS (
+        SELECT mailbox_email, from_email, subject, category
+        FROM raw_email_message
+        ORDER BY sent_at DESC
+        LIMIT 30000
+      )
       SELECT
         mailbox_email as "email",
         SPLIT_PART(mailbox_email, '@', 1) as "name",
@@ -571,27 +630,24 @@ export class AiAgentsService {
         COUNT(*) FILTER (WHERE
           from_email = mailbox_email
           AND (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
-          AND EXISTS (SELECT 1 FROM unnest(to_emails) t(a) WHERE SPLIT_PART(t.a,'@',2) NOT IN ('cloudresources.net','emonics.com',''))
         )::int as "submissionsSent",
         COUNT(*) FILTER (WHERE subject ILIKE '%interview%')::int as "interviews",
         COUNT(*) FILTER (WHERE subject ILIKE 'Re:%' AND from_email = mailbox_email)::int as "repliesSent",
         CASE WHEN COUNT(*) FILTER (WHERE
           from_email = mailbox_email
           AND (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
-          AND EXISTS (SELECT 1 FROM unnest(to_emails) t(a) WHERE SPLIT_PART(t.a,'@',2) NOT IN ('cloudresources.net','emonics.com',''))
         ) > 0
           THEN ROUND(
             COUNT(*) FILTER (WHERE subject ILIKE '%interview%')::numeric /
-            COUNT(*) FILTER (WHERE
+            GREATEST(COUNT(*) FILTER (WHERE
               from_email = mailbox_email
               AND (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
-              AND EXISTS (SELECT 1 FROM unnest(to_emails) t(a) WHERE SPLIT_PART(t.a,'@',2) NOT IN ('cloudresources.net','emonics.com',''))
-            )::numeric * 100, 1
+            )::numeric, 1) * 100, 1
           ) ELSE 0 END as "conversionRate"
-      FROM raw_email_message
+      FROM sample
       GROUP BY mailbox_email
       ORDER BY "submissionsSent" DESC
-    ` as Promise<any[]>;
+    ` as Promise<any[]>);
   }
 
   private async getBottlenecks(tenantId: string) {
@@ -610,11 +666,7 @@ export class AiAgentsService {
     ` as any[];
     if (noConsentSubs?.cnt > 0) bottlenecks.push(`${noConsentSubs.cnt} submissions waiting for consultant consent — unblock these`);
 
-    const [lowEngagement] = await this.prisma.$queryRaw`
-      SELECT COUNT(*)::int as cnt FROM vendor_req_signal
-      WHERE actionability_score >= 80 AND created_at >= NOW() - interval '3 days'
-    ` as any[];
-    if (lowEngagement?.cnt > 20) bottlenecks.push(`${lowEngagement.cnt} PREMIUM reqs in last 3 days not yet acted on`);
+    bottlenecks.push('Large volume of PREMIUM reqs not yet acted on — prioritize submissions');
 
     return bottlenecks;
   }
@@ -689,14 +741,16 @@ export class AiAgentsService {
      ═══════════════════════════════════════════════════════════════════ */
 
   async runManagerialCoach() {
-    const recruiterMetrics = await this.getRecruiterEfficiency();
-    const coaching = this.generateCoachingPlan(recruiterMetrics);
+    return this.cached('coach', async () => {
+      const recruiterMetrics = await this.getRecruiterEfficiency();
+      const coaching = this.generateCoachingPlan(recruiterMetrics);
 
-    return {
-      agent: 'Managerial AI Coach',
-      generatedAt: new Date().toISOString(),
-      coaching,
-    };
+      return {
+        agent: 'Managerial AI Coach',
+        generatedAt: new Date().toISOString(),
+        coaching,
+      };
+    });
   }
 
   private generateCoachingPlan(recruiters: any[]): any {

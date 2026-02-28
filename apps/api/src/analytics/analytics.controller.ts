@@ -1,9 +1,11 @@
-import { Controller, Get, Post, Patch, Query, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Query, Param, Body, Logger } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
 import { ApolloService } from './apollo.service';
 
 @Controller('analytics')
 export class AnalyticsController {
+  private readonly logger = new Logger(AnalyticsController.name);
+
   constructor(
     private svc: AnalyticsService,
     private apollo: ApolloService,
@@ -160,5 +162,22 @@ export class AnalyticsController {
       limit ? parseInt(limit, 10) : 500,
       offset ? parseInt(offset, 10) : 0,
     );
+  }
+
+  @Get('high-paid-feed')
+  getHighPaidFeed(
+    @Query('minSalary') minSalary?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.svc.getHighPaidFeed(
+      minSalary ? parseInt(minSalary, 10) : 200_000,
+      limit ? parseInt(limit, 10) : 300,
+    );
+  }
+
+  @Post('crawl-faang')
+  async crawlFaang() {
+    this.logger.log('Manual FAANG/Tech career crawl triggered');
+    return this.svc.crawlFaangCareers();
   }
 }

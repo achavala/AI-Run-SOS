@@ -62,6 +62,7 @@ export default function AiAgentsPage() {
   const [activeAgent, setActiveAgent] = useState<AgentId>('gm');
   const [agentData, setAgentData] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   const agents: { id: AgentId; name: string; icon: any; endpoint: string; color: string }[] = [
     { id: 'gm', name: 'GM Strategist', icon: RocketLaunchIcon, endpoint: '/ai-agents/gm-strategist', color: 'indigo' },
@@ -71,15 +72,23 @@ export default function AiAgentsPage() {
     { id: 'coach', name: 'Managerial Coach', icon: AcademicCapIcon, endpoint: '/ai-agents/managerial-coach', color: 'amber' },
   ];
 
-  const loadAgent = useCallback(async (agentId: AgentId) => {
+  const loadAgent = useCallback(async (agentId: AgentId, force = false) => {
     const agent = agents.find(a => a.id === agentId);
-    if (!agent || agentData[agentId]) return;
+    if (!agent || (!force && agentData[agentId])) return;
 
     setLoading(prev => ({ ...prev, [agentId]: true }));
+    setErrors(prev => { const n = { ...prev }; delete n[agentId]; return n; });
     try {
-      const res: any = await api.get(agent.endpoint);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120_000);
+      const res: any = await api.get(agent.endpoint, { signal: controller.signal });
+      clearTimeout(timeout);
       setAgentData(prev => ({ ...prev, [agentId]: res }));
-    } catch (e) {
+    } catch (e: any) {
+      const msg = e?.name === 'AbortError'
+        ? 'Request timed out. The analysis is running on a large dataset — please retry.'
+        : (e?.message || 'Failed to load agent data');
+      setErrors(prev => ({ ...prev, [agentId]: msg }));
       console.error(`Failed to load ${agentId}`, e);
     } finally {
       setLoading(prev => ({ ...prev, [agentId]: false }));
@@ -88,9 +97,17 @@ export default function AiAgentsPage() {
 
   useEffect(() => { loadAgent(activeAgent); }, [activeAgent, loadAgent]);
 
+  useEffect(() => {
+    const ids: AgentId[] = ['gm', 'sales', 'recruiting', 'jobSearch', 'coach'];
+    ids.forEach((id, i) => {
+      setTimeout(() => loadAgent(id), (i + 1) * 2000);
+    });
+  }, []);
+
   const currentAgent = agents.find(a => a.id === activeAgent)!;
   const data = agentData[activeAgent];
   const isLoading = loading[activeAgent];
+  const error = errors[activeAgent];
 
   return (
     <div className="space-y-6">
@@ -120,11 +137,28 @@ export default function AiAgentsPage() {
           <div className="text-center">
             <ArrowPathIcon className="h-8 w-8 animate-spin text-indigo-500 mx-auto" />
             <p className="text-sm text-gray-500 mt-2">Agent analyzing data...</p>
+            <p className="text-xs text-gray-400 mt-1">This may take a few seconds on first load</p>
           </div>
         </div>
       )}
 
-      {!isLoading && data && (
+      {!isLoading && error && (
+        <div className="flex items-center justify-center min-h-[300px]">
+          <div className="text-center max-w-md">
+            <ExclamationTriangleIcon className="h-10 w-10 text-amber-500 mx-auto" />
+            <p className="text-sm text-gray-700 mt-3 font-medium">Agent analysis failed</p>
+            <p className="text-xs text-gray-500 mt-1">{error}</p>
+            <button
+              onClick={() => loadAgent(activeAgent, true)}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+            >
+              <ArrowPathIcon className="h-4 w-4" /> Retry
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!isLoading && !error && data && (
         <div className="space-y-6">
           {/* Agent header */}
           <div className="rounded-xl border bg-gradient-to-r from-indigo-50 to-purple-50 p-4 flex items-center justify-between">
@@ -138,7 +172,7 @@ export default function AiAgentsPage() {
             <button
               onClick={() => {
                 setAgentData(prev => { const n = { ...prev }; delete n[activeAgent]; return n; });
-                loadAgent(activeAgent);
+                loadAgent(activeAgent, true);
               }}
               className="flex items-center gap-1 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-gray-600 shadow-sm hover:bg-gray-50"
             >

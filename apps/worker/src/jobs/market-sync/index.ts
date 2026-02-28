@@ -16,6 +16,7 @@ import { AdzunaProvider } from './providers/adzuna';
 import { ArbeitnowProvider } from './providers/arbeitnow';
 import { CareerjetProvider } from './providers/careerjet';
 import { CorpToCorpProvider } from './providers/corptocorp';
+import { FaangTechProvider } from './providers/faang-tech';
 
 /** Default queries when no QueryPlan rows exist for a provider */
 const DEFAULT_QUERIES = [
@@ -43,6 +44,7 @@ export async function handleMarketJobSync(
   console.log('[MarketSync] Starting job sync...');
 
   const providers: JobProvider[] = [
+    new FaangTechProvider(),
     new CorpToCorpProvider(),
     new JSearchProvider(),
     new JoobleProvider(),
