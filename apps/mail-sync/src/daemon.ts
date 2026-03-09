@@ -77,15 +77,26 @@ async function syncCycle() {
       try { await extractVendors(pool, true); } catch (e: any) { console.error(`  [WARN] vendor extraction: ${e.message}`); }
       try { await extractReqSignals(pool, true); } catch (e: any) { console.error(`  [WARN] req signal extraction: ${e.message}`); }
 
-      // Trigger API-side re-extraction for Prisma-based signals
+      // Trigger API-side re-extraction (processes only unprocessed emails via 'processed' flag)
       try {
         const apiBase = process.env.API_URL || 'http://localhost:3001/api';
         const loginRes = await axios.post(`${apiBase}/auth/login`, { email: 'md@apex-staffing.com', password: 'Password123!' });
         const token = loginRes.data.accessToken;
-        const extractRes = await axios.post(`${apiBase}/mail-intel/re-extract`, {}, { headers: { Authorization: `Bearer ${token}` } });
-        console.log(`[${ts()}] API re-extract: ${extractRes.data.signalsCreated} new signals, ${extractRes.data.vendorsCreated} new vendors`);
+        const extractRes = await axios.post(`${apiBase}/mail-intel/re-extract`, {}, {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 300000,
+        });
+        console.log(`[${ts()}] API re-extract: ${extractRes.data.signalsCreated} new signals, ${extractRes.data.vendorsCreated} new vendors (${extractRes.data.emailsScanned} scanned)`);
       } catch (e: any) {
         console.error(`  [WARN] API re-extract: ${e.message}`);
+      }
+
+      // Mark newly synced emails as processed after all extraction is done
+      try {
+        const markResult = await pool.query(`UPDATE "RawEmailMessage" SET processed = true WHERE processed = false`);
+        console.log(`[${ts()}] Marked ${markResult.rowCount} emails as processed`);
+      } catch (e: any) {
+        console.error(`  [WARN] marking processed: ${e.message}`);
       }
 
       console.log(`[${ts()}] Extraction complete`);

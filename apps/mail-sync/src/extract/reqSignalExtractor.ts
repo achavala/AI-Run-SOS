@@ -114,7 +114,7 @@ export async function extractReqSignals(pool: Pool, incrementalOnly = false): Pr
     for (const c of companyRows.rows) companyMap.set(c.domain.toLowerCase(), c.id);
 
     const whereClause = incrementalOnly
-      ? `WHERE "fromEmail" IS NOT NULL AND "createdAt" >= NOW() - interval '2 hours'`
+      ? `WHERE "fromEmail" IS NOT NULL AND processed = false`
       : `WHERE "fromEmail" IS NOT NULL`;
 
     const result = await client.query(`
@@ -124,8 +124,11 @@ export async function extractReqSignals(pool: Pool, incrementalOnly = false): Pr
       ORDER BY "sentAt" DESC
     `);
 
+    console.log(`  Processing ${result.rows.length} unprocessed emails`);
+
     let detected = 0;
     let inserted = 0;
+    let skippedDupe = 0;
 
     for (const row of result.rows) {
       const subject = row.subject || "";
@@ -147,6 +150,12 @@ export async function extractReqSignals(pool: Pool, incrementalOnly = false): Pr
       const employmentType = extractEmploymentType(allText);
       const skills = extractSkills(allText);
 
+      const existCheck = await client.query(
+        `SELECT 1 FROM "VendorReqSignal" WHERE "rawEmailId" = $1 LIMIT 1`,
+        [row.id]
+      );
+      if (existCheck.rows.length > 0) { skippedDupe++; continue; }
+
       await client.query(`
         INSERT INTO "VendorReqSignal"
           (id, "vendorCompanyId", "vendorContactId", "rawEmailId", title, location, "rateText", "employmentType", skills)
@@ -158,6 +167,7 @@ export async function extractReqSignals(pool: Pool, incrementalOnly = false): Pr
 
     console.log(`  Req-like emails detected: ${detected}`);
     console.log(`  Req signals stored: ${inserted}`);
+    if (skippedDupe > 0) console.log(`  Skipped duplicates: ${skippedDupe}`);
 
     const typeBreakdown = await client.query(`
       SELECT "employmentType", COUNT(*) as cnt

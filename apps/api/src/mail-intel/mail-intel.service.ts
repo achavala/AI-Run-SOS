@@ -712,7 +712,14 @@ export class MailIntelService {
   }
 
   async reExtractSignals(): Promise<{ vendorsCreated: number; contactsCreated: number; signalsCreated: number; emailsScanned: number }> {
-    this.logger.log('Starting re-extraction from RawEmailMessage...');
+    const unprocessedCount = await this.prisma.rawEmailMessage.count({ where: { processed: false, fromEmail: { not: null } } });
+    this.logger.log(`Starting incremental extraction: ${unprocessedCount} unprocessed emails to scan`);
+
+    if (unprocessedCount === 0) {
+      this.logger.log('No unprocessed emails — nothing to extract');
+      return { vendorsCreated: 0, contactsCreated: 0, signalsCreated: 0, emailsScanned: 0 };
+    }
+
     let vendorsCreated = 0;
     let contactsCreated = 0;
     let signalsCreated = 0;
@@ -723,7 +730,7 @@ export class MailIntelService {
 
     while (true) {
       const emails = await this.prisma.rawEmailMessage.findMany({
-        where: { fromEmail: { not: null } },
+        where: { processed: false, fromEmail: { not: null } },
         take: BATCH_SIZE,
         orderBy: { id: 'asc' },
         skip: cursor ? 1 : 0,
@@ -733,15 +740,16 @@ export class MailIntelService {
 
       if (emails.length === 0) break;
 
+      const processedIds: string[] = [];
+
       for (const email of emails) {
         try {
           const fromEmail = email.fromEmail?.trim().toLowerCase();
-          if (!fromEmail) continue;
+          if (!fromEmail) { processedIds.push(email.id); continue; }
 
           const domain = fromEmail.includes('@') ? fromEmail.split('@')[1] : null;
-          if (!domain || FREE_DOMAINS.has(domain) || OWN_DOMAINS.has(domain)) continue;
+          if (!domain || FREE_DOMAINS.has(domain) || OWN_DOMAINS.has(domain)) { processedIds.push(email.id); continue; }
 
-          // Upsert vendor company
           const existingCompany = await this.prisma.extractedVendorCompany.findUnique({ where: { domain } });
           let companyId: string;
           if (existingCompany) {
@@ -754,7 +762,6 @@ export class MailIntelService {
             vendorsCreated++;
           }
 
-          // Upsert vendor contact
           const existingContact = await this.prisma.extractedVendorContact.findUnique({ where: { email: fromEmail } });
           if (!existingContact) {
             await this.prisma.extractedVendorContact.create({
@@ -763,11 +770,6 @@ export class MailIntelService {
             contactsCreated++;
           }
 
-          // Check if signal already exists for this email
-          const existingSignal = await this.prisma.vendorReqSignal.findFirst({ where: { rawEmailId: email.id } });
-          if (existingSignal) continue;
-
-          // Check if it looks like a job req
           const subject = email.subject ?? '';
           const body = (email.bodyText ?? email.bodyHtml ?? '').replace(/<[^>]+>/g, ' ');
           const bodyPrefix = body.slice(0, 500);
@@ -775,10 +777,10 @@ export class MailIntelService {
 
           const hasKeyword = REQ_SUBJECT_KEYWORDS.some(kw => subj.includes(kw));
           const hasRate = RATE_PATTERN.test(bodyPrefix);
-          if (!hasKeyword && !hasRate) continue;
+          if (!hasKeyword && !hasRate) { processedIds.push(email.id); continue; }
 
           const title = subject.replace(/^(RE:\s*|FW:\s*|Fwd:\s*)+/i, '').trim() || null;
-          if (!title || title.length < 5) continue;
+          if (!title || title.length < 5) { processedIds.push(email.id); continue; }
 
           const locationMatch = body.match(LOCATION_PATTERN);
           const location = locationMatch?.[1]?.trim() || null;
@@ -828,20 +830,28 @@ export class MailIntelService {
             },
           });
           signalsCreated++;
+          processedIds.push(email.id);
         } catch (err) {
-          // Skip individual email errors
+          processedIds.push(email.id);
         }
+      }
+
+      if (processedIds.length > 0) {
+        await this.prisma.rawEmailMessage.updateMany({
+          where: { id: { in: processedIds } },
+          data: { processed: true },
+        });
       }
 
       emailsScanned += emails.length;
       cursor = emails[emails.length - 1]!.id;
 
       if (emailsScanned % 5000 === 0) {
-        this.logger.log(`Scanned ${emailsScanned} emails, signals: ${signalsCreated}, vendors: ${vendorsCreated}`);
+        this.logger.log(`Scanned ${emailsScanned}/${unprocessedCount} emails, signals: ${signalsCreated}, vendors: ${vendorsCreated}`);
       }
     }
 
-    this.logger.log(`Re-extraction complete: ${emailsScanned} emails scanned, ${signalsCreated} new signals, ${vendorsCreated} new vendors, ${contactsCreated} new contacts`);
+    this.logger.log(`Extraction complete: ${emailsScanned} emails scanned, ${signalsCreated} new signals, ${vendorsCreated} new vendors, ${contactsCreated} new contacts`);
     return { vendorsCreated, contactsCreated, signalsCreated, emailsScanned };
   }
 }

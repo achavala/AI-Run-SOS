@@ -37,7 +37,7 @@ export async function extractVendors(pool: Pool, incrementalOnly = false): Promi
   const client = await pool.connect();
   try {
     const whereClause = incrementalOnly
-      ? `WHERE "fromEmail" IS NOT NULL AND "fromEmail" != '' AND "createdAt" >= NOW() - interval '2 hours'`
+      ? `WHERE "fromEmail" IS NOT NULL AND "fromEmail" != '' AND processed = false`
       : `WHERE "fromEmail" IS NOT NULL AND "fromEmail" != ''`;
 
     const result = await client.query(`
@@ -47,6 +47,8 @@ export async function extractVendors(pool: Pool, incrementalOnly = false): Promi
       GROUP BY "fromEmail", "fromName"
       ORDER BY cnt DESC
     `);
+
+    console.log(`  Processing ${result.rows.length} unique senders from unprocessed emails`);
 
     let vendorDomains = 0;
     let vendorContacts = 0;
