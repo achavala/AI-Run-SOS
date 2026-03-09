@@ -26,6 +26,7 @@ import {
   FireIcon,
   SignalIcon,
   RocketLaunchIcon,
+  AdjustmentsHorizontalIcon,
 } from '@heroicons/react/24/outline';
 import { useAuthStore, type UserRole } from '@/lib/auth';
 
@@ -44,6 +45,7 @@ const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { name: 'AI Agents', href: '/dashboard/ai-agents', icon: SparklesIcon },
     { name: 'Recruiter Analytics', href: '/dashboard/recruiter-analytics', icon: PresentationChartBarIcon },
     { name: 'Live Feed', href: '/dashboard/live-feed', icon: SignalIcon },
+    { name: 'Strategy Ops', href: '/dashboard/strategy-ops', icon: AdjustmentsHorizontalIcon },
     { name: 'Jobs', href: '/dashboard/jobs', icon: BriefcaseIcon },
     { name: 'Vendor Reqs', href: '/dashboard/vendor-reqs', icon: EnvelopeIcon },
     { name: 'Market Jobs', href: '/dashboard/market-jobs', icon: GlobeAltIcon },
@@ -62,6 +64,7 @@ const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { name: 'AI Agents', href: '/dashboard/ai-agents', icon: SparklesIcon },
     { name: 'Recruiter Analytics', href: '/dashboard/recruiter-analytics', icon: PresentationChartBarIcon },
     { name: 'Live Feed', href: '/dashboard/live-feed', icon: SignalIcon },
+    { name: 'Strategy Ops', href: '/dashboard/strategy-ops', icon: AdjustmentsHorizontalIcon },
     { name: 'Jobs', href: '/dashboard/jobs', icon: BriefcaseIcon },
     { name: 'Vendor Reqs', href: '/dashboard/vendor-reqs', icon: EnvelopeIcon },
     { name: 'Market Jobs', href: '/dashboard/market-jobs', icon: GlobeAltIcon },

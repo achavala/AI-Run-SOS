@@ -27,6 +27,7 @@ import { AiAgentsModule } from './ai-agents/ai-agents.module';
 import { EmailModule } from './email/email.module';
 import { AutoSubmitModule } from './auto-submit/auto-submit.module';
 import { ResumeFormatterModule } from './resume-formatter/resume-formatter.module';
+import { StrategyOpsModule } from './strategy-ops/strategy-ops.module';
 import { AuditInterceptor } from './common/audit.interceptor';
 
 @Module({
@@ -57,6 +58,7 @@ import { AuditInterceptor } from './common/audit.interceptor';
     AiAgentsModule,
     AutoSubmitModule,
     ResumeFormatterModule,
+    StrategyOpsModule,
   ],
   providers: [
     {

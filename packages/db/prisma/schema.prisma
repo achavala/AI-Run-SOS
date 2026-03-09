@@ -1592,6 +1592,61 @@ model VendorReqSignal {
   @@index([createdAt])
 }
 
+// ── OPT Employer Index (Lane 4: visa-friendly employer tracking) ──
+
+model OptEmployerProfile {
+  id                 String    @id @default(cuid())
+  companyName        String
+  website            String?
+  atsSource          String?
+  visaFriendliness   Int       @default(50)  // 0-100
+  juniorFitScore     Int       @default(50)  // 0-100
+  compensationTier   String?                 // ENTRY, MID, SENIOR
+  roleFamilies       String[]                // ["SWE", "DATA", "CLOUD"]
+  degreeAlignment    String[]                // ["CS", "EE", "DS"]
+  h1bSponsored       Boolean   @default(false)
+  optStemEligible    Boolean   @default(false)
+  avgStartingSalary  Float?
+  placementHistory   Int       @default(0)
+  lastPlacedAt       DateTime?
+  notes              String?   @db.Text
+
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([companyName])
+  @@index([visaFriendliness])
+  @@index([juniorFitScore])
+}
+
+// ── Technology Tier Configuration (profitability-ranked tech families) ──
+
+model TechTierConfig {
+  id                 String    @id @default(cuid())
+  rank               Int                     // 1 = highest priority
+  technologyFamily   String    @unique       // "AI/ML", "MLOps/GenAI", etc.
+  premiumSkillFamily String?                 // Maps to PremiumSkillFamily enum
+  pod                String?                 // Maps to Pod enum
+  c2cBillRateMin     Float?
+  c2cBillRateMax     Float?
+  fteSalaryMin       Float?
+  fteSalaryMax       Float?
+  demandGrowthPct    Float?                  // Year-over-year growth
+  competitionLevel   String?                 // LOW, MEDIUM, HIGH
+  grossProfitPerPlacement Float?
+  portfolioAllocationPct Float?              // Target % of placements
+  keySkills          String[]                // Specific skills in this family
+  targetVendorTiers  String[]                // ["PRIME", "DIRECT"]
+  sourcingStrategy   String?   @db.Text      // Prose description
+  isActive           Boolean   @default(true)
+
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([rank])
+  @@index([isActive])
+}
+
 model ExtractionFact {
   id                 String    @id @default(cuid())
   entityType         String
