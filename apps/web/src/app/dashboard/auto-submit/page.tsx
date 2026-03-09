@@ -169,8 +169,7 @@ export default function AutoSubmitPage() {
     <div className="space-y-6">
       <PageHeader
         title="Auto-Submit Queue"
-        subtitle="AI-matched submissions ready for 1-click approval"
-        icon={RocketLaunchIcon}
+        description="AI-matched submissions ready for 1-click approval"
       />
 
       {/* Stats bar */}

@@ -1,4 +1,9 @@
 import { Pool } from "pg";
+import crypto from "crypto";
+
+function cuid(): string {
+  return 'c' + crypto.randomBytes(12).toString('hex') + Date.now().toString(36);
+}
 
 const REQ_SUBJECT_PATTERNS = [
   /\bc2c\b/i, /\bw2\b/i, /\bcorp[\s-]?to[\s-]?corp\b/i,
@@ -144,9 +149,9 @@ export async function extractReqSignals(pool: Pool, incrementalOnly = false): Pr
 
       await client.query(`
         INSERT INTO "VendorReqSignal"
-          ("vendorCompanyId", "vendorContactId", "rawEmailId", title, location, "rateText", "employmentType", skills)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      `, [companyId, contactId, row.id, title, location, rateText, employmentType, skills]);
+          (id, "vendorCompanyId", "vendorContactId", "rawEmailId", title, location, "rateText", "employmentType", skills)
+        VALUES ($9, $1, $2, $3, $4, $5, $6, $7, $8)
+      `, [companyId, contactId, row.id, title, location, rateText, employmentType, skills, cuid()]);
 
       inserted++;
     }

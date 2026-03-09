@@ -2,8 +2,13 @@ import axios from "axios";
 import { getAccessToken, invalidateToken } from "./graphClient";
 import { discoverFolders, MailFolder } from "./discoverFolders";
 import { Pool } from "pg";
+import crypto from "crypto";
 import dotenv from "dotenv";
 import path from "path";
+
+function cuid(): string {
+  return 'c' + crypto.randomBytes(12).toString('hex') + Date.now().toString(36);
+}
 
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
@@ -54,11 +59,12 @@ async function syncFolder(
         const toArrayLiteral = `{${toAddrs.join(",")}}`;
 
         const result = await client.query(
-          `INSERT INTO "RawEmailMessage" ("pstBatch", "messageId", subject, "fromEmail", "fromName", "toEmails", "ccEmails", "sentAt", "bodyText", "sourcePath", processed)
-           SELECT $1,$2,$3,$4,$5,$6,$7::text[],$8,$9,$10, false
-           WHERE NOT EXISTS (SELECT 1 FROM "RawEmailMessage" WHERE "pstBatch" = $1 AND "messageId" = $2)
+          `INSERT INTO "RawEmailMessage" (id, "pstBatch", "messageId", subject, "fromEmail", "fromName", "toEmails", "ccEmails", "sentAt", "bodyText", "sourcePath", processed, "createdAt")
+           SELECT $1,$2,$3,$4,$5,$6,$7::text[],$8::text[],$9,$10,$11, false, NOW()
+           WHERE NOT EXISTS (SELECT 1 FROM "RawEmailMessage" WHERE "pstBatch" = $2 AND "messageId" = $3)
            RETURNING id`,
           [
+            cuid(),
             email,
             msg.id,
             msg.subject,
@@ -152,10 +158,10 @@ export async function syncMailbox(email: string): Promise<number> {
 
     try {
       await client.query(
-        `INSERT INTO "EmailSyncState" ("tenantId", mailbox, folder, "deltaToken", "lastSyncAt", "messagesTotal", "messagesNew")
-         VALUES ('default', $1, 'all', '', NOW(), 0, $2)
-         ON CONFLICT ("tenantId", mailbox, folder) DO UPDATE SET "lastSyncAt" = NOW(), "messagesNew" = $2`,
-        [email, total]
+        `INSERT INTO "EmailSyncState" (id, "tenantId", mailbox, folder, "deltaToken", "lastSyncAt", "messagesTotal", "messagesNew", "createdAt", "updatedAt")
+         VALUES ($3, 'default', $1, 'all', '', NOW(), 0, $2, NOW(), NOW())
+         ON CONFLICT ("tenantId", mailbox, folder) DO UPDATE SET "lastSyncAt" = NOW(), "messagesNew" = $2, "updatedAt" = NOW()`,
+        [email, total, cuid()]
       );
     } catch (err) {
       console.error(`  Failed to update EmailSyncState for ${email}:`, err);

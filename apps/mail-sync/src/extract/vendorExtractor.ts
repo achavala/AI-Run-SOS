@@ -1,4 +1,9 @@
 import { Pool } from "pg";
+import crypto from "crypto";
+
+function cuid(): string {
+  return 'c' + crypto.randomBytes(12).toString('hex') + Date.now().toString(36);
+}
 
 const FREE_DOMAINS = new Set([
   "gmail.com", "yahoo.com", "outlook.com", "hotmail.com",
@@ -57,27 +62,27 @@ export async function extractVendors(pool: Pool, incrementalOnly = false): Promi
       if (OWN_DOMAINS.has(domain)) { skippedOwn++; continue; }
 
       const companyResult = await client.query(`
-        INSERT INTO "ExtractedVendorCompany" (domain, name, "emailCount", "firstSeenAt", "lastSeenAt")
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO "ExtractedVendorCompany" (id, domain, name, "emailCount", "firstSeenAt", "lastSeenAt")
+        VALUES ($6, $1, $2, $3, $4, $5)
         ON CONFLICT (domain) DO UPDATE SET
           "emailCount" = "ExtractedVendorCompany"."emailCount" + $3,
           "firstSeenAt" = LEAST("ExtractedVendorCompany"."firstSeenAt", $4),
           "lastSeenAt" = GREATEST("ExtractedVendorCompany"."lastSeenAt", $5)
         RETURNING id
-      `, [domain, guessCompanyName(domain), parseInt(row.cnt), row.first_seen, row.last_seen]);
+      `, [domain, guessCompanyName(domain), parseInt(row.cnt), row.first_seen, row.last_seen, cuid()]);
 
       const companyId = companyResult.rows[0].id;
 
       const contactResult = await client.query(`
-        INSERT INTO "ExtractedVendorContact" ("vendorCompanyId", name, email, "emailCount", "firstSeenAt", "lastSeenAt")
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO "ExtractedVendorContact" (id, "vendorCompanyId", name, email, "emailCount", "firstSeenAt", "lastSeenAt")
+        VALUES ($7, $1, $2, $3, $4, $5, $6)
         ON CONFLICT (email) DO UPDATE SET
           name = COALESCE(NULLIF($2, ''), "ExtractedVendorContact".name),
           "emailCount" = "ExtractedVendorContact"."emailCount" + $4,
           "firstSeenAt" = LEAST("ExtractedVendorContact"."firstSeenAt", $5),
           "lastSeenAt" = GREATEST("ExtractedVendorContact"."lastSeenAt", $6)
         RETURNING id
-      `, [companyId, row.fromName || null, email, parseInt(row.cnt), row.first_seen, row.last_seen]);
+      `, [companyId, row.fromName || null, email, parseInt(row.cnt), row.first_seen, row.last_seen, cuid()]);
 
       if (contactResult.rowCount && contactResult.rowCount > 0) vendorContacts++;
     }
