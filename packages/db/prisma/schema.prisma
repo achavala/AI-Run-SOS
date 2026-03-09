@@ -45,6 +45,7 @@ model Tenant {
   notifications        Notification[]
   communicationEvents  CommunicationEvent[]
   dailyScoreboards     DailyScoreboard[]
+  autoSubmitQueue      AutoSubmitQueueItem[]
 }
 
 // ─── Pods (closure engine) ───────────────────────────────────────
@@ -54,6 +55,36 @@ enum Pod {
   CLOUD_DEVOPS
   DATA
   CYBER
+}
+
+// ─── Vendor Tier (Prime Vendor Registry) ─────────────────────────
+
+enum VendorTier {
+  PRIME       // Direct client relationship, no intermediary
+  DIRECT      // Tier-1 vendor, single layer
+  SUB         // Sub-vendor, one intermediary
+  BROKER      // Multi-layer or unknown chain
+  UNCLASSIFIED
+}
+
+// ─── Sourcing Lanes ──────────────────────────────────────────────
+
+enum SourcingLane {
+  PRIME_C2C       // Lane 1: Prime/Trusted C2C — margin + speed
+  BROAD_C2C_W2    // Lane 2: Broad C2C/W2 — volume + bench utilization
+  FTE_HIGH_COMP   // Lane 3: FTE high-comp / direct ATS — premium vertical
+  OPT_JUNIOR_FTE  // Lane 4: OPT / junior FTE — early-career pipeline
+}
+
+// ─── Premium Skill Families ──────────────────────────────────────
+
+enum PremiumSkillFamily {
+  AI_ML
+  MLOPS_GENAI
+  DATA_ENGINEERING
+  CLOUD_DEVOPS
+  CYBERSECURITY
+  SWE_CORE
 }
 
 // ─── Users & Auth ────────────────────────────────────────────────
@@ -122,6 +153,21 @@ model Vendor {
   disputeFrequency   Float?
   feedbackLatencyHrs Float?
 
+  // ─── Prime Vendor Registry ─────────────────────────
+  tier                VendorTier        @default(UNCLASSIFIED)
+  isMspVms            Boolean           @default(false)
+  onboardingUrl       String?
+  preferredPods       Pod[]
+  avgBillRateMin      Float?
+  avgBillRateMax      Float?
+  avgPaymentDays      Float?
+  responseRate        Float?
+  interviewGrantRate  Float?
+  placementCount      Int               @default(0)
+  relationshipOwner   String?
+  vendorNotes         String?           @db.Text
+  lastActivityAt      DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -134,6 +180,8 @@ model Vendor {
   offers      Offer[]
 
   @@index([tenantId])
+  @@index([tenantId, tier])
+  @@index([tenantId, trustScore])
 }
 
 model VendorContact {
@@ -210,6 +258,18 @@ model Consultant {
   consentPolicy         Json                @default("{}")
   trustScore            Float?
   performanceHistory    Json                @default("[]")
+
+  // ─── Candidate Quality Score ───────────────────────
+  qualityScore          Float?
+  resumeFreshnessAt     DateTime?
+  rateRealism           Float?
+  interviewCount        Int                 @default(0)
+  offerCount            Int                 @default(0)
+  placementCount        Int                 @default(0)
+  availabilityConfidence Float?
+  premiumSkillFamilies  PremiumSkillFamily[]
+  sourcingLane          SourcingLane?
+
   createdAt             DateTime            @default(now())
   updatedAt             DateTime            @updatedAt
 
@@ -224,10 +284,12 @@ model Consultant {
   assignments      Assignment[]
   timesheets       Timesheet[]
   immigrationCases ImmigrationCase[]
+  autoSubmitQueue  AutoSubmitQueueItem[]
 
   @@index([tenantId])
   @@index([tenantId, email])
   @@index([tenantId, readiness])
+  @@index([tenantId, qualityScore])
 }
 
 // ─── Work Authorization ──────────────────────────────────────────
@@ -412,6 +474,13 @@ model Submission {
   marginApproved       Boolean          @default(false)
   marginOverrideBy     String?
   notes                String?
+  sentEmailId          String?
+  sentConversationId   String?
+  sentInternetMsgId    String?
+  sentAt               DateTime?
+  sentTo               String?
+  sentFrom             String?
+  sentSubject          String?
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
 
@@ -422,10 +491,89 @@ model Submission {
   consentRecord ConsentRecord?
   interviews    Interview[]
   offers        Offer[]
+  emailThreads  SubmissionEmailThread[]
 
   @@unique([tenantId, jobId, consultantId])
   @@index([tenantId])
   @@index([tenantId, status])
+  @@index([sentConversationId])
+}
+
+model SubmissionEmailThread {
+  id              String   @id @default(cuid())
+  submissionId    String
+  direction       String   // OUTBOUND | INBOUND
+  emailType       String   // INITIAL | FOLLOWUP_1 | FOLLOWUP_2 | FOLLOWUP_3 | VENDOR_REPLY
+  graphMessageId  String?
+  conversationId  String?
+  internetMsgId   String?
+  fromEmail       String
+  toEmails        String[]
+  subject         String
+  bodyPreview     String?
+  sentAt          DateTime
+  createdAt       DateTime @default(now())
+
+  submission Submission @relation(fields: [submissionId], references: [id])
+
+  @@index([submissionId])
+  @@index([conversationId])
+}
+
+// ─── Auto-Submit Queue (Epic 4) ────────────────────────────────────
+
+enum AutoSubmitStatus {
+  QUEUED
+  APPROVED
+  REJECTED
+  SENT
+  EXPIRED
+}
+
+model AutoSubmitQueueItem {
+  id               String           @id @default(cuid())
+  tenantId         String
+  reqSignalId      String?
+  marketJobId      String?
+  consultantId     String
+  reqTitle         String
+  reqLocation      String?
+  reqRate          String?
+  reqSkills        Json             @default("[]")
+  reqSource        String
+  vendorName       String?
+  vendorDomain     String?
+  vendorTrustScore Float?
+  contactEmail     String?
+  contactName      String?
+  consultantName   String
+  consultantSkills Json             @default("[]")
+  matchScore       Float            @default(0)
+  matchReasons     Json             @default("[]")
+  marginEstimate   Float?
+  status           AutoSubmitStatus @default(QUEUED)
+  reviewedBy       String?
+  reviewedAt       DateTime?
+  submissionId     String?
+  sentAt           DateTime?
+  expiresAt        DateTime
+  createdAt        DateTime         @default(now())
+
+  // ─── Strategic Routing ─────────────────────────────
+  sourcingLane         SourcingLane?
+  premiumSkillBonus    Float?
+  supplyFitScore       Float?
+  opportunityPriority  Float?
+  vendorTier           VendorTier?
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+  consultant Consultant @relation(fields: [consultantId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt])
+  @@index([consultantId])
+  @@index([status, expiresAt])
+  @@index([tenantId, sourcingLane])
 }
 
 // ─── Consent Ledger ──────────────────────────────────────────────
@@ -1426,6 +1574,13 @@ model VendorReqSignal {
   skills          String[]
   clientHint      String?
 
+  // Scoring (computed by actionability pipeline)
+  actionabilityScore  Int?
+  engagementModel     String?
+  employmentNature    String?
+  premiumSkillFamily  String?
+  premiumSkillBonus   Int?
+
   vendorCompany   ExtractedVendorCompany? @relation(fields: [vendorCompanyId], references: [id])
   vendorContact   ExtractedVendorContact? @relation(fields: [vendorContactId], references: [id])
 
@@ -1433,6 +1588,8 @@ model VendorReqSignal {
 
   @@index([vendorCompanyId])
   @@index([vendorContactId])
+  @@index([actionabilityScore])
+  @@index([createdAt])
 }
 
 model ExtractionFact {

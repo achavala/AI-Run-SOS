@@ -8,66 +8,68 @@ export class VendorTrustService {
   constructor(private prisma: PrismaService) {}
 
   async computeAllScores() {
-    this.logger.log('Computing vendor trust scores...');
+    this.logger.log('Computing vendor trust scores with tier-based weighting...');
 
     const vendors = await this.prisma.$queryRaw`
       SELECT
         vc.id,
         vc.domain,
         vc.name,
-        vc.email_count,
-        (SELECT COUNT(*)::int FROM vendor_req_signal vrs WHERE vrs.vendor_company_id = vc.id) as req_count,
-        (SELECT COUNT(*)::int FROM vendor_req_signal vrs WHERE vrs.vendor_company_id = vc.id
-          AND vrs.created_at >= NOW() - interval '30 days') as req_count_30d,
-        (SELECT COUNT(*)::int FROM vendor_contact vct WHERE vct.vendor_company_id = vc.id) as contact_count,
-        (SELECT COUNT(DISTINCT title)::int FROM vendor_req_signal vrs WHERE vrs.vendor_company_id = vc.id
+        vc."emailCount" as email_count,
+        (SELECT COUNT(*)::int FROM "VendorReqSignal" vrs WHERE vrs."vendorCompanyId" = vc.id) as req_count,
+        (SELECT COUNT(*)::int FROM "VendorReqSignal" vrs WHERE vrs."vendorCompanyId" = vc.id
+          AND vrs."createdAt" >= NOW() - interval '30 days') as req_count_30d,
+        (SELECT COUNT(*)::int FROM "ExtractedVendorContact" vct WHERE vct."vendorCompanyId" = vc.id) as contact_count,
+        (SELECT COUNT(DISTINCT title)::int FROM "VendorReqSignal" vrs WHERE vrs."vendorCompanyId" = vc.id
           AND title IS NOT NULL) as unique_roles,
-        (SELECT ROUND(COUNT(*)::numeric /
-          GREATEST(EXTRACT(EPOCH FROM (MAX(created_at) - MIN(created_at))) / 604800, 1), 2)
-          FROM vendor_req_signal vrs WHERE vrs.vendor_company_id = vc.id) as avg_reqs_per_week,
         (SELECT ROUND(
-          COUNT(*) FILTER (WHERE rate_text IS NOT NULL)::numeric / GREATEST(COUNT(*), 1) * 100, 1)
-          FROM vendor_req_signal vrs WHERE vrs.vendor_company_id = vc.id) as has_rate_pct,
+          COUNT(*) FILTER (WHERE "rateText" IS NOT NULL)::numeric / GREATEST(COUNT(*), 1) * 100, 1)
+          FROM "VendorReqSignal" vrs WHERE vrs."vendorCompanyId" = vc.id) as has_rate_pct,
         (SELECT ROUND(
           COUNT(*) FILTER (WHERE location IS NOT NULL AND location != '')::numeric / GREATEST(COUNT(*), 1) * 100, 1)
-          FROM vendor_req_signal vrs WHERE vrs.vendor_company_id = vc.id) as has_location_pct
-      FROM vendor_company vc
-      WHERE vc.name NOT LIKE '[SYSTEM]%'
+          FROM "VendorReqSignal" vrs WHERE vrs."vendorCompanyId" = vc.id) as has_location_pct,
+        (SELECT COUNT(*)::int FROM "VendorReqSignal" vrs WHERE vrs."vendorCompanyId" = vc.id
+          AND "premiumSkillFamily" IS NOT NULL) as premium_req_count
+      FROM "ExtractedVendorCompany" vc
+      WHERE vc.name IS NOT NULL AND vc.name NOT LIKE '[SYSTEM]%'
     ` as any[];
 
     let computed = 0;
     for (const v of vendors) {
       const score = this.calculateTrustScore(v);
-      const tier = score >= 75 ? 'HIGH' : score >= 45 ? 'MEDIUM' : score >= 20 ? 'LOW' : 'JUNK';
+      const tier = this.determineTier(score, v);
 
-      await this.prisma.$executeRaw`
-        INSERT INTO vendor_trust_score (
-          vendor_company_id, domain, req_count, req_count_30d, contact_count,
-          unique_roles_count, avg_reqs_per_week, has_rate_pct, has_location_pct,
-          trust_score, actionability_tier, computed_at
-        ) VALUES (
-          ${v.id}::uuid, ${v.domain}, ${v.req_count}::int, ${v.req_count_30d}::int,
-          ${v.contact_count}::int, ${v.unique_roles}::int, ${v.avg_reqs_per_week}::float,
-          ${v.has_rate_pct}::float, ${v.has_location_pct}::float,
-          ${score}::float, ${tier}, NOW()
-        )
-        ON CONFLICT (vendor_company_id) DO UPDATE SET
-          req_count = EXCLUDED.req_count,
-          req_count_30d = EXCLUDED.req_count_30d,
-          contact_count = EXCLUDED.contact_count,
-          unique_roles_count = EXCLUDED.unique_roles_count,
-          avg_reqs_per_week = EXCLUDED.avg_reqs_per_week,
-          has_rate_pct = EXCLUDED.has_rate_pct,
-          has_location_pct = EXCLUDED.has_location_pct,
-          trust_score = EXCLUDED.trust_score,
-          actionability_tier = EXCLUDED.actionability_tier,
-          computed_at = NOW()
-      `;
+      await this.prisma.vendor.upsert({
+        where: { id: v.id },
+        create: {
+          id: v.id,
+          tenantId: 'default',
+          companyName: v.name || v.domain,
+          domain: v.domain,
+          trustScore: score,
+          tier: tier as any,
+          placementCount: 0,
+        },
+        update: {
+          trustScore: score,
+          tier: tier as any,
+          lastActivityAt: new Date(),
+        },
+      }).catch(async () => {
+        const existing = await this.prisma.vendor.findFirst({
+          where: { domain: v.domain },
+        });
+        if (existing) {
+          await this.prisma.vendor.update({
+            where: { id: existing.id },
+            data: { trustScore: score, tier: tier as any, lastActivityAt: new Date() },
+          });
+        }
+      });
       computed++;
     }
 
     this.logger.log(`Computed trust scores for ${computed} vendors`);
-
     return {
       computed,
       distribution: await this.getDistribution(),
@@ -77,7 +79,7 @@ export class VendorTrustService {
   private calculateTrustScore(v: any): number {
     let score = 0;
 
-    // Volume: more reqs = more active (max 25 pts)
+    // Volume (max 25 pts)
     if (v.req_count >= 100) score += 25;
     else if (v.req_count >= 20) score += 15;
     else if (v.req_count >= 5) score += 8;
@@ -99,38 +101,102 @@ export class VendorTrustService {
     // Data quality: has location (max 10 pts)
     score += Math.min(10, Math.round((v.has_location_pct || 0) * 0.1));
 
-    // Contacts: multiple contacts = real company (max 10 pts)
+    // Contacts (max 10 pts)
     if (v.contact_count >= 5) score += 10;
     else if (v.contact_count >= 2) score += 6;
     else score += 2;
 
+    // Premium skill bonus: vendors sending premium reqs get a trust uplift (max 5 pts)
+    const premiumRatio = v.req_count > 0 ? (v.premium_req_count || 0) / v.req_count : 0;
+    if (premiumRatio >= 0.3) score += 5;
+    else if (premiumRatio >= 0.1) score += 3;
+
     return Math.min(100, Math.max(0, score));
   }
 
+  private determineTier(score: number, v: any): string {
+    // PRIME: high trust + high volume + recent activity + multiple contacts
+    if (score >= 80 && v.req_count_30d >= 5 && v.contact_count >= 3) return 'PRIME';
+    // DIRECT: good trust + active
+    if (score >= 65 && v.req_count_30d >= 2) return 'DIRECT';
+    // SUB: medium trust
+    if (score >= 40) return 'SUB';
+    // BROKER: low trust but some activity
+    if (score >= 20) return 'BROKER';
+    return 'UNCLASSIFIED';
+  }
+
   async getTopVendors(limit = 30) {
-    return this.prisma.$queryRaw`
-      SELECT vts.*, vc.name as vendor_name
-      FROM vendor_trust_score vts
-      JOIN vendor_company vc ON vc.id = vts.vendor_company_id
-      ORDER BY vts.trust_score DESC
-      LIMIT ${limit}
-    ` as Promise<any[]>;
+    return this.prisma.vendor.findMany({
+      where: { trustScore: { not: null } },
+      orderBy: { trustScore: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        companyName: true,
+        domain: true,
+        trustScore: true,
+        tier: true,
+        responseRate: true,
+        interviewGrantRate: true,
+        placementCount: true,
+        avgBillRateMin: true,
+        avgBillRateMax: true,
+        preferredPods: true,
+        lastActivityAt: true,
+      },
+    });
   }
 
   async getDistribution() {
     return this.prisma.$queryRaw`
-      SELECT actionability_tier as tier, COUNT(*)::int as count,
-             ROUND(AVG(trust_score)::numeric, 1) as avg_score
-      FROM vendor_trust_score
-      GROUP BY actionability_tier
+      SELECT tier::text as tier, COUNT(*)::int as count,
+             ROUND(AVG("trustScore")::numeric, 1) as avg_score
+      FROM "Vendor"
+      WHERE "trustScore" IS NOT NULL
+      GROUP BY tier
       ORDER BY avg_score DESC
     ` as Promise<any[]>;
   }
 
-  async getVendorScore(vendorCompanyId: string) {
-    const [score] = await this.prisma.$queryRaw`
-      SELECT * FROM vendor_trust_score WHERE vendor_company_id = ${vendorCompanyId}::uuid
-    ` as any[];
-    return score || null;
+  async getVendorScore(vendorId: string) {
+    return this.prisma.vendor.findUnique({
+      where: { id: vendorId },
+      select: {
+        id: true,
+        companyName: true,
+        domain: true,
+        trustScore: true,
+        tier: true,
+        responseRate: true,
+        interviewGrantRate: true,
+        placementCount: true,
+        avgBillRateMin: true,
+        avgBillRateMax: true,
+        preferredPods: true,
+        lastActivityAt: true,
+        paySpeedDays: true,
+        ghostRate: true,
+      },
+    });
+  }
+
+  async getVendorsByLane(lane: string) {
+    const tierMap: Record<string, string[]> = {
+      PRIME_C2C: ['PRIME', 'DIRECT'],
+      BROAD_C2C_W2: ['SUB', 'DIRECT'],
+      FTE_HIGH_COMP: ['PRIME', 'DIRECT'],
+      OPT_JUNIOR_FTE: ['DIRECT', 'SUB'],
+    };
+    const tiers = tierMap[lane] || ['PRIME', 'DIRECT', 'SUB', 'BROKER'];
+
+    return this.prisma.vendor.findMany({
+      where: {
+        tier: { in: tiers as any },
+        trustScore: { gte: 30 },
+      },
+      orderBy: { trustScore: 'desc' },
+      take: 50,
+    });
   }
 }

@@ -29,51 +29,45 @@ export class AnalyticsService {
     const cached = this.getCached('recruiterActivity');
     if (cached) return cached;
 
-    const recruiters = await this.prisma.$queryRaw`
-      SELECT
-        mailbox_email as "email",
-        SPLIT_PART(mailbox_email, '@', 1) as "name",
-        COUNT(*)::int as "totalEmails",
-        COUNT(*) FILTER (WHERE from_email = mailbox_email)::int as "sent",
-        COUNT(*) FILTER (WHERE from_email != mailbox_email)::int as "received",
-        COUNT(*) FILTER (WHERE category = 'VENDOR_REQ')::int as "vendorReqs",
-        COUNT(*) FILTER (WHERE category = 'CONSULTANT')::int as "consultantEmails",
-        COUNT(*) FILTER (WHERE category = 'CLIENT')::int as "clientEmails",
-        COUNT(*) FILTER (WHERE category = 'INTERNAL')::int as "internalEmails",
-        COUNT(*) FILTER (WHERE subject ILIKE 'Re:%' AND from_email = mailbox_email)::int as "repliesSent",
-        COUNT(*) FILTER (WHERE subject ILIKE 'Re:%' AND from_email != mailbox_email)::int as "repliesReceived",
-        COUNT(*) FILTER (WHERE subject ILIKE 'Fw:%' OR subject ILIKE 'Fwd:%')::int as "forwards",
-        COUNT(*) FILTER (WHERE
-          from_email = mailbox_email
-          AND (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
-          AND EXISTS (SELECT 1 FROM unnest(to_emails) t(a) WHERE SPLIT_PART(t.a,'@',2) NOT IN ('cloudresources.net','emonics.com',''))
-        )::int as "submissionsSent",
-        COUNT(*) FILTER (WHERE subject ILIKE '%interview%')::int as "interviewRelated",
-        COUNT(*) FILTER (WHERE subject ILIKE '%offer%' AND subject NOT ILIKE '%offered%position%')::int as "offerRelated",
-        MIN(sent_at) as "firstActivity",
-        MAX(sent_at) as "lastActivity"
-      FROM raw_email_message
-      GROUP BY mailbox_email
-      ORDER BY "totalEmails" DESC
-    ` as any[];
+    try {
+      const recruiters = await this.prisma.$queryRaw`
+        SELECT
+          "pstBatch" as "email",
+          SPLIT_PART("pstBatch", '@', 1) as "name",
+          COUNT(*)::int as "totalEmails",
+          COUNT(*) FILTER (WHERE subject ILIKE 'Re:%')::int as "repliesSent",
+          COUNT(*) FILTER (WHERE subject ILIKE 'Fw:%' OR subject ILIKE 'Fwd:%')::int as "forwards",
+          COUNT(*) FILTER (WHERE
+            (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
+            AND EXISTS (SELECT 1 FROM unnest("toEmails") t(a) WHERE SPLIT_PART(t.a,'@',2) NOT IN ('cloudresources.net','emonics.com',''))
+          )::int as "submissionsSent",
+          COUNT(*) FILTER (WHERE subject ILIKE '%interview%')::int as "interviewRelated",
+          COUNT(*) FILTER (WHERE subject ILIKE '%offer%' AND subject NOT ILIKE '%offered%position%')::int as "offerRelated",
+          MIN("sentAt") as "firstActivity",
+          MAX("sentAt") as "lastActivity"
+        FROM "RawEmailMessage"
+        GROUP BY "pstBatch"
+        ORDER BY "totalEmails" DESC
+      ` as any[];
 
-    const dailyActivity = await this.prisma.$queryRaw`
-      SELECT
-        mailbox_email as "email",
-        sent_at::date as "day",
-        COUNT(*)::int as "total",
-        COUNT(*) FILTER (WHERE from_email = mailbox_email)::int as "sent",
-        COUNT(*) FILTER (WHERE from_email != mailbox_email)::int as "received",
-        COUNT(*) FILTER (WHERE category = 'VENDOR_REQ')::int as "vendorReqs"
-      FROM raw_email_message
-      WHERE sent_at >= NOW() - interval '30 days'
-      GROUP BY mailbox_email, sent_at::date
-      ORDER BY day DESC, total DESC
-    ` as any[];
+      const dailyActivity = await this.prisma.$queryRaw`
+        SELECT
+          "pstBatch" as "email",
+          "sentAt"::date as "day",
+          COUNT(*)::int as "total"
+        FROM "RawEmailMessage"
+        WHERE "sentAt" >= NOW() - interval '30 days'
+        GROUP BY "pstBatch", "sentAt"::date
+        ORDER BY "day" DESC, "total" DESC
+      ` as any[];
 
-    const result = { recruiters, dailyActivity };
-    this.setCache('recruiterActivity', result, 300_000);
-    return result;
+      const result = { recruiters, dailyActivity };
+      this.setCache('recruiterActivity', result, 300_000);
+      return result;
+    } catch (e) {
+      this.logger.warn(`getRecruiterActivity failed (mailbox_email/category columns missing): ${e}`);
+      return { recruiters: [], dailyActivity: [] };
+    }
   }
 
   /* ═══════ 2. Email Pipeline Tracker (openings → submitted → replies → interviews) ═══════ */
@@ -81,77 +75,52 @@ export class AnalyticsService {
   async getEmailPipeline() {
     const cached = this.getCached('emailPipeline');
     if (cached) return cached;
-    const pipeline = await this.prisma.$queryRaw`
-      SELECT
-        mailbox_email as "email",
-        SPLIT_PART(mailbox_email, '@', 1) as "name",
 
-        -- Stage 1: Job Openings Received
-        COUNT(*) FILTER (WHERE category = 'VENDOR_REQ')::int as "openingsReceived",
+    try {
+      const pipeline = await this.prisma.$queryRaw`
+        SELECT
+          "pstBatch" as "email",
+          SPLIT_PART("pstBatch", '@', 1) as "name",
+          COUNT(*) FILTER (WHERE
+            (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
+            AND EXISTS (SELECT 1 FROM unnest("toEmails") t(a) WHERE SPLIT_PART(t.a,'@',2) NOT IN ('cloudresources.net','emonics.com',''))
+          )::int as "submissionsSent",
+          COUNT(*) FILTER (WHERE
+            subject ILIKE '%interview%'
+            AND subject NOT ILIKE '%interview prep%'
+          )::int as "interviewSignals",
+          COUNT(*) FILTER (WHERE
+            subject ILIKE '%offer%letter%'
+            OR subject ILIKE '%offer%extend%'
+            OR (subject ILIKE '%offer%' AND subject ILIKE '%accept%')
+          )::int as "offerSignals"
+        FROM "RawEmailMessage"
+        GROUP BY "pstBatch"
+        ORDER BY "submissionsSent" DESC
+      ` as any[];
 
-        -- Stage 2: Verified Submissions (outbound to external vendor domains)
-        COUNT(*) FILTER (WHERE
-          from_email = mailbox_email
-          AND (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
-          AND EXISTS (SELECT 1 FROM unnest(to_emails) t(a) WHERE SPLIT_PART(t.a,'@',2) NOT IN ('cloudresources.net','emonics.com',''))
-        )::int as "submissionsSent",
+      const weeklyTrend = await this.prisma.$queryRaw`
+        SELECT
+          date_trunc('week', "sentAt")::date as "week",
+          "pstBatch" as "email",
+          COUNT(*) FILTER (WHERE
+            (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
+            AND EXISTS (SELECT 1 FROM unnest("toEmails") t(a) WHERE SPLIT_PART(t.a,'@',2) NOT IN ('cloudresources.net','emonics.com',''))
+          )::int as "submissions",
+          COUNT(*) FILTER (WHERE subject ILIKE '%interview%')::int as "interviews"
+        FROM "RawEmailMessage"
+        WHERE "sentAt" >= NOW() - interval '90 days'
+        GROUP BY "week", "pstBatch"
+        ORDER BY "week" DESC, "submissions" DESC
+      ` as any[];
 
-        -- Stage 3: Replies received (Re: from external after submission)
-        COUNT(*) FILTER (WHERE
-          subject ILIKE 'Re:%'
-          AND from_email != mailbox_email
-          AND category IN ('VENDOR_REQ', 'VENDOR_OTHER')
-        )::int as "vendorReplies",
-
-        -- Stage 4: Interview signals
-        COUNT(*) FILTER (WHERE
-          subject ILIKE '%interview%'
-          AND subject NOT ILIKE '%interview prep%'
-        )::int as "interviewSignals",
-
-        -- Stage 5: Offer signals
-        COUNT(*) FILTER (WHERE
-          subject ILIKE '%offer%letter%'
-          OR subject ILIKE '%offer%extend%'
-          OR (subject ILIKE '%offer%' AND subject ILIKE '%accept%')
-        )::int as "offerSignals",
-
-        -- Engagement rate (validated)
-        CASE WHEN COUNT(*) FILTER (WHERE category = 'VENDOR_REQ') > 0
-          THEN ROUND(
-            COUNT(*) FILTER (WHERE
-              from_email = mailbox_email
-              AND (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
-              AND EXISTS (SELECT 1 FROM unnest(to_emails) t(a) WHERE SPLIT_PART(t.a,'@',2) NOT IN ('cloudresources.net','emonics.com',''))
-            )::numeric /
-            COUNT(*) FILTER (WHERE category = 'VENDOR_REQ')::numeric * 100, 1
-          )
-          ELSE 0 END as "engagementRate"
-      FROM raw_email_message
-      GROUP BY mailbox_email
-      ORDER BY "openingsReceived" DESC
-    ` as any[];
-
-    const weeklyTrend = await this.prisma.$queryRaw`
-      SELECT
-        date_trunc('week', sent_at)::date as "week",
-        mailbox_email as "email",
-        COUNT(*) FILTER (WHERE category = 'VENDOR_REQ')::int as "openings",
-        COUNT(*) FILTER (WHERE
-          from_email = mailbox_email
-          AND (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
-          AND EXISTS (SELECT 1 FROM unnest(to_emails) t(a) WHERE SPLIT_PART(t.a,'@',2) NOT IN ('cloudresources.net','emonics.com',''))
-        )::int as "submissions",
-        COUNT(*) FILTER (WHERE subject ILIKE '%interview%')::int as "interviews"
-      FROM raw_email_message
-      WHERE sent_at >= NOW() - interval '90 days'
-      GROUP BY "week", mailbox_email
-      ORDER BY "week" DESC, "openings" DESC
-    ` as any[];
-
-    const pipelineResult = { pipeline, weeklyTrend };
-    this.setCache('emailPipeline', pipelineResult, 300_000);
-    return pipelineResult;
+      const pipelineResult = { pipeline, weeklyTrend };
+      this.setCache('emailPipeline', pipelineResult, 300_000);
+      return pipelineResult;
+    } catch (e) {
+      this.logger.warn(`getEmailPipeline failed (mailbox_email/category columns missing): ${e}`);
+      return { pipeline: [], weeklyTrend: [] };
+    }
   }
 
   /* ═══════ 3. ML Email Quality Scoring ═══════ */
@@ -165,34 +134,34 @@ export class AnalyticsService {
           vrs.id,
           vrs.title,
           vrs.location,
-          vrs.rate_text,
-          vrs.employment_type,
+          vrs."rateText",
+          vrs."employmentType",
           vrs.skills,
-          vrs.actionability_score,
-          vrs.engagement_model,
-          vrs.employment_nature,
+          vrs."actionabilityScore",
+          vrs."engagementModel",
+          vrs."employmentNature",
           vc.name as vendor_name,
-          vts.trust_score as vendor_trust,
-          vts.actionability_tier as vendor_tier,
+          COALESCE(v."trustScore", 0) as vendor_trust,
+          COALESCE(v.tier::text, 'UNCLASSIFIED') as vendor_tier,
           CASE
-            WHEN vrs.actionability_score >= 80 AND vts.trust_score >= 60 THEN 'PREMIUM'
-            WHEN vrs.actionability_score >= 60 AND vts.trust_score >= 40 THEN 'QUALITY'
-            WHEN vrs.actionability_score >= 40 THEN 'MODERATE'
-            WHEN vrs.actionability_score >= 20 THEN 'LOW_VALUE'
+            WHEN vrs."actionabilityScore" >= 80 AND COALESCE(v."trustScore", 0) >= 60 THEN 'PREMIUM'
+            WHEN vrs."actionabilityScore" >= 60 AND COALESCE(v."trustScore", 0) >= 40 THEN 'QUALITY'
+            WHEN vrs."actionabilityScore" >= 40 THEN 'MODERATE'
+            WHEN vrs."actionabilityScore" >= 20 THEN 'LOW_VALUE'
             ELSE 'JUNK'
           END as quality_tier
-        FROM vendor_req_signal vrs
-        LEFT JOIN vendor_company vc ON vc.id = vrs.vendor_company_id
-        LEFT JOIN vendor_trust_score vts ON vts.vendor_company_id = vc.id
+        FROM "VendorReqSignal" vrs
+        LEFT JOIN "ExtractedVendorCompany" vc ON vc.id = vrs."vendorCompanyId"
+        LEFT JOIN "Vendor" v ON v.domain = vc.domain
       )
       SELECT
         quality_tier as "tier",
         COUNT(*)::int as "count",
-        ROUND(AVG(actionability_score)::numeric, 1) as "avgActionScore",
-        COUNT(*) FILTER (WHERE rate_text IS NOT NULL)::int as "withRate",
+        ROUND(AVG("actionabilityScore")::numeric, 1) as "avgActionScore",
+        COUNT(*) FILTER (WHERE "rateText" IS NOT NULL)::int as "withRate",
         COUNT(*) FILTER (WHERE location IS NOT NULL)::int as "withLocation",
         COUNT(*) FILTER (WHERE skills IS NOT NULL AND array_length(skills,1) > 0)::int as "withSkills",
-        COUNT(*) FILTER (WHERE engagement_model IN ('C2C', 'W2'))::int as "c2cOrW2"
+        COUNT(*) FILTER (WHERE "engagementModel" IN ('C2C', 'W2'))::int as "c2cOrW2"
       FROM scored
       GROUP BY quality_tier
       ORDER BY
@@ -209,17 +178,17 @@ export class AnalyticsService {
       SELECT
         'No title' as "pattern",
         COUNT(*) FILTER (WHERE title IS NULL OR title = '')::int as "count"
-      FROM vendor_req_signal
+      FROM "VendorReqSignal"
       UNION ALL
-      SELECT 'No vendor contact', COUNT(*) FILTER (WHERE vendor_contact_id IS NULL)::int FROM vendor_req_signal
+      SELECT 'No vendor contact', COUNT(*) FILTER (WHERE "vendorContactId" IS NULL)::int FROM "VendorReqSignal"
       UNION ALL
-      SELECT 'No skills detected', COUNT(*) FILTER (WHERE skills IS NULL OR array_length(skills,1) IS NULL)::int FROM vendor_req_signal
+      SELECT 'No skills detected', COUNT(*) FILTER (WHERE skills IS NULL OR array_length(skills,1) IS NULL)::int FROM "VendorReqSignal"
       UNION ALL
-      SELECT 'No location', COUNT(*) FILTER (WHERE location IS NULL OR location = '')::int FROM vendor_req_signal
+      SELECT 'No location', COUNT(*) FILTER (WHERE location IS NULL OR location = '')::int FROM "VendorReqSignal"
       UNION ALL
-      SELECT 'No employment type', COUNT(*) FILTER (WHERE employment_type IS NULL OR employment_type = '')::int FROM vendor_req_signal
+      SELECT 'No employment type', COUNT(*) FILTER (WHERE "employmentType" IS NULL OR "employmentType" = '')::int FROM "VendorReqSignal"
       UNION ALL
-      SELECT 'Contains no-C2C/no-third-party', COUNT(*) FILTER (WHERE title ILIKE '%no third party%' OR title ILIKE '%no c2c%' OR title ILIKE '%w2 only%')::int FROM vendor_req_signal
+      SELECT 'Contains no-C2C/no-third-party', COUNT(*) FILTER (WHERE title ILIKE '%no third party%' OR title ILIKE '%no c2c%' OR title ILIKE '%w2 only%')::int FROM "VendorReqSignal"
       ORDER BY "count" DESC
     ` as any[];
 
@@ -235,71 +204,61 @@ export class AnalyticsService {
   async getRecruiterEfficiencyTable() {
     const cached = this.getCached('recruiterEfficiency');
     if (cached) return cached;
-    const daily = await this.prisma.$queryRaw`
-      SELECT
-        mailbox_email as "email",
-        SPLIT_PART(mailbox_email, '@', 1) as "name",
-        sent_at::date as "day",
-        COUNT(*) FILTER (WHERE category = 'VENDOR_REQ')::int as "reqsReceived",
-        COUNT(*) FILTER (WHERE
-          from_email = mailbox_email
-          AND (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
-          AND EXISTS (SELECT 1 FROM unnest(to_emails) t(a) WHERE SPLIT_PART(t.a,'@',2) NOT IN ('cloudresources.net','emonics.com',''))
-        )::int as "verifiedSubmissions",
-        COUNT(*) FILTER (WHERE
-          subject ILIKE 'Re:%'
-          AND from_email != mailbox_email
-          AND SPLIT_PART(from_email,'@',2) NOT IN ('cloudresources.net','emonics.com')
-          AND category IN ('VENDOR_REQ','VENDOR_OTHER','CLIENT')
-        )::int as "vendorReplies",
-        COUNT(*) FILTER (WHERE subject ILIKE '%interview%' AND subject NOT ILIKE '%interview prep%')::int as "interviewSignals",
-        COUNT(*) FILTER (WHERE from_email = mailbox_email)::int as "emailsSent",
-        COUNT(*) FILTER (WHERE
-          subject ILIKE 'Re:%' AND from_email = mailbox_email
-          AND SPLIT_PART(COALESCE((SELECT t FROM unnest(to_emails) t LIMIT 1),''),'@',2) NOT IN ('cloudresources.net','emonics.com','')
-        )::int as "externalRepliesSent"
-      FROM raw_email_message
-      WHERE sent_at >= NOW() - interval '30 days'
-      GROUP BY mailbox_email, sent_at::date
-      HAVING COUNT(*) FILTER (WHERE category = 'VENDOR_REQ') > 0
-        OR COUNT(*) FILTER (WHERE from_email = mailbox_email AND (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%')) > 0
-      ORDER BY day DESC, "reqsReceived" DESC
-    ` as any[];
 
-    const allTime = await this.prisma.$queryRaw`
-      SELECT
-        mailbox_email as "email",
-        SPLIT_PART(mailbox_email, '@', 1) as "name",
-        COUNT(*) FILTER (WHERE category = 'VENDOR_REQ')::int as "totalReqs",
-        COUNT(*) FILTER (WHERE
-          from_email = mailbox_email
-          AND (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
-          AND EXISTS (SELECT 1 FROM unnest(to_emails) t(a) WHERE SPLIT_PART(t.a,'@',2) NOT IN ('cloudresources.net','emonics.com',''))
-        )::int as "totalVerifiedSubmissions",
-        COUNT(*) FILTER (WHERE subject ILIKE '%interview%' AND subject NOT ILIKE '%interview prep%')::int as "totalInterviews",
-        COUNT(*) FILTER (WHERE subject ILIKE '%offer%letter%' OR subject ILIKE '%offer%extend%' OR (subject ILIKE '%offer%' AND subject ILIKE '%accept%'))::int as "totalOffers",
-        COUNT(*) FILTER (WHERE
-          subject ILIKE 'Re:%' AND from_email != mailbox_email
-          AND SPLIT_PART(from_email,'@',2) NOT IN ('cloudresources.net','emonics.com')
-          AND category IN ('VENDOR_REQ','VENDOR_OTHER','CLIENT')
-        )::int as "totalVendorReplies",
-        CASE WHEN COUNT(*) FILTER (WHERE
-          from_email = mailbox_email AND (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%')
-        ) > 0
-          THEN ROUND(
-            COUNT(*) FILTER (WHERE subject ILIKE '%interview%')::numeric /
-            COUNT(*) FILTER (WHERE from_email = mailbox_email AND (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%'))::numeric * 100, 1
-          ) ELSE 0 END as "submissionToInterviewPct",
-        MIN(sent_at) as "firstActivity",
-        MAX(sent_at) as "lastActivity"
-      FROM raw_email_message
-      GROUP BY mailbox_email
-      ORDER BY "totalVerifiedSubmissions" DESC
-    ` as any[];
+    try {
+      const daily = await this.prisma.$queryRaw`
+        SELECT
+          "pstBatch" as "email",
+          SPLIT_PART("pstBatch", '@', 1) as "name",
+          "sentAt"::date as "day",
+          COUNT(*) FILTER (WHERE
+            (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
+            AND EXISTS (SELECT 1 FROM unnest("toEmails") t(a) WHERE SPLIT_PART(t.a,'@',2) NOT IN ('cloudresources.net','emonics.com',''))
+          )::int as "verifiedSubmissions",
+          COUNT(*) FILTER (WHERE
+            subject ILIKE 'Re:%'
+            AND SPLIT_PART("fromEmail",'@',2) NOT IN ('cloudresources.net','emonics.com')
+          )::int as "vendorReplies",
+          COUNT(*) FILTER (WHERE subject ILIKE '%interview%' AND subject NOT ILIKE '%interview prep%')::int as "interviewSignals",
+          COUNT(*) FILTER (WHERE
+            subject ILIKE 'Re:%'
+            AND SPLIT_PART(COALESCE((SELECT t FROM unnest("toEmails") t LIMIT 1),''),'@',2) NOT IN ('cloudresources.net','emonics.com','')
+          )::int as "externalRepliesSent"
+        FROM "RawEmailMessage"
+        WHERE "sentAt" >= NOW() - interval '30 days'
+        GROUP BY "pstBatch", "sentAt"::date
+        HAVING COUNT(*) FILTER (WHERE subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%') > 0
+        ORDER BY "day" DESC, "verifiedSubmissions" DESC
+      ` as any[];
 
-    const effResult = { daily, allTime };
-    this.setCache('recruiterEfficiency', effResult, 300_000);
-    return effResult;
+      const allTime = await this.prisma.$queryRaw`
+        SELECT
+          "pstBatch" as "email",
+          SPLIT_PART("pstBatch", '@', 1) as "name",
+          COUNT(*) FILTER (WHERE
+            (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
+            AND EXISTS (SELECT 1 FROM unnest("toEmails") t(a) WHERE SPLIT_PART(t.a,'@',2) NOT IN ('cloudresources.net','emonics.com',''))
+          )::int as "totalVerifiedSubmissions",
+          COUNT(*) FILTER (WHERE subject ILIKE '%interview%' AND subject NOT ILIKE '%interview prep%')::int as "totalInterviews",
+          COUNT(*) FILTER (WHERE subject ILIKE '%offer%letter%' OR subject ILIKE '%offer%extend%' OR (subject ILIKE '%offer%' AND subject ILIKE '%accept%'))::int as "totalOffers",
+          COUNT(*) FILTER (WHERE
+            subject ILIKE 'Re:%'
+            AND SPLIT_PART("fromEmail",'@',2) NOT IN ('cloudresources.net','emonics.com')
+          )::int as "totalVendorReplies",
+          MIN("sentAt") as "firstActivity",
+          MAX("sentAt") as "lastActivity"
+        FROM "RawEmailMessage"
+        GROUP BY "pstBatch"
+        ORDER BY "totalVerifiedSubmissions" DESC
+      ` as any[];
+
+      const effResult = { daily, allTime };
+      this.setCache('recruiterEfficiency', effResult, 300_000);
+      return effResult;
+    } catch (e) {
+      this.logger.warn(`getRecruiterEfficiencyTable failed (mailbox_email/category columns missing): ${e}`);
+      return { daily: [], allTime: [] };
+    }
   }
 
   /* ═══════ 5. Top 30 Actionable Queue (Enforced Work Surface) ═══════ */
@@ -310,52 +269,56 @@ export class AnalyticsService {
         vrs.id,
         vrs.title,
         vrs.location,
-        vrs.rate_text as "rateText",
-        vrs.employment_type as "employmentType",
-        vrs.engagement_model as "engagementModel",
+        vrs."rateText",
+        vrs."employmentType",
+        vrs."engagementModel",
         vrs.skills,
-        vrs.actionability_score as "actionabilityScore",
-        vrs.created_at as "createdAt",
+        vrs."actionabilityScore",
+        vrs."createdAt",
+        vrs."premiumSkillFamily",
+        vrs."premiumSkillBonus",
         vc.name as "vendorName",
         vc.domain as "vendorDomain",
         vct.name as "contactName",
         vct.email as "contactEmail",
-        vts.trust_score as "vendorTrust",
-        vts.actionability_tier as "vendorTier",
+        COALESCE(v."trustScore", 0) as "vendorTrust",
+        COALESCE(v.tier::text, 'UNCLASSIFIED') as "vendorTier",
         CASE
-          WHEN vrs.actionability_score >= 80 AND COALESCE(vts.trust_score,0) >= 60 THEN 'PREMIUM'
-          WHEN vrs.actionability_score >= 60 AND COALESCE(vts.trust_score,0) >= 40 THEN 'QUALITY'
+          WHEN COALESCE(vrs."actionabilityScore",0) >= 80 AND COALESCE(v."trustScore",0) >= 60 THEN 'PREMIUM'
+          WHEN COALESCE(vrs."actionabilityScore",0) >= 60 AND COALESCE(v."trustScore",0) >= 40 THEN 'QUALITY'
           ELSE 'MODERATE'
         END as "tier"
-      FROM vendor_req_signal vrs
-      LEFT JOIN vendor_company vc ON vc.id = vrs.vendor_company_id
-      LEFT JOIN vendor_contact vct ON vct.id = vrs.vendor_contact_id
-      LEFT JOIN vendor_trust_score vts ON vts.vendor_company_id = vc.id
-      WHERE vrs.created_at >= NOW() - interval '3 days'
-        AND vrs.actionability_score >= 40
-        AND vc.name NOT LIKE '[SYSTEM]%'
-        AND vrs.employment_type IS NOT NULL
+      FROM "VendorReqSignal" vrs
+      LEFT JOIN "ExtractedVendorCompany" vc ON vc.id = vrs."vendorCompanyId"
+      LEFT JOIN "ExtractedVendorContact" vct ON vct.id = vrs."vendorContactId"
+      LEFT JOIN "Vendor" v ON v.domain = vc.domain
+      WHERE vrs."createdAt" >= NOW() - interval '3 days'
+        AND COALESCE(vrs."actionabilityScore", 0) >= 40
+        AND (vc.name IS NULL OR vc.name NOT LIKE '[SYSTEM]%')
+        AND vrs."employmentType" IS NOT NULL
         AND vrs.title IS NOT NULL AND vrs.title != ''
       ORDER BY
         CASE
-          WHEN vrs.actionability_score >= 80 AND COALESCE(vts.trust_score,0) >= 60 THEN 1
-          WHEN vrs.actionability_score >= 60 AND COALESCE(vts.trust_score,0) >= 40 THEN 2
+          WHEN COALESCE(vrs."actionabilityScore",0) >= 80 AND COALESCE(v."trustScore",0) >= 60 THEN 1
+          WHEN COALESCE(vrs."actionabilityScore",0) >= 60 AND COALESCE(v."trustScore",0) >= 40 THEN 2
           ELSE 3
         END,
-        vrs.actionability_score DESC,
-        COALESCE(vts.trust_score, 0) DESC
+        COALESCE(vrs."premiumSkillBonus", 0) DESC,
+        vrs."actionabilityScore" DESC,
+        COALESCE(v."trustScore", 0) DESC
       LIMIT 30
     ` as any[];
 
     const queueStats = await this.prisma.$queryRaw`
       SELECT
         COUNT(*)::int as "total3d",
-        COUNT(*) FILTER (WHERE actionability_score >= 80)::int as "premium",
-        COUNT(*) FILTER (WHERE actionability_score >= 60 AND actionability_score < 80)::int as "quality",
-        COUNT(*) FILTER (WHERE actionability_score >= 40 AND actionability_score < 60)::int as "moderate",
-        COUNT(*) FILTER (WHERE actionability_score < 40 OR actionability_score IS NULL)::int as "lowValue"
-      FROM vendor_req_signal
-      WHERE created_at >= NOW() - interval '3 days'
+        COUNT(*) FILTER (WHERE "actionabilityScore" >= 80)::int as "premium",
+        COUNT(*) FILTER (WHERE "actionabilityScore" >= 60 AND "actionabilityScore" < 80)::int as "quality",
+        COUNT(*) FILTER (WHERE "actionabilityScore" >= 40 AND "actionabilityScore" < 60)::int as "moderate",
+        COUNT(*) FILTER (WHERE "actionabilityScore" < 40 OR "actionabilityScore" IS NULL)::int as "lowValue",
+        COUNT(*) FILTER (WHERE "premiumSkillFamily" IS NOT NULL)::int as "premiumSkill"
+      FROM "VendorReqSignal"
+      WHERE "createdAt" >= NOW() - interval '3 days'
     ` as any[];
 
     return { queue: reqs, stats: queueStats[0] || {} };
@@ -364,27 +327,32 @@ export class AnalyticsService {
   /* ═══════ 6. Follow-ups Due Now ═══════ */
 
   async getFollowupsDue() {
-    return this.prisma.$queryRaw`
-      SELECT
-        sf.id,
-        sf.submission_id as "submissionId",
-        sf.followup_number as "number",
-        sf.scheduled_at as "scheduledAt",
-        sf.sent_at as "sentAt",
-        sf.status,
-        COALESCE(c."firstName" || ' ' || c."lastName", 'Unknown') as "candidateName",
-        j.title as "jobTitle",
-        v."companyName" as "vendorName"
-      FROM submission_followup sf
-      JOIN "Submission" s ON s.id = sf.submission_id
-      LEFT JOIN "Consultant" c ON c.id = s."consultantId"
-      LEFT JOIN "Job" j ON j.id = s."jobId"
-      LEFT JOIN "Vendor" v ON v.id = j."vendorId"
-      WHERE sf.status = 'PENDING'
-        AND sf.scheduled_at <= NOW() + interval '2 hours'
-      ORDER BY sf.scheduled_at ASC
-      LIMIT 20
-    ` as Promise<any[]>;
+    try {
+      return await this.prisma.$queryRaw`
+        SELECT
+          sf.id,
+          sf.submission_id as "submissionId",
+          sf.followup_number as "number",
+          sf.scheduled_at as "scheduledAt",
+          sf.sent_at as "sentAt",
+          sf.status,
+          COALESCE(c."firstName" || ' ' || c."lastName", 'Unknown') as "candidateName",
+          j.title as "jobTitle",
+          v."companyName" as "vendorName"
+        FROM submission_followup sf
+        JOIN "Submission" s ON s.id = sf.submission_id
+        LEFT JOIN "Consultant" c ON c.id = s."consultantId"
+        LEFT JOIN "Job" j ON j.id = s."jobId"
+        LEFT JOIN "Vendor" v ON v.id = j."vendorId"
+        WHERE sf.status = 'PENDING'
+          AND sf.scheduled_at <= NOW() + interval '2 hours'
+        ORDER BY sf.scheduled_at ASC
+        LIMIT 20
+      ` as any[];
+    } catch (e) {
+      this.logger.warn(`getFollowupsDue failed (submission_followup may not exist): ${e}`);
+      return [];
+    }
   }
 
   /* ═══════ 7. CLOSURE PROBABILITY MODEL ═══════
@@ -404,16 +372,7 @@ export class AnalyticsService {
 
   async getClosureRankedQueue(limit = 30) {
     const queue = await this.prisma.$queryRaw`
-      WITH skill_demand AS (
-        SELECT unnest(skills) as skill, COUNT(*)::float as demand
-        FROM vendor_req_signal
-        WHERE created_at >= NOW() - interval '30 days'
-        GROUP BY 1
-      ),
-      max_demand AS (
-        SELECT MAX(demand) as max_d FROM skill_demand
-      ),
-      bench_skills AS (
+      WITH bench_skills AS (
         SELECT LOWER(s::text) as skill
         FROM "Consultant" c, jsonb_array_elements_text(c.skills) s
         WHERE c.readiness IN ('SUBMISSION_READY', 'VERIFIED')
@@ -423,27 +382,35 @@ export class AnalyticsService {
           vrs.id,
           vrs.title,
           vrs.location,
-          vrs.rate_text,
-          vrs.employment_type,
-          vrs.engagement_model,
+          vrs."rateText" as rate_text,
+          vrs."employmentType" as employment_type,
+          vrs."engagementModel" as engagement_model,
           vrs.skills,
-          vrs.actionability_score,
-          vrs.created_at,
+          vrs."actionabilityScore" as actionability_score,
+          vrs."createdAt" as created_at,
+          vrs."premiumSkillFamily" as premium_family,
+          vrs."premiumSkillBonus" as premium_bonus,
           vc.name as vendor_name,
           vc.domain as vendor_domain,
-          vc.email_count as vendor_emails,
+          COALESCE(vc."emailCount", 0) as vendor_emails,
           vct.name as contact_name,
           vct.email as contact_email,
-          COALESCE(vts.trust_score, 0) as vendor_trust,
+          COALESCE(v."trustScore", 0) as vendor_trust,
+          COALESCE(v.tier::text, 'UNCLASSIFIED') as vendor_tier,
 
-          -- VENDOR TRUST (0-25)
-          LEAST(COALESCE(vts.trust_score, 0) * 0.25, 25) as trust_pts,
+          -- VENDOR TRUST (0-25) with tier bonus
+          LEAST(COALESCE(v."trustScore", 0) * 0.25, 25) +
+            CASE v.tier
+              WHEN 'PRIME' THEN 5
+              WHEN 'DIRECT' THEN 3
+              ELSE 0
+            END as trust_pts,
 
           -- RATE PRESENCE (0-20)
-          CASE WHEN vrs.rate_text IS NOT NULL AND vrs.rate_text != '' THEN 20 ELSE 0 END as rate_pts,
+          CASE WHEN vrs."rateText" IS NOT NULL AND vrs."rateText" != '' THEN 20 ELSE 0 END as rate_pts,
 
           -- EMPLOYMENT FIT (0-15)
-          CASE vrs.employment_type
+          CASE vrs."employmentType"
             WHEN 'C2C' THEN 15
             WHEN 'W2' THEN 12
             WHEN 'C2H' THEN 10
@@ -460,45 +427,54 @@ export class AnalyticsService {
             CASE WHEN vct.email IS NOT NULL THEN 2 ELSE 0 END
           ) as complete_pts,
 
-          -- VENDOR VOLUME (0-10): log-scaled email engagement
-          LEAST(LN(GREATEST(vc.email_count, 1)) / LN(10000) * 10, 10) as volume_pts,
+          -- VENDOR VOLUME (0-10)
+          LEAST(LN(GREATEST(COALESCE(vc."emailCount", 1), 1)) / LN(10000) * 10, 10) as volume_pts,
 
-          -- BENCH MATCH (0-10): any of our bench consultants match these skills?
+          -- BENCH MATCH (0-10)
           (SELECT LEAST(COUNT(DISTINCT bs.skill)::float * 3.3, 10)
            FROM unnest(vrs.skills) rs(s)
            JOIN bench_skills bs ON LOWER(rs.s) = bs.skill
           ) as bench_pts,
 
-          -- FRESHNESS (0-10): based on email age
+          -- FRESHNESS (0-10)
           CASE
-            WHEN vrs.created_at >= NOW() - interval '6 hours' THEN 10
-            WHEN vrs.created_at >= NOW() - interval '24 hours' THEN 8
-            WHEN vrs.created_at >= NOW() - interval '3 days' THEN 5
-            WHEN vrs.created_at >= NOW() - interval '7 days' THEN 2
+            WHEN vrs."createdAt" >= NOW() - interval '6 hours' THEN 10
+            WHEN vrs."createdAt" >= NOW() - interval '24 hours' THEN 8
+            WHEN vrs."createdAt" >= NOW() - interval '3 days' THEN 5
+            WHEN vrs."createdAt" >= NOW() - interval '7 days' THEN 2
             ELSE 0
-          END as fresh_pts
+          END as fresh_pts,
 
-        FROM vendor_req_signal vrs
-        LEFT JOIN vendor_company vc ON vc.id = vrs.vendor_company_id
-        LEFT JOIN vendor_contact vct ON vct.id = vrs.vendor_contact_id
-        LEFT JOIN vendor_trust_score vts ON vts.vendor_company_id = vc.id
-        WHERE vrs.created_at >= NOW() - interval '7 days'
-          AND vrs.actionability_score >= 30
+          -- PREMIUM SKILL BONUS (0-15) — AI/ML, MLOps, DataEng, DevOps, Cyber
+          LEAST(COALESCE(vrs."premiumSkillBonus", 0), 15) as premium_pts
+
+        FROM "VendorReqSignal" vrs
+        LEFT JOIN "ExtractedVendorCompany" vc ON vc.id = vrs."vendorCompanyId"
+        LEFT JOIN "ExtractedVendorContact" vct ON vct.id = vrs."vendorContactId"
+        LEFT JOIN "Vendor" v ON v.domain = vc.domain
+        WHERE vrs."createdAt" >= NOW() - interval '7 days'
+          AND COALESCE(vrs."actionabilityScore", 0) >= 30
           AND vrs.title IS NOT NULL AND vrs.title != ''
-          AND vrs.employment_type IS NOT NULL
+          AND vrs."employmentType" IS NOT NULL
       )
       SELECT
         s.*,
-        ROUND((s.trust_pts + s.rate_pts + s.emp_pts + s.complete_pts + s.volume_pts + COALESCE(s.bench_pts,0) + s.fresh_pts)::numeric, 1) as "closureScore",
-        ROUND(((s.trust_pts + s.rate_pts + s.emp_pts + s.complete_pts + s.volume_pts + COALESCE(s.bench_pts,0) + s.fresh_pts) / 100.0)::numeric, 3) as "closureProbability",
+        ROUND((s.trust_pts + s.rate_pts + s.emp_pts + s.complete_pts + s.volume_pts + COALESCE(s.bench_pts,0) + s.fresh_pts + s.premium_pts)::numeric, 1) as "closureScore",
+        ROUND(((s.trust_pts + s.rate_pts + s.emp_pts + s.complete_pts + s.volume_pts + COALESCE(s.bench_pts,0) + s.fresh_pts + s.premium_pts) / 115.0)::numeric, 3) as "closureProbability",
         CASE
-          WHEN (s.trust_pts + s.rate_pts + s.emp_pts + s.complete_pts + s.volume_pts + COALESCE(s.bench_pts,0) + s.fresh_pts) >= 70 THEN 'HOT'
-          WHEN (s.trust_pts + s.rate_pts + s.emp_pts + s.complete_pts + s.volume_pts + COALESCE(s.bench_pts,0) + s.fresh_pts) >= 50 THEN 'WARM'
-          WHEN (s.trust_pts + s.rate_pts + s.emp_pts + s.complete_pts + s.volume_pts + COALESCE(s.bench_pts,0) + s.fresh_pts) >= 30 THEN 'COOL'
+          WHEN (s.trust_pts + s.rate_pts + s.emp_pts + s.complete_pts + s.volume_pts + COALESCE(s.bench_pts,0) + s.fresh_pts + s.premium_pts) >= 75 THEN 'HOT'
+          WHEN (s.trust_pts + s.rate_pts + s.emp_pts + s.complete_pts + s.volume_pts + COALESCE(s.bench_pts,0) + s.fresh_pts + s.premium_pts) >= 50 THEN 'WARM'
+          WHEN (s.trust_pts + s.rate_pts + s.emp_pts + s.complete_pts + s.volume_pts + COALESCE(s.bench_pts,0) + s.fresh_pts + s.premium_pts) >= 30 THEN 'COOL'
           ELSE 'COLD'
-        END as "closureTier"
+        END as "closureTier",
+        CASE
+          WHEN COALESCE(s.bench_pts, 0) >= 6 AND s.trust_pts >= 15 AND s.rate_pts >= 10 THEN 'PRIME_C2C'
+          WHEN s.emp_pts >= 10 THEN 'BROAD_C2C_W2'
+          WHEN s.emp_pts <= 3 THEN 'FTE_HIGH_COMP'
+          ELSE 'BROAD_C2C_W2'
+        END as "sourcingLane"
       FROM scored s
-      ORDER BY (s.trust_pts + s.rate_pts + s.emp_pts + s.complete_pts + s.volume_pts + COALESCE(s.bench_pts,0) + s.fresh_pts) DESC
+      ORDER BY (s.trust_pts + s.rate_pts + s.emp_pts + s.complete_pts + s.volume_pts + COALESCE(s.bench_pts,0) + s.fresh_pts + s.premium_pts) DESC
       LIMIT ${limit}
     ` as any[];
 
@@ -506,32 +482,35 @@ export class AnalyticsService {
       WITH scored AS (
         SELECT
           (
-            LEAST(COALESCE(vts.trust_score, 0) * 0.25, 25) +
-            CASE WHEN vrs.rate_text IS NOT NULL AND vrs.rate_text != '' THEN 20 ELSE 0 END +
-            CASE vrs.employment_type WHEN 'C2C' THEN 15 WHEN 'W2' THEN 12 WHEN 'C2H' THEN 10 WHEN 'CONTRACT' THEN 8 WHEN 'FTE' THEN 3 ELSE 2 END +
+            LEAST(COALESCE(v."trustScore", 0) * 0.25, 25) +
+            CASE WHEN vrs."rateText" IS NOT NULL AND vrs."rateText" != '' THEN 20 ELSE 0 END +
+            CASE vrs."employmentType" WHEN 'C2C' THEN 15 WHEN 'W2' THEN 12 WHEN 'C2H' THEN 10 WHEN 'CONTRACT' THEN 8 WHEN 'FTE' THEN 3 ELSE 2 END +
             CASE WHEN vrs.title IS NOT NULL AND vrs.title != '' THEN 3 ELSE 0 END +
             CASE WHEN vrs.location IS NOT NULL THEN 2.5 ELSE 0 END +
             CASE WHEN vrs.skills IS NOT NULL AND array_length(vrs.skills, 1) > 0 THEN 2.5 ELSE 0 END +
             CASE WHEN vct.email IS NOT NULL THEN 2 ELSE 0 END +
-            LEAST(LN(GREATEST(vc.email_count, 1)) / LN(10000) * 10, 10) +
-            CASE WHEN vrs.created_at >= NOW() - interval '6 hours' THEN 10
-                 WHEN vrs.created_at >= NOW() - interval '24 hours' THEN 8
-                 WHEN vrs.created_at >= NOW() - interval '3 days' THEN 5
-                 ELSE 2 END
-          ) as score
-        FROM vendor_req_signal vrs
-        LEFT JOIN vendor_company vc ON vc.id = vrs.vendor_company_id
-        LEFT JOIN vendor_contact vct ON vct.id = vrs.vendor_contact_id
-        LEFT JOIN vendor_trust_score vts ON vts.vendor_company_id = vc.id
-        WHERE vrs.created_at >= NOW() - interval '7 days'
+            LEAST(LN(GREATEST(COALESCE(vc."emailCount", 1), 1)) / LN(10000) * 10, 10) +
+            CASE WHEN vrs."createdAt" >= NOW() - interval '6 hours' THEN 10
+                 WHEN vrs."createdAt" >= NOW() - interval '24 hours' THEN 8
+                 WHEN vrs."createdAt" >= NOW() - interval '3 days' THEN 5
+                 ELSE 2 END +
+            LEAST(COALESCE(vrs."premiumSkillBonus", 0), 15)
+          ) as score,
+          vrs."premiumSkillFamily" as family
+        FROM "VendorReqSignal" vrs
+        LEFT JOIN "ExtractedVendorCompany" vc ON vc.id = vrs."vendorCompanyId"
+        LEFT JOIN "ExtractedVendorContact" vct ON vct.id = vrs."vendorContactId"
+        LEFT JOIN "Vendor" v ON v.domain = vc.domain
+        WHERE vrs."createdAt" >= NOW() - interval '7 days'
           AND vrs.title IS NOT NULL AND vrs.title != ''
       )
       SELECT
         COUNT(*)::int as "total",
-        COUNT(*) FILTER (WHERE score >= 70)::int as "hot",
-        COUNT(*) FILTER (WHERE score >= 50 AND score < 70)::int as "warm",
+        COUNT(*) FILTER (WHERE score >= 75)::int as "hot",
+        COUNT(*) FILTER (WHERE score >= 50 AND score < 75)::int as "warm",
         COUNT(*) FILTER (WHERE score >= 30 AND score < 50)::int as "cool",
         COUNT(*) FILTER (WHERE score < 30)::int as "cold",
+        COUNT(*) FILTER (WHERE family IS NOT NULL)::int as "premiumCount",
         ROUND(AVG(score)::numeric, 1) as "avgScore",
         ROUND(MAX(score)::numeric, 1) as "maxScore"
       FROM scored
@@ -548,14 +527,17 @@ export class AnalyticsService {
         skills: r.skills,
         actionabilityScore: r.actionability_score,
         createdAt: r.created_at,
+        premiumFamily: r.premium_family,
         vendorName: r.vendor_name,
         vendorDomain: r.vendor_domain,
+        vendorTier: r.vendor_tier,
         contactName: r.contact_name,
         contactEmail: r.contact_email,
         vendorTrust: r.vendor_trust,
         closureScore: Number(r.closureScore),
         closureProbability: Number(r.closureProbability),
         closureTier: r.closureTier,
+        sourcingLane: r.sourcingLane,
         breakdown: {
           trust: Number(r.trust_pts),
           rate: Number(r.rate_pts),
@@ -564,6 +546,7 @@ export class AnalyticsService {
           vendorVolume: Number(r.volume_pts),
           benchMatch: Number(r.bench_pts || 0),
           freshness: Number(r.fresh_pts),
+          premiumSkill: Number(r.premium_pts || 0),
         },
       })),
       distribution: distribution[0] || {},
@@ -576,125 +559,140 @@ export class AnalyticsService {
     const cached = this.getCached('recruiterWorkload');
     if (cached) return cached;
 
-    const workload = await this.prisma.$queryRaw`
-      SELECT
-        m.email as "recruiterEmail",
-        SPLIT_PART(m.email, '@', 1) as "name",
-        COALESCE(rq.assigned_today, 0)::int as "assignedToday",
-        COALESCE(rq.submitted_today, 0)::int as "submittedToday",
-        COALESCE(rq.skipped_today, 0)::int as "skippedToday",
-        COALESCE(rq.in_progress, 0)::int as "inProgress",
-        30 - COALESCE(rq.assigned_today, 0)::int as "remainingCapacity"
-      FROM mailbox m
-      LEFT JOIN LATERAL (
+    try {
+      const workload = await this.prisma.$queryRaw`
         SELECT
-          COUNT(*) FILTER (WHERE assigned_date = CURRENT_DATE) as assigned_today,
-          COUNT(*) FILTER (WHERE assigned_date = CURRENT_DATE AND status = 'SUBMITTED') as submitted_today,
-          COUNT(*) FILTER (WHERE assigned_date = CURRENT_DATE AND status = 'SKIPPED') as skipped_today,
-          COUNT(*) FILTER (WHERE status = 'ASSIGNED' OR status = 'IN_PROGRESS') as in_progress
-        FROM recruiter_queue rq2
-        WHERE rq2.recruiter_email = m.email
-      ) rq ON true
-      WHERE m.email NOT IN ('akkayya.chavala@cloudresources.net', 'accounts@cloudresources.net', 'info@cloudresources.net')
-      ORDER BY "remainingCapacity" DESC
-    ` as any[];
+          m.email as "recruiterEmail",
+          SPLIT_PART(m.email, '@', 1) as "name",
+          COALESCE(rq.assigned_today, 0)::int as "assignedToday",
+          COALESCE(rq.submitted_today, 0)::int as "submittedToday",
+          COALESCE(rq.skipped_today, 0)::int as "skippedToday",
+          COALESCE(rq.in_progress, 0)::int as "inProgress",
+          30 - COALESCE(rq.assigned_today, 0)::int as "remainingCapacity"
+        FROM mailbox m
+        LEFT JOIN LATERAL (
+          SELECT
+            COUNT(*) FILTER (WHERE assigned_date = CURRENT_DATE) as assigned_today,
+            COUNT(*) FILTER (WHERE assigned_date = CURRENT_DATE AND status = 'SUBMITTED') as submitted_today,
+            COUNT(*) FILTER (WHERE assigned_date = CURRENT_DATE AND status = 'SKIPPED') as skipped_today,
+            COUNT(*) FILTER (WHERE status = 'ASSIGNED' OR status = 'IN_PROGRESS') as in_progress
+          FROM recruiter_queue rq2
+          WHERE rq2.recruiter_email = m.email
+        ) rq ON true
+        WHERE m.email NOT IN ('akkayya.chavala@cloudresources.net', 'accounts@cloudresources.net', 'info@cloudresources.net')
+        ORDER BY "remainingCapacity" DESC
+      ` as any[];
 
-    const wlResult = { workload, maxQueueSize: 30, date: new Date().toISOString().split('T')[0] };
-    this.setCache('recruiterWorkload', wlResult, 120_000);
-    return wlResult;
+      const wlResult = { workload, maxQueueSize: 30, date: new Date().toISOString().split('T')[0] };
+      this.setCache('recruiterWorkload', wlResult, 120_000);
+      return wlResult;
+    } catch (e) {
+      this.logger.warn(`getRecruiterWorkload failed (mailbox/recruiter_queue may not exist): ${e}`);
+      return { workload: [], maxQueueSize: 30, date: new Date().toISOString().split('T')[0] };
+    }
   }
 
   async autoAssignQueue() {
-    const recruiters = await this.prisma.$queryRaw`
-      SELECT m.email,
-        COALESCE((
-          SELECT COUNT(*) FROM recruiter_queue rq
-          WHERE rq.recruiter_email = m.email AND rq.assigned_date = CURRENT_DATE
-        ), 0)::int as today_count
-      FROM mailbox m
-      WHERE m.email NOT IN ('akkayya.chavala@cloudresources.net', 'accounts@cloudresources.net', 'info@cloudresources.net', 'jobs@cloudresources.net')
-      ORDER BY today_count ASC, m.email
-    ` as any[];
+    try {
+      const recruiters = await this.prisma.$queryRaw`
+        SELECT m.email,
+          COALESCE((
+            SELECT COUNT(*) FROM recruiter_queue rq
+            WHERE rq.recruiter_email = m.email AND rq.assigned_date = CURRENT_DATE
+          ), 0)::int as today_count
+        FROM mailbox m
+        WHERE m.email NOT IN ('akkayya.chavala@cloudresources.net', 'accounts@cloudresources.net', 'info@cloudresources.net', 'jobs@cloudresources.net')
+        ORDER BY today_count ASC, m.email
+      ` as any[];
 
-    const eligibleRecruiters = recruiters.filter((r: any) => r.today_count < 30);
-    if (eligibleRecruiters.length === 0) {
-      return { assigned: 0, message: 'All recruiters at capacity (30/day)' };
-    }
-
-    const unassigned = await this.prisma.$queryRaw`
-      SELECT vrs.id,
-        (
-          LEAST(COALESCE(vts.trust_score, 0) * 0.25, 25) +
-          CASE WHEN vrs.rate_text IS NOT NULL AND vrs.rate_text != '' THEN 20 ELSE 0 END +
-          CASE vrs.employment_type WHEN 'C2C' THEN 15 WHEN 'W2' THEN 12 WHEN 'C2H' THEN 10 WHEN 'CONTRACT' THEN 8 ELSE 2 END +
-          CASE WHEN vrs.title IS NOT NULL AND vrs.title != '' THEN 3 ELSE 0 END +
-          CASE WHEN vrs.location IS NOT NULL THEN 2.5 ELSE 0 END +
-          CASE WHEN vrs.skills IS NOT NULL AND array_length(vrs.skills, 1) > 0 THEN 2.5 ELSE 0 END +
-          CASE WHEN vct.email IS NOT NULL THEN 2 ELSE 0 END +
-          LEAST(LN(GREATEST(vc.email_count, 1)) / LN(10000) * 10, 10) +
-          CASE WHEN vrs.created_at >= NOW() - interval '6 hours' THEN 10
-               WHEN vrs.created_at >= NOW() - interval '24 hours' THEN 8
-               WHEN vrs.created_at >= NOW() - interval '3 days' THEN 5
-               ELSE 2 END
-        ) as closure_score
-      FROM vendor_req_signal vrs
-      LEFT JOIN vendor_company vc ON vc.id = vrs.vendor_company_id
-      LEFT JOIN vendor_contact vct ON vct.id = vrs.vendor_contact_id
-      LEFT JOIN vendor_trust_score vts ON vts.vendor_company_id = vc.id
-      WHERE vrs.created_at >= NOW() - interval '3 days'
-        AND vrs.actionability_score >= 40
-        AND vrs.title IS NOT NULL AND vrs.title != ''
-        AND vrs.employment_type IS NOT NULL
-        AND NOT EXISTS (
-          SELECT 1 FROM recruiter_queue rq
-          WHERE rq.req_signal_id = vrs.id AND rq.assigned_date = CURRENT_DATE
-        )
-      ORDER BY closure_score DESC
-      LIMIT ${eligibleRecruiters.length * 30}
-    ` as any[];
-
-    let assigned = 0;
-    let recruiterIdx = 0;
-    const capacity = new Map(eligibleRecruiters.map((r: any) => [r.email, 30 - r.today_count]));
-
-    for (const req of unassigned) {
-      const recruiter = eligibleRecruiters[recruiterIdx % eligibleRecruiters.length];
-      const cap = capacity.get(recruiter.email) || 0;
-      if (cap <= 0) {
-        recruiterIdx++;
-        if (recruiterIdx >= eligibleRecruiters.length) break;
-        continue;
+      const eligibleRecruiters = recruiters.filter((r: any) => r.today_count < 30);
+      if (eligibleRecruiters.length === 0) {
+        return { assigned: 0, message: 'All recruiters at capacity (30/day)' };
       }
 
-      try {
-        await this.prisma.$executeRaw`
-          INSERT INTO recruiter_queue (recruiter_email, req_signal_id, assigned_date, closure_score, status)
-          VALUES (${recruiter.email}, ${req.id}::uuid, CURRENT_DATE, ${Number(req.closure_score)}, 'ASSIGNED')
-          ON CONFLICT (recruiter_email, req_signal_id, assigned_date) DO NOTHING
-        `;
-        capacity.set(recruiter.email, cap - 1);
-        assigned++;
-        recruiterIdx++;
-      } catch {
-        continue;
-      }
-    }
+      const unassigned = await this.prisma.$queryRaw`
+        SELECT vrs.id,
+          (
+            LEAST(COALESCE(v."trustScore", 0) * 0.25, 25) +
+            CASE WHEN vrs."rateText" IS NOT NULL AND vrs."rateText" != '' THEN 20 ELSE 0 END +
+            CASE vrs."employmentType" WHEN 'C2C' THEN 15 WHEN 'W2' THEN 12 WHEN 'C2H' THEN 10 WHEN 'CONTRACT' THEN 8 ELSE 2 END +
+            CASE WHEN vrs.title IS NOT NULL AND vrs.title != '' THEN 3 ELSE 0 END +
+            CASE WHEN vrs.location IS NOT NULL THEN 2.5 ELSE 0 END +
+            CASE WHEN vrs.skills IS NOT NULL AND array_length(vrs.skills, 1) > 0 THEN 2.5 ELSE 0 END +
+            CASE WHEN vct.email IS NOT NULL THEN 2 ELSE 0 END +
+            LEAST(LN(GREATEST(COALESCE(vc."emailCount", 1), 1)) / LN(10000) * 10, 10) +
+            CASE WHEN vrs."createdAt" >= NOW() - interval '6 hours' THEN 10
+                 WHEN vrs."createdAt" >= NOW() - interval '24 hours' THEN 8
+                 WHEN vrs."createdAt" >= NOW() - interval '3 days' THEN 5
+                 ELSE 2 END
+          ) as closure_score
+        FROM "VendorReqSignal" vrs
+        LEFT JOIN "ExtractedVendorCompany" vc ON vc.id = vrs."vendorCompanyId"
+        LEFT JOIN "ExtractedVendorContact" vct ON vct.id = vrs."vendorContactId"
+        LEFT JOIN "Vendor" v ON v.domain = vc.domain
+        WHERE vrs."createdAt" >= NOW() - interval '3 days'
+          AND vrs."actionabilityScore" >= 40
+          AND vrs.title IS NOT NULL AND vrs.title != ''
+          AND vrs."employmentType" IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM recruiter_queue rq
+            WHERE rq.req_signal_id = vrs.id AND rq.assigned_date = CURRENT_DATE
+          )
+        ORDER BY closure_score DESC
+        LIMIT ${eligibleRecruiters.length * 30}
+      ` as any[];
 
-    return {
-      assigned,
-      recruiters: eligibleRecruiters.map((r: any) => ({
-        email: r.email,
-        previousCount: r.today_count,
-        newCount: r.today_count + (30 - (capacity.get(r.email) || 0) - r.today_count),
-      })),
-    };
+      let assigned = 0;
+      let recruiterIdx = 0;
+      const capacity = new Map(eligibleRecruiters.map((r: any) => [r.email, 30 - r.today_count]));
+
+      for (const req of unassigned) {
+        const recruiter = eligibleRecruiters[recruiterIdx % eligibleRecruiters.length];
+        const cap = capacity.get(recruiter.email) || 0;
+        if (cap <= 0) {
+          recruiterIdx++;
+          if (recruiterIdx >= eligibleRecruiters.length) break;
+          continue;
+        }
+
+        try {
+          await this.prisma.$executeRaw`
+            INSERT INTO recruiter_queue (recruiter_email, req_signal_id, assigned_date, closure_score, status)
+            VALUES (${recruiter.email}, ${req.id}::uuid, CURRENT_DATE, ${Number(req.closure_score)}, 'ASSIGNED')
+            ON CONFLICT (recruiter_email, req_signal_id, assigned_date) DO NOTHING
+          `;
+          capacity.set(recruiter.email, cap - 1);
+          assigned++;
+          recruiterIdx++;
+        } catch {
+          continue;
+        }
+      }
+
+      return {
+        assigned,
+        recruiters: eligibleRecruiters.map((r: any) => ({
+          email: r.email,
+          previousCount: r.today_count,
+          newCount: r.today_count + (30 - (capacity.get(r.email) || 0) - r.today_count),
+        })),
+      };
+    } catch (e) {
+      this.logger.warn(`autoAssignQueue failed (mailbox/recruiter_queue may not exist): ${e}`);
+      return { assigned: 0, message: 'Queue tables not available', recruiters: [] };
+    }
   }
 
   async updateQueueItem(id: number, status: string) {
-    await this.prisma.$executeRaw`
-      UPDATE recruiter_queue SET status = ${status}, updated_at = NOW() WHERE id = ${id}
-    `;
-    return { success: true };
+    try {
+      await this.prisma.$executeRaw`
+        UPDATE recruiter_queue SET status = ${status}, updated_at = NOW() WHERE id = ${id}
+      `;
+      return { success: true };
+    } catch (e) {
+      this.logger.warn(`updateQueueItem failed (recruiter_queue may not exist): ${e}`);
+      return { success: false };
+    }
   }
 
   /* ═══════ 9. VENDOR CONVERSION FEEDBACK LOOPS ═══════ */
@@ -707,24 +705,24 @@ export class AnalyticsService {
       WITH sub_events AS (
         SELECT
           SPLIT_PART(COALESCE(
-            (SELECT t FROM unnest(to_emails) t WHERE SPLIT_PART(t,'@',2) NOT IN ('cloudresources.net','emonics.com','') LIMIT 1),
+            (SELECT t FROM unnest("toEmails") t WHERE SPLIT_PART(t,'@',2) NOT IN ('cloudresources.net','emonics.com','') LIMIT 1),
             ''
           ), '@', 2) as vendor_domain,
-          mailbox_email as recruiter,
+          "pstBatch" as recruiter,
           subject,
-          sent_at,
+          "sentAt" as sent_at,
           id as eid
-        FROM raw_email_message
-        WHERE from_email LIKE '%@cloudresources.net'
+        FROM "RawEmailMessage"
+        WHERE "fromEmail" LIKE '%@cloudresources.net'
           AND (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%')
-          AND sent_at >= NOW() - interval '90 days'
+          AND "sentAt" >= NOW() - interval '90 days'
       ),
       reply_events AS (
         SELECT
-          SPLIT_PART(from_email, '@', 2) as vendor_domain,
-          mailbox_email as recruiter,
+          SPLIT_PART("fromEmail", '@', 2) as vendor_domain,
+          "pstBatch" as recruiter,
           subject,
-          sent_at,
+          "sentAt" as sent_at,
           CASE
             WHEN subject ILIKE '%interview%' THEN 'INTERVIEW_REQUEST'
             WHEN subject ILIKE '%reject%' OR subject ILIKE '%not selected%' OR subject ILIKE '%not moving%' THEN 'REJECTION'
@@ -732,11 +730,11 @@ export class AnalyticsService {
             WHEN subject ILIKE '%more info%' OR subject ILIKE '%additional%' THEN 'INFO_REQUEST'
             ELSE 'REPLY'
           END as feedback_type
-        FROM raw_email_message
-        WHERE from_email NOT LIKE '%@cloudresources.net'
-          AND from_email NOT LIKE '%@emonics.com'
+        FROM "RawEmailMessage"
+        WHERE "fromEmail" NOT LIKE '%@cloudresources.net'
+          AND "fromEmail" NOT LIKE '%@emonics.com'
           AND subject ILIKE '%Re:%Submission%'
-          AND sent_at >= NOW() - interval '90 days'
+          AND "sentAt" >= NOW() - interval '90 days'
       )
       SELECT
         s.vendor_domain as "vendorDomain",
@@ -770,26 +768,26 @@ export class AnalyticsService {
     const summary = await this.prisma.$queryRaw`
       SELECT
         COUNT(*) FILTER (WHERE
-          from_email LIKE '%@cloudresources.net'
+          "fromEmail" LIKE '%@cloudresources.net'
           AND (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%')
-          AND sent_at >= NOW() - interval '90 days'
+          AND "sentAt" >= NOW() - interval '90 days'
         )::int as "totalSubmissions90d",
         COUNT(*) FILTER (WHERE
-          from_email NOT LIKE '%@cloudresources.net'
+          "fromEmail" NOT LIKE '%@cloudresources.net'
           AND subject ILIKE '%Re:%Submission%'
-          AND sent_at >= NOW() - interval '90 days'
+          AND "sentAt" >= NOW() - interval '90 days'
         )::int as "totalReplies90d",
         COUNT(*) FILTER (WHERE
           subject ILIKE '%interview%'
-          AND from_email NOT LIKE '%@cloudresources.net'
-          AND sent_at >= NOW() - interval '90 days'
+          AND "fromEmail" NOT LIKE '%@cloudresources.net'
+          AND "sentAt" >= NOW() - interval '90 days'
         )::int as "interviewSignals90d",
         COUNT(*) FILTER (WHERE
           (subject ILIKE '%offer%letter%' OR (subject ILIKE '%offer%' AND subject ILIKE '%accept%'))
-          AND from_email NOT LIKE '%@cloudresources.net'
-          AND sent_at >= NOW() - interval '90 days'
+          AND "fromEmail" NOT LIKE '%@cloudresources.net'
+          AND "sentAt" >= NOW() - interval '90 days'
         )::int as "offerSignals90d"
-      FROM raw_email_message
+      FROM "RawEmailMessage"
     ` as any[];
 
     const fbResult = { vendors: feedbackByVendor, summary: summary[0] || {} };
@@ -852,8 +850,8 @@ export class AnalyticsService {
 
     const skillDemand = await this.prisma.$queryRaw`
       SELECT LOWER(unnest(skills)) as skill, COUNT(*)::int as demand
-      FROM vendor_req_signal
-      WHERE created_at >= NOW() - interval '7 days'
+      FROM "VendorReqSignal"
+      WHERE "createdAt" >= NOW() - interval '7 days'
       GROUP BY 1
       ORDER BY demand DESC
       LIMIT 100
@@ -995,10 +993,14 @@ export class AnalyticsService {
 
   async reconcileConsultants(tenantId: string) {
     const extracted = await this.prisma.$queryRaw`
-      SELECT c.id as ext_id, c.full_name, c.email, c.phone, c.primary_skills,
-             c.first_seen, c.last_seen
-      FROM consultant c
-      WHERE c.full_name IS NOT NULL AND c.full_name != ''
+      SELECT c.id as ext_id,
+             (c."firstName" || ' ' || c."lastName") as full_name,
+             c.email, c.phone,
+             c.skills as primary_skills,
+             c."createdAt" as first_seen,
+             c."updatedAt" as last_seen
+      FROM "Consultant" c
+      WHERE c."firstName" IS NOT NULL AND c."firstName" != ''
         AND c.email IS NOT NULL AND c.email != ''
         AND c.email NOT LIKE '%@cloudresources.net'
         AND c.email NOT LIKE '%@emonics.com'
@@ -1006,12 +1008,12 @@ export class AnalyticsService {
         AND c.email NOT LIKE '%linkedin.com%'
         AND c.email NOT LIKE '%google.com%'
         AND c.email NOT LIKE '%microsoft.com%'
-        AND LENGTH(c.full_name) > 3
-        AND c.full_name NOT IN ('LinkedIn', 'Indeed', 'Dice', 'Monster', 'Gmail')
+        AND LENGTH(c."firstName" || ' ' || c."lastName") > 3
+        AND (c."firstName" || ' ' || c."lastName") NOT IN ('LinkedIn', 'Indeed', 'Dice', 'Monster', 'Gmail')
         AND NOT EXISTS (
-          SELECT 1 FROM "Consultant" pc WHERE LOWER(pc.email) = LOWER(c.email)
+          SELECT 1 FROM "Consultant" pc WHERE pc.id != c.id AND LOWER(pc.email) = LOWER(c.email)
         )
-      ORDER BY c.last_seen DESC
+      ORDER BY c."updatedAt" DESC
       LIMIT 5000
     ` as any[];
 
@@ -1064,23 +1066,23 @@ export class AnalyticsService {
     const signals = await this.prisma.$queryRaw`
       SELECT
         r.id as email_id,
-        r.mailbox_email as recruiter_email,
+        r."pstBatch" as recruiter_email,
         r.subject,
-        r.sent_at,
-        r.from_email,
+        r."sentAt" as sent_at,
+        r."fromEmail" as from_email,
         COALESCE(
-          (SELECT t FROM unnest(r.to_emails) t WHERE SPLIT_PART(t,'@',2) NOT IN ('cloudresources.net','emonics.com','') LIMIT 1),
+          (SELECT t FROM unnest(r."toEmails") t WHERE SPLIT_PART(t,'@',2) NOT IN ('cloudresources.net','emonics.com','') LIMIT 1),
           ''
         ) as vendor_email,
         SPLIT_PART(COALESCE(
-          (SELECT t FROM unnest(r.to_emails) t WHERE SPLIT_PART(t,'@',2) NOT IN ('cloudresources.net','emonics.com','') LIMIT 1),
+          (SELECT t FROM unnest(r."toEmails") t WHERE SPLIT_PART(t,'@',2) NOT IN ('cloudresources.net','emonics.com','') LIMIT 1),
           ''
         ), '@', 2) as vendor_domain
-      FROM raw_email_message r
-      WHERE r.from_email LIKE '%@cloudresources.net'
+      FROM "RawEmailMessage" r
+      WHERE r."fromEmail" LIKE '%@cloudresources.net'
         AND (r.subject ILIKE 'Submission -%' OR r.subject ILIKE 'Submission –%')
-        AND EXISTS (SELECT 1 FROM unnest(r.to_emails) t(a) WHERE SPLIT_PART(t.a,'@',2) NOT IN ('cloudresources.net','emonics.com',''))
-      ORDER BY r.sent_at DESC
+        AND EXISTS (SELECT 1 FROM unnest(r."toEmails") t(a) WHERE SPLIT_PART(t.a,'@',2) NOT IN ('cloudresources.net','emonics.com',''))
+      ORDER BY r."sentAt" DESC
       LIMIT 3000
     ` as any[];
 
@@ -1166,49 +1168,54 @@ export class AnalyticsService {
   /* ═══════ 13. POPULATE VENDOR FEEDBACK EVENTS ═══════ */
 
   async populateVendorFeedbackEvents() {
-    const result = await this.prisma.$executeRaw`
-      INSERT INTO vendor_feedback_event (vendor_domain, recruiter_email, submission_subject, feedback_type, detected_at, raw_subject, confidence)
-      SELECT
-        SPLIT_PART(from_email, '@', 2) as vendor_domain,
-        mailbox_email as recruiter_email,
-        subject as submission_subject,
-        CASE
-          WHEN subject ILIKE '%interview%schedule%' OR subject ILIKE '%schedule%interview%' THEN 'INTERVIEW_SCHEDULED'
-          WHEN subject ILIKE '%interview%' THEN 'INTERVIEW_REQUEST'
-          WHEN subject ILIKE '%reject%' OR subject ILIKE '%not selected%' OR subject ILIKE '%not move%forward%' OR subject ILIKE '%unfortunately%' THEN 'REJECTION'
-          WHEN subject ILIKE '%offer%' AND subject NOT ILIKE '%we offer%' THEN 'OFFER'
-          WHEN subject ILIKE '%more info%' OR subject ILIKE '%additional%detail%' OR subject ILIKE '%clarif%' THEN 'INFO_REQUEST'
-          WHEN subject ILIKE '%shortlist%' OR subject ILIKE '%selected%' THEN 'SHORTLISTED'
-          ELSE 'REPLY'
-        END as feedback_type,
-        sent_at as detected_at,
-        subject as raw_subject,
-        CASE
-          WHEN subject ILIKE '%interview%schedule%' THEN 0.9
-          WHEN subject ILIKE '%reject%' OR subject ILIKE '%not selected%' THEN 0.85
-          WHEN subject ILIKE '%offer%' THEN 0.8
-          WHEN subject ILIKE '%interview%' THEN 0.7
-          ELSE 0.5
-        END as confidence
-      FROM raw_email_message
-      WHERE from_email NOT LIKE '%@cloudresources.net'
-        AND from_email NOT LIKE '%@emonics.com'
-        AND subject ILIKE '%Re:%Submission%'
-        AND sent_at >= NOW() - interval '180 days'
-        AND NOT EXISTS (
-          SELECT 1 FROM vendor_feedback_event vfe
-          WHERE vfe.raw_subject = subject
-            AND vfe.recruiter_email = mailbox_email
-            AND vfe.detected_at = sent_at
-        )
-    `;
-    
-    const summary = await this.prisma.$queryRaw`
-      SELECT feedback_type as "type", COUNT(*)::int as "count"
-      FROM vendor_feedback_event GROUP BY 1 ORDER BY 2 DESC
-    ` as any[];
+    try {
+      const result = await this.prisma.$executeRaw`
+        INSERT INTO vendor_feedback_event (vendor_domain, recruiter_email, submission_subject, feedback_type, detected_at, raw_subject, confidence)
+        SELECT
+          SPLIT_PART("fromEmail", '@', 2) as vendor_domain,
+          "pstBatch" as recruiter_email,
+          subject as submission_subject,
+          CASE
+            WHEN subject ILIKE '%interview%schedule%' OR subject ILIKE '%schedule%interview%' THEN 'INTERVIEW_SCHEDULED'
+            WHEN subject ILIKE '%interview%' THEN 'INTERVIEW_REQUEST'
+            WHEN subject ILIKE '%reject%' OR subject ILIKE '%not selected%' OR subject ILIKE '%not move%forward%' OR subject ILIKE '%unfortunately%' THEN 'REJECTION'
+            WHEN subject ILIKE '%offer%' AND subject NOT ILIKE '%we offer%' THEN 'OFFER'
+            WHEN subject ILIKE '%more info%' OR subject ILIKE '%additional%detail%' OR subject ILIKE '%clarif%' THEN 'INFO_REQUEST'
+            WHEN subject ILIKE '%shortlist%' OR subject ILIKE '%selected%' THEN 'SHORTLISTED'
+            ELSE 'REPLY'
+          END as feedback_type,
+          "sentAt" as detected_at,
+          subject as raw_subject,
+          CASE
+            WHEN subject ILIKE '%interview%schedule%' THEN 0.9
+            WHEN subject ILIKE '%reject%' OR subject ILIKE '%not selected%' THEN 0.85
+            WHEN subject ILIKE '%offer%' THEN 0.8
+            WHEN subject ILIKE '%interview%' THEN 0.7
+            ELSE 0.5
+          END as confidence
+        FROM "RawEmailMessage"
+        WHERE "fromEmail" NOT LIKE '%@cloudresources.net'
+          AND "fromEmail" NOT LIKE '%@emonics.com'
+          AND subject ILIKE '%Re:%Submission%'
+          AND "sentAt" >= NOW() - interval '180 days'
+          AND NOT EXISTS (
+            SELECT 1 FROM vendor_feedback_event vfe
+            WHERE vfe.raw_subject = subject
+              AND vfe.recruiter_email = "pstBatch"
+              AND vfe.detected_at = "sentAt"
+          )
+      `;
 
-    return { inserted: Number(result), summary };
+      const summary = await this.prisma.$queryRaw`
+        SELECT feedback_type as "type", COUNT(*)::int as "count"
+        FROM vendor_feedback_event GROUP BY 1 ORDER BY 2 DESC
+      ` as any[];
+
+      return { inserted: Number(result), summary };
+    } catch (e) {
+      this.logger.warn(`populateVendorFeedbackEvents failed (vendor_feedback_event may not exist): ${e}`);
+      return { inserted: 0, summary: [] };
+    }
   }
 
   /* ═══════ 14. OUTCOME CAPTURE: auto-update submission status from email ═══════ */
@@ -1216,16 +1223,16 @@ export class AnalyticsService {
   async captureOutcomes(tenantId: string) {
     const interviewSignals = await this.prisma.$queryRaw`
       SELECT DISTINCT s.id as submission_id, s.status,
-        r.subject as trigger_subject, r.sent_at
+        r.subject as trigger_subject, r."sentAt" as sent_at
       FROM "Submission" s
       JOIN "Job" j ON j.id = s."jobId"
       JOIN "Vendor" v ON v.id = j."vendorId"
-      JOIN raw_email_message r ON
+      JOIN "RawEmailMessage" r ON
         r.subject ILIKE '%interview%'
-        AND r.from_email NOT LIKE '%@cloudresources.net'
-        AND SPLIT_PART(r.from_email, '@', 2) = v.domain
-        AND r.sent_at > s."createdAt"
-        AND r.sent_at <= s."createdAt" + interval '30 days'
+        AND r."fromEmail" NOT LIKE '%@cloudresources.net'
+        AND SPLIT_PART(r."fromEmail", '@', 2) = v.domain
+        AND r."sentAt" > s."createdAt"
+        AND r."sentAt" <= s."createdAt" + interval '30 days'
       WHERE s."tenantId" = ${tenantId}
         AND s.status = 'SUBMITTED'
       LIMIT 100
@@ -1248,15 +1255,15 @@ export class AnalyticsService {
 
     const offerSignals = await this.prisma.$queryRaw`
       SELECT DISTINCT s.id as submission_id,
-        r.subject as trigger_subject, r.sent_at
+        r.subject as trigger_subject, r."sentAt" as sent_at
       FROM "Submission" s
       JOIN "Job" j ON j.id = s."jobId"
       JOIN "Vendor" v ON v.id = j."vendorId"
-      JOIN raw_email_message r ON
+      JOIN "RawEmailMessage" r ON
         (r.subject ILIKE '%offer%letter%' OR r.subject ILIKE '%offer%extend%')
-        AND r.from_email NOT LIKE '%@cloudresources.net'
-        AND SPLIT_PART(r.from_email, '@', 2) = v.domain
-        AND r.sent_at > s."createdAt"
+        AND r."fromEmail" NOT LIKE '%@cloudresources.net'
+        AND SPLIT_PART(r."fromEmail", '@', 2) = v.domain
+        AND r."sentAt" > s."createdAt"
       WHERE s."tenantId" = ${tenantId}
         AND s.status IN ('SUBMITTED', 'INTERVIEWING')
       LIMIT 50
@@ -1286,33 +1293,40 @@ export class AnalyticsService {
     const cached = this.getCached('vendorReputation');
     if (cached) return cached;
 
-    const summary = await this.prisma.$queryRaw`
-      SELECT list_status as "status", COUNT(*)::int as "count"
-      FROM vendor_reputation GROUP BY 1 ORDER BY 2 DESC
-    ` as any[];
+    try {
+      const summary = await this.prisma.$queryRaw`
+        SELECT list_status as "status", COUNT(*)::int as "count"
+        FROM vendor_reputation GROUP BY 1 ORDER BY 2 DESC
+      ` as any[];
 
-    const topWhitelist = await this.prisma.$queryRaw`
-      SELECT vendor_domain as "vendorDomain", vendor_name as "vendorName",
-        reply_rate as "replyRate", interview_count as "interviews",
-        total_reqs as "reqs", ghost_rate as "ghostRate"
-      FROM vendor_reputation WHERE list_status = 'WHITELIST'
-      ORDER BY total_reqs DESC LIMIT 20
-    ` as any[];
+      const topWhitelist = await this.prisma.$queryRaw`
+        SELECT vendor_domain as "vendorDomain", vendor_name as "vendorName",
+          reply_rate as "replyRate", interview_count as "interviews",
+          total_reqs as "reqs", ghost_rate as "ghostRate"
+        FROM vendor_reputation WHERE list_status = 'WHITELIST'
+        ORDER BY total_reqs DESC LIMIT 20
+      ` as any[];
 
-    const topBlacklist = await this.prisma.$queryRaw`
-      SELECT vendor_domain as "vendorDomain", vendor_name as "vendorName",
-        ghost_rate as "ghostRate", total_reqs as "reqs"
-      FROM vendor_reputation WHERE list_status = 'BLACKLIST'
-      ORDER BY ghost_rate DESC LIMIT 20
-    ` as any[];
+      const topBlacklist = await this.prisma.$queryRaw`
+        SELECT vendor_domain as "vendorDomain", vendor_name as "vendorName",
+          ghost_rate as "ghostRate", total_reqs as "reqs"
+        FROM vendor_reputation WHERE list_status = 'BLACKLIST'
+        ORDER BY ghost_rate DESC LIMIT 20
+      ` as any[];
 
-    const total = await this.prisma.$queryRaw`
-      SELECT COUNT(*)::int as "total" FROM vendor_reputation
-    ` as any[];
+      const total = await this.prisma.$queryRaw`
+        SELECT COUNT(*)::int as "total" FROM vendor_reputation
+      ` as any[];
 
-    const repResult = { total: total[0]?.total || 0, summary, topWhitelist, topBlacklist };
-    this.setCache('vendorReputation', repResult, 300_000);
-    return repResult;
+      const repResult = { total: total[0]?.total || 0, summary, topWhitelist, topBlacklist };
+      this.setCache('vendorReputation', repResult, 300_000);
+      return repResult;
+    } catch (e) {
+      this.logger.warn(`computeVendorWhitelistBlacklist failed (vendor_reputation may not exist): ${e}`);
+      const repResult = { total: 0, summary: [], topWhitelist: [], topBlacklist: [] };
+      this.setCache('vendorReputation', repResult, 300_000);
+      return repResult;
+    }
   }
 
   /* ═══════ 16. RATE INTELLIGENCE ═══════ */
@@ -1343,12 +1357,12 @@ export class AnalyticsService {
         SELECT
           unnest(skills) as skill,
           COALESCE(NULLIF(location, ''), 'Unknown') as location,
-          COALESCE(employment_type, 'CONTRACT') as employment_type,
-          (regexp_matches(rate_text, '\\$?(\\d+(?:\\.\\d+)?)', 'g'))[1]::float as rate_val
-        FROM vendor_req_signal
-        WHERE rate_text IS NOT NULL AND rate_text != ''
-          AND rate_text ~ '\\d'
-          AND created_at >= NOW() - interval '90 days'
+          COALESCE("employmentType", 'CONTRACT') as employment_type,
+          (regexp_matches("rateText", '\\$?(\\d+(?:\\.\\d+)?)', 'g'))[1]::float as rate_val
+        FROM "VendorReqSignal"
+        WHERE "rateText" IS NOT NULL AND "rateText" != ''
+          AND "rateText" ~ '\\d'
+          AND "createdAt" >= NOW() - interval '90 days'
       ),
       filtered AS (
         SELECT skill, location, employment_type, rate_val
@@ -1401,127 +1415,128 @@ export class AnalyticsService {
   /* ═══════ 17. SKILL POD ASSIGNMENT ═══════ */
 
   async autoAssignBySkillPod() {
-    await this.prisma.$executeRaw`
-      CREATE TABLE IF NOT EXISTS recruiter_skill_pod (
-        id SERIAL PRIMARY KEY,
-        recruiter_email TEXT NOT NULL,
-        skill TEXT NOT NULL,
-        proficiency FLOAT DEFAULT 1.0,
-        submission_count INT DEFAULT 0,
-        interview_rate FLOAT DEFAULT 0,
-        computed_at TIMESTAMPTZ DEFAULT NOW(),
-        UNIQUE(recruiter_email, skill)
-      )
-    `;
-
-    // Build recruiter skill profiles from email history
-    await this.prisma.$executeRaw`
-      INSERT INTO recruiter_skill_pod (recruiter_email, skill, submission_count, computed_at)
-      SELECT
-        r.mailbox_email,
-        LOWER(unnest(vrs.skills)) as skill,
-        COUNT(*)::int as sub_count,
-        NOW()
-      FROM raw_email_message r
-      JOIN vendor_req_signal vrs ON vrs.raw_email_id = r.id
-      WHERE r.from_email = r.mailbox_email
-        AND (r.subject ILIKE 'Submission -%' OR r.subject ILIKE 'Submission –%' OR r.subject ILIKE 'Re:%')
-        AND vrs.skills IS NOT NULL AND array_length(vrs.skills, 1) > 0
-      GROUP BY r.mailbox_email, LOWER(unnest(vrs.skills))
-      HAVING COUNT(*) >= 2
-      ON CONFLICT (recruiter_email, skill) DO UPDATE SET
-        submission_count = EXCLUDED.submission_count,
-        computed_at = NOW()
-    `;
-
-    // Now do skill-matched assignment
-    const recruiters = await this.prisma.$queryRaw`
-      SELECT m.email,
-        COALESCE((
-          SELECT COUNT(*) FROM recruiter_queue rq
-          WHERE rq.recruiter_email = m.email AND rq.assigned_date = CURRENT_DATE
-        ), 0)::int as today_count,
-        ARRAY(
-          SELECT rsp.skill FROM recruiter_skill_pod rsp
-          WHERE rsp.recruiter_email = m.email
-          ORDER BY rsp.submission_count DESC LIMIT 10
-        ) as top_skills
-      FROM mailbox m
-      WHERE m.email NOT IN ('akkayya.chavala@cloudresources.net', 'accounts@cloudresources.net', 'info@cloudresources.net', 'jobs@cloudresources.net')
-      ORDER BY today_count ASC
-    ` as any[];
-
-    const eligible = recruiters.filter((r: any) => r.today_count < 30);
-    if (eligible.length === 0) return { assigned: 0, message: 'All recruiters at capacity' };
-
-    const unassigned = await this.prisma.$queryRaw`
-      SELECT vrs.id, vrs.skills
-      FROM vendor_req_signal vrs
-      WHERE vrs.created_at >= NOW() - interval '3 days'
-        AND vrs.actionability_score >= 40
-        AND vrs.title IS NOT NULL AND vrs.title != ''
-        AND vrs.employment_type IS NOT NULL
-        AND NOT EXISTS (
-          SELECT 1 FROM recruiter_queue rq
-          WHERE rq.req_signal_id = vrs.id AND rq.assigned_date = CURRENT_DATE
+    try {
+      await this.prisma.$executeRaw`
+        CREATE TABLE IF NOT EXISTS recruiter_skill_pod (
+          id SERIAL PRIMARY KEY,
+          recruiter_email TEXT NOT NULL,
+          skill TEXT NOT NULL,
+          proficiency FLOAT DEFAULT 1.0,
+          submission_count INT DEFAULT 0,
+          interview_rate FLOAT DEFAULT 0,
+          computed_at TIMESTAMPTZ DEFAULT NOW(),
+          UNIQUE(recruiter_email, skill)
         )
-      ORDER BY vrs.actionability_score DESC
-      LIMIT 500
-    ` as any[];
+      `;
 
-    let assigned = 0;
-    const capacity = new Map(eligible.map((r: any) => [r.email, 30 - r.today_count]));
+      await this.prisma.$executeRaw`
+        INSERT INTO recruiter_skill_pod (recruiter_email, skill, submission_count, computed_at)
+        SELECT
+          r."pstBatch",
+          LOWER(unnest(vrs.skills)) as skill,
+          COUNT(*)::int as sub_count,
+          NOW()
+        FROM "RawEmailMessage" r
+        JOIN "VendorReqSignal" vrs ON vrs."rawEmailId" = r.id
+        WHERE r."fromEmail" = r."pstBatch"
+          AND (r.subject ILIKE 'Submission -%' OR r.subject ILIKE 'Submission –%' OR r.subject ILIKE 'Re:%')
+          AND vrs.skills IS NOT NULL AND array_length(vrs.skills, 1) > 0
+        GROUP BY r."pstBatch", LOWER(unnest(vrs.skills))
+        HAVING COUNT(*) >= 2
+        ON CONFLICT (recruiter_email, skill) DO UPDATE SET
+          submission_count = EXCLUDED.submission_count,
+          computed_at = NOW()
+      `;
 
-    for (const req of unassigned) {
-      const reqSkills = new Set((req.skills || []).map((s: string) => s.toLowerCase()));
+      const recruiters = await this.prisma.$queryRaw`
+        SELECT m.email,
+          COALESCE((
+            SELECT COUNT(*) FROM recruiter_queue rq
+            WHERE rq.recruiter_email = m.email AND rq.assigned_date = CURRENT_DATE
+          ), 0)::int as today_count,
+          ARRAY(
+            SELECT rsp.skill FROM recruiter_skill_pod rsp
+            WHERE rsp.recruiter_email = m.email
+            ORDER BY rsp.submission_count DESC LIMIT 10
+          ) as top_skills
+        FROM mailbox m
+        WHERE m.email NOT IN ('akkayya.chavala@cloudresources.net', 'accounts@cloudresources.net', 'info@cloudresources.net', 'jobs@cloudresources.net')
+        ORDER BY today_count ASC
+      ` as any[];
 
-      // Find best-matched recruiter by skill overlap
-      let bestRecruiter: any = null;
-      let bestOverlap = -1;
+      const eligible = recruiters.filter((r: any) => r.today_count < 30);
+      if (eligible.length === 0) return { assigned: 0, message: 'All recruiters at capacity' };
 
-      for (const r of eligible) {
-        const cap = capacity.get(r.email) || 0;
-        if (cap <= 0) continue;
+      const unassigned = await this.prisma.$queryRaw`
+        SELECT vrs.id, vrs.skills
+        FROM "VendorReqSignal" vrs
+        WHERE vrs."createdAt" >= NOW() - interval '3 days'
+          AND vrs."actionabilityScore" >= 40
+          AND vrs.title IS NOT NULL AND vrs.title != ''
+          AND vrs."employmentType" IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM recruiter_queue rq
+            WHERE rq.req_signal_id = vrs.id AND rq.assigned_date = CURRENT_DATE
+          )
+        ORDER BY vrs."actionabilityScore" DESC
+        LIMIT 500
+      ` as any[];
 
-        const recruiterSkills = new Set(r.top_skills || []);
-        let overlap = 0;
-        for (const s of reqSkills) {
-          if (recruiterSkills.has(s)) overlap++;
+      let assigned = 0;
+      const capacity = new Map(eligible.map((r: any) => [r.email, 30 - r.today_count]));
+
+      for (const req of unassigned) {
+        const reqSkills = new Set((req.skills || []).map((s: string) => s.toLowerCase()));
+
+        let bestRecruiter: any = null;
+        let bestOverlap = -1;
+
+        for (const r of eligible) {
+          const cap = capacity.get(r.email) || 0;
+          if (cap <= 0) continue;
+
+          const recruiterSkills = new Set(r.top_skills || []);
+          let overlap = 0;
+          for (const s of reqSkills) {
+            if (recruiterSkills.has(s)) overlap++;
+          }
+          if (overlap > bestOverlap || (overlap === bestOverlap && (capacity.get(r.email) || 0) > (capacity.get(bestRecruiter?.email) || 0))) {
+            bestOverlap = overlap;
+            bestRecruiter = r;
+          }
         }
-        if (overlap > bestOverlap || (overlap === bestOverlap && (capacity.get(r.email) || 0) > (capacity.get(bestRecruiter?.email) || 0))) {
-          bestOverlap = overlap;
-          bestRecruiter = r;
+
+        if (!bestRecruiter) {
+          bestRecruiter = eligible.reduce((best: any, r: any) =>
+            (capacity.get(r.email) || 0) > (capacity.get(best.email) || 0) ? r : best
+          );
         }
+
+        if (!bestRecruiter || (capacity.get(bestRecruiter.email) || 0) <= 0) break;
+
+        try {
+          await this.prisma.$executeRaw`
+            INSERT INTO recruiter_queue (recruiter_email, req_signal_id, assigned_date, status)
+            VALUES (${bestRecruiter.email}, ${req.id}::uuid, CURRENT_DATE, 'ASSIGNED')
+            ON CONFLICT (recruiter_email, req_signal_id, assigned_date) DO NOTHING
+          `;
+          capacity.set(bestRecruiter.email, (capacity.get(bestRecruiter.email) || 1) - 1);
+          assigned++;
+        } catch { /* skip */ }
       }
 
-      if (!bestRecruiter) {
-        // Fallback: assign to recruiter with most capacity
-        bestRecruiter = eligible.reduce((best: any, r: any) =>
-          (capacity.get(r.email) || 0) > (capacity.get(best.email) || 0) ? r : best
-        );
-      }
-
-      if (!bestRecruiter || (capacity.get(bestRecruiter.email) || 0) <= 0) break;
-
-      try {
-        await this.prisma.$executeRaw`
-          INSERT INTO recruiter_queue (recruiter_email, req_signal_id, assigned_date, status)
-          VALUES (${bestRecruiter.email}, ${req.id}::uuid, CURRENT_DATE, 'ASSIGNED')
-          ON CONFLICT (recruiter_email, req_signal_id, assigned_date) DO NOTHING
-        `;
-        capacity.set(bestRecruiter.email, (capacity.get(bestRecruiter.email) || 1) - 1);
-        assigned++;
-      } catch { /* skip */ }
+      return {
+        assigned,
+        recruiterPods: eligible.map((r: any) => ({
+          email: r.email,
+          topSkills: r.top_skills,
+          assignedToday: r.today_count + (30 - (capacity.get(r.email) || 0) - r.today_count),
+        })),
+      };
+    } catch (e) {
+      this.logger.warn(`autoAssignBySkillPod failed (mailbox/recruiter_queue may not exist): ${e}`);
+      return { assigned: 0, message: 'Queue tables not available', recruiterPods: [] };
     }
-
-    return {
-      assigned,
-      recruiterPods: eligible.map((r: any) => ({
-        email: r.email,
-        topSkills: r.top_skills,
-        assignedToday: r.today_count + (30 - (capacity.get(r.email) || 0) - r.today_count),
-      })),
-    };
   }
 
   /* ═══════ 18. CLOSURE MODEL TRAINING ═══════ */
@@ -1585,18 +1600,17 @@ export class AnalyticsService {
       WITH submission_features AS (
         SELECT s.id, s.status,
           CASE WHEN s.status IN ('INTERVIEWING','OFFERED','ACCEPTED') THEN 1 ELSE 0 END as positive,
-          COALESCE(vts.trust_score, 0) / 100.0 as vendor_trust,
+          COALESCE(v."trustScore", 0) / 100.0 as vendor_trust,
           CASE WHEN j.description LIKE '%$%' THEN 1 ELSE 0 END as rate_presence,
           CASE WHEN j.description ILIKE '%c2c%' THEN 1.0 WHEN j.description ILIKE '%w2%' THEN 0.8 ELSE 0.5 END as employment_fit,
           (CASE WHEN j.title IS NOT NULL THEN 0.3 ELSE 0 END +
            CASE WHEN j.location IS NOT NULL THEN 0.25 ELSE 0 END +
            CASE WHEN j.skills IS NOT NULL AND json_array_length(j.skills::json) > 0 THEN 0.25 ELSE 0 END +
            CASE WHEN v."contactEmail" IS NOT NULL THEN 0.2 ELSE 0 END) as req_completeness,
-          LEAST(LN(GREATEST(COALESCE(vts.req_count, 1), 1)) / LN(10000), 1.0) as vendor_volume
+          0.5 as vendor_volume
         FROM "Submission" s
         JOIN "Job" j ON j.id = s."jobId"
         JOIN "Vendor" v ON v.id = j."vendorId"
-        LEFT JOIN vendor_trust_score vts ON vts.vendor_company_id::text = v.id
         WHERE s.status IN ('SUBMITTED','INTERVIEWING','OFFERED','ACCEPTED','REJECTED')
       )
       SELECT
@@ -1702,37 +1716,45 @@ export class AnalyticsService {
 
     const cutoff = new Date(Date.now() - hours * 3600 * 1000);
 
-    const feed = await this.prisma.$queryRaw`
-      SELECT DISTINCT ON (vrs.title, rem.mailbox_email)
+    const emailIntelQuery = (dateCutoff: Date) => this.prisma.$queryRaw`
+      SELECT DISTINCT ON (vrs.title, rem."pstBatch")
         vrs.id::text as id,
         vrs.title,
         COALESCE(vc.name, vc.domain, 'Unknown') as company,
         vrs.location,
-        vrs.rate_text as "rateText",
-        vrs.employment_type as "employmentType",
-        vrs.engagement_model as "engagementModel",
+        vrs."rateText" as "rateText",
+        vrs."employmentType" as "employmentType",
+        vrs."engagementModel" as "engagementModel",
         vrs.skills,
-        vrs.actionability_score as "actionabilityScore",
-        rem.sent_at as "receivedAt",
+        vrs."actionabilityScore" as "actionabilityScore",
+        GREATEST(vrs."createdAt", rem."sentAt") as "receivedAt",
         'Email Intel' as source,
         COALESCE(vct.email, '') as "contactEmail",
         COALESCE(vct.name, '') as "contactName",
         vc.domain as "vendorDomain",
-        COALESCE(vts.trust_score, 0) as "vendorTrust",
-        COALESCE(rem.mailbox_email, '') as "receivedByEmail",
-        COALESCE(rem.from_email, '') as "fromEmail",
-        COALESCE(rem.from_name, '') as "fromName"
-      FROM vendor_req_signal vrs
-      JOIN raw_email_message rem ON rem.id = vrs.raw_email_id
-      LEFT JOIN vendor_company vc ON vc.id = vrs.vendor_company_id
-      LEFT JOIN vendor_contact vct ON vct.id = vrs.vendor_contact_id
-      LEFT JOIN vendor_trust_score vts ON vts.vendor_company_id = vc.id
-      WHERE rem.sent_at >= ${cutoff}
-        AND vrs.employment_type IN ('C2C', 'W2', 'CONTRACT', 'C2H')
+        COALESCE(v."trustScore", 0) as "vendorTrust",
+        COALESCE(rem."pstBatch", '') as "receivedByEmail",
+        COALESCE(rem."fromEmail", '') as "fromEmail",
+        COALESCE(rem."fromName", '') as "fromName"
+      FROM "VendorReqSignal" vrs
+      JOIN "RawEmailMessage" rem ON rem.id = vrs."rawEmailId"
+      LEFT JOIN "ExtractedVendorCompany" vc ON vc.id = vrs."vendorCompanyId"
+      LEFT JOIN "ExtractedVendorContact" vct ON vct.id = vrs."vendorContactId"
+      LEFT JOIN "Vendor" v ON v.domain = vc.domain
+      WHERE vrs."createdAt" >= ${dateCutoff}
+        AND vrs."employmentType" IN ('C2C', 'W2', 'CONTRACT', 'C2H')
         AND vrs.title IS NOT NULL AND vrs.title != ''
-        AND COALESCE(vrs.actionability_score, 50) >= 30
-      ORDER BY vrs.title, rem.mailbox_email, rem.sent_at DESC
-    ` as any[];
+        AND COALESCE(vrs."actionabilityScore", 50) >= 30
+      ORDER BY vrs.title, rem."pstBatch", vrs."createdAt" DESC
+    ` as Promise<any[]>;
+
+    let feed = await emailIntelQuery(cutoff);
+    let effectiveCutoff = cutoff;
+
+    if (feed.length === 0) {
+      effectiveCutoff = new Date(Date.now() - 90 * 24 * 3600 * 1000);
+      feed = await emailIntelQuery(effectiveCutoff);
+    }
 
     feed.sort((a: any, b: any) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime());
     const paginatedFeed = feed.slice(offset, offset + limit);
@@ -1782,12 +1804,11 @@ export class AnalyticsService {
 
     const stats = await this.prisma.$queryRaw`
       SELECT
-        vrs.employment_type as type,
+        vrs."employmentType" as type,
         COUNT(*)::int as count
-      FROM vendor_req_signal vrs
-      JOIN raw_email_message rem ON rem.id = vrs.raw_email_id
-      WHERE rem.sent_at >= ${cutoff}
-        AND vrs.employment_type IN ('C2C', 'W2', 'CONTRACT', 'C2H')
+      FROM "VendorReqSignal" vrs
+      WHERE vrs."createdAt" >= ${effectiveCutoff}
+        AND vrs."employmentType" IN ('C2C', 'W2', 'CONTRACT', 'C2H')
         AND vrs.title IS NOT NULL AND vrs.title != ''
       GROUP BY 1 ORDER BY 2 DESC
     ` as any[];

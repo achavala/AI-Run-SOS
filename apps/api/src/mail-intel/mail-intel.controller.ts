@@ -129,4 +129,7 @@ export class MailIntelController {
 
   @Post('mailboxes')
   addMailbox(@Body() body: { email: string }) { return this.svc.addMailbox(body.email); }
+
+  @Post('re-extract')
+  reExtract() { return this.svc.reExtractSignals(); }
 }

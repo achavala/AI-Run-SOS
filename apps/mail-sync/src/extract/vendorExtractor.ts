@@ -32,14 +32,14 @@ export async function extractVendors(pool: Pool, incrementalOnly = false): Promi
   const client = await pool.connect();
   try {
     const whereClause = incrementalOnly
-      ? "WHERE from_email IS NOT NULL AND from_email != '' AND category IS NOT NULL AND created_at >= NOW() - interval '2 hours'"
-      : "WHERE from_email IS NOT NULL AND from_email != ''";
+      ? `WHERE "fromEmail" IS NOT NULL AND "fromEmail" != '' AND "createdAt" >= NOW() - interval '2 hours'`
+      : `WHERE "fromEmail" IS NOT NULL AND "fromEmail" != ''`;
 
     const result = await client.query(`
-      SELECT from_email, from_name, MIN(sent_at) as first_seen, MAX(sent_at) as last_seen, COUNT(*) as cnt
-      FROM raw_email_message
+      SELECT "fromEmail", "fromName", MIN("sentAt") as first_seen, MAX("sentAt") as last_seen, COUNT(*) as cnt
+      FROM "RawEmailMessage"
       ${whereClause}
-      GROUP BY from_email, from_name
+      GROUP BY "fromEmail", "fromName"
       ORDER BY cnt DESC
     `);
 
@@ -49,46 +49,43 @@ export async function extractVendors(pool: Pool, incrementalOnly = false): Promi
     let skippedOwn = 0;
 
     for (const row of result.rows) {
-      const email = row.from_email.toLowerCase().trim();
+      const email = row.fromEmail.toLowerCase().trim();
       const domain = getDomain(email);
       if (!domain) continue;
 
       if (FREE_DOMAINS.has(domain)) { skippedFree++; continue; }
       if (OWN_DOMAINS.has(domain)) { skippedOwn++; continue; }
 
-      // Upsert vendor_company
       const companyResult = await client.query(`
-        INSERT INTO vendor_company (domain, name, email_count, first_seen, last_seen)
+        INSERT INTO "ExtractedVendorCompany" (domain, name, "emailCount", "firstSeenAt", "lastSeenAt")
         VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT (domain) DO UPDATE SET
-          email_count = vendor_company.email_count + $3,
-          first_seen = LEAST(vendor_company.first_seen, $4),
-          last_seen = GREATEST(vendor_company.last_seen, $5)
+          "emailCount" = "ExtractedVendorCompany"."emailCount" + $3,
+          "firstSeenAt" = LEAST("ExtractedVendorCompany"."firstSeenAt", $4),
+          "lastSeenAt" = GREATEST("ExtractedVendorCompany"."lastSeenAt", $5)
         RETURNING id
       `, [domain, guessCompanyName(domain), parseInt(row.cnt), row.first_seen, row.last_seen]);
 
       const companyId = companyResult.rows[0].id;
 
-      // Upsert vendor_contact
       const contactResult = await client.query(`
-        INSERT INTO vendor_contact (vendor_company_id, name, email, email_count, first_seen, last_seen)
+        INSERT INTO "ExtractedVendorContact" ("vendorCompanyId", name, email, "emailCount", "firstSeenAt", "lastSeenAt")
         VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (email) DO UPDATE SET
-          name = COALESCE(NULLIF($2, ''), vendor_contact.name),
-          email_count = vendor_contact.email_count + $4,
-          first_seen = LEAST(vendor_contact.first_seen, $5),
-          last_seen = GREATEST(vendor_contact.last_seen, $6)
+          name = COALESCE(NULLIF($2, ''), "ExtractedVendorContact".name),
+          "emailCount" = "ExtractedVendorContact"."emailCount" + $4,
+          "firstSeenAt" = LEAST("ExtractedVendorContact"."firstSeenAt", $5),
+          "lastSeenAt" = GREATEST("ExtractedVendorContact"."lastSeenAt", $6)
         RETURNING id
-      `, [companyId, row.from_name || null, email, parseInt(row.cnt), row.first_seen, row.last_seen]);
+      `, [companyId, row.fromName || null, email, parseInt(row.cnt), row.first_seen, row.last_seen]);
 
       if (contactResult.rowCount && contactResult.rowCount > 0) vendorContacts++;
     }
 
-    // Count unique domains
-    const domainCount = await client.query("SELECT COUNT(*) FROM vendor_company");
+    const domainCount = await client.query(`SELECT COUNT(*) FROM "ExtractedVendorCompany"`);
     vendorDomains = parseInt(domainCount.rows[0].count);
 
-    const contactCount = await client.query("SELECT COUNT(*) FROM vendor_contact");
+    const contactCount = await client.query(`SELECT COUNT(*) FROM "ExtractedVendorContact"`);
     vendorContacts = parseInt(contactCount.rows[0].count);
 
     console.log(`  Vendor domains extracted: ${vendorDomains}`);

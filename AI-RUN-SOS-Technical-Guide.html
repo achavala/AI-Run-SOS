@@ -1,0 +1,1597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI-RUN SOS — Complete Technical Architecture &amp; Solutions Guide</title>
+<style>
+  @page {
+    size: A4;
+    margin: 20mm 15mm;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.55;
+    color: #1a1a2e;
+    background: #fff;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 30px 40px;
+  }
+  h1 { font-size: 26pt; font-weight: 800; color: #0f172a; margin-bottom: 4px; letter-spacing: -0.5px; }
+  h2 { font-size: 18pt; font-weight: 700; color: #1e3a5f; border-bottom: 3px solid #2563eb; padding-bottom: 6px; margin: 32px 0 14px 0; page-break-after: avoid; }
+  h3 { font-size: 14pt; font-weight: 700; color: #334155; margin: 22px 0 8px 0; page-break-after: avoid; }
+  h4 { font-size: 12pt; font-weight: 600; color: #475569; margin: 16px 0 6px 0; }
+  p { margin-bottom: 10px; }
+  .subtitle { font-size: 14pt; color: #475569; margin-bottom: 2px; }
+  .meta { font-size: 10pt; color: #64748b; margin-bottom: 20px; }
+  .meta span { margin-right: 20px; }
+  .cover-banner {
+    background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #2563eb 100%);
+    color: #fff;
+    padding: 40px;
+    border-radius: 12px;
+    margin-bottom: 30px;
+  }
+  .cover-banner h1 { color: #fff; font-size: 30pt; }
+  .cover-banner .subtitle { color: #93c5fd; font-size: 13pt; }
+  .cover-banner .meta { color: #cbd5e1; }
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin: 16px 0 24px 0;
+  }
+  .kpi-card {
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    border-radius: 8px;
+    padding: 14px 16px;
+    text-align: center;
+  }
+  .kpi-card .value { font-size: 20pt; font-weight: 800; color: #1e3a5f; }
+  .kpi-card .label { font-size: 9pt; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 18px 0;
+    font-size: 10pt;
+    page-break-inside: avoid;
+  }
+  thead { background: #1e3a5f; color: #fff; }
+  th { padding: 8px 10px; text-align: left; font-weight: 600; font-size: 9.5pt; text-transform: uppercase; letter-spacing: 0.3px; }
+  td { padding: 7px 10px; border-bottom: 1px solid #e2e8f0; }
+  tr:nth-child(even) { background: #f8fafc; }
+  tr:hover { background: #eff6ff; }
+  .arch-diagram, pre {
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 20px;
+    border-radius: 8px;
+    font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', 'Consolas', monospace;
+    font-size: 9.5pt;
+    line-height: 1.5;
+    overflow-x: auto;
+    margin: 12px 0 18px 0;
+    white-space: pre;
+    page-break-inside: avoid;
+  }
+  .flow-box {
+    background: #fefce8;
+    border: 1px solid #fde68a;
+    border-left: 4px solid #f59e0b;
+    padding: 14px 18px;
+    border-radius: 6px;
+    margin: 12px 0;
+    page-break-inside: avoid;
+  }
+  .info-box {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-left: 4px solid #2563eb;
+    padding: 14px 18px;
+    border-radius: 6px;
+    margin: 12px 0;
+    page-break-inside: avoid;
+  }
+  .success-box {
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-left: 4px solid #16a34a;
+    padding: 14px 18px;
+    border-radius: 6px;
+    margin: 12px 0;
+  }
+  .warn-box {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-left: 4px solid #dc2626;
+    padding: 14px 18px;
+    border-radius: 6px;
+    margin: 12px 0;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 9pt;
+    font-weight: 600;
+  }
+  .badge-green { background: #dcfce7; color: #166534; }
+  .badge-yellow { background: #fef9c3; color: #854d0e; }
+  .badge-red { background: #fef2f2; color: #991b1b; }
+  .badge-blue { background: #dbeafe; color: #1e40af; }
+  .toc { columns: 2; column-gap: 40px; margin: 16px 0 24px 0; }
+  .toc a { color: #2563eb; text-decoration: none; display: block; padding: 3px 0; font-size: 10.5pt; }
+  .toc a:hover { text-decoration: underline; }
+  .section-num { font-weight: 700; color: #1e3a5f; margin-right: 6px; }
+  ul, ol { margin: 8px 0 12px 24px; }
+  li { margin-bottom: 4px; }
+  strong { color: #1e293b; }
+  .page-break { page-break-before: always; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .agent-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+    page-break-inside: avoid;
+  }
+  .agent-card h4 { margin-top: 0; color: #1e3a5f; }
+  .agent-card .role { font-size: 9pt; color: #2563eb; font-weight: 600; text-transform: uppercase; }
+  hr { border: none; border-top: 1px solid #e2e8f0; margin: 24px 0; }
+  .footer { text-align: center; color: #94a3b8; font-size: 9pt; margin-top: 40px; padding-top: 20px; border-top: 1px solid #e2e8f0; }
+  @media print {
+    body { padding: 0; max-width: none; }
+    .cover-banner { break-after: page; }
+    h2 { break-after: avoid; }
+    table, pre, .arch-diagram { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============================================ -->
+<!-- COVER PAGE -->
+<!-- ============================================ -->
+<div class="cover-banner">
+  <h1>AI-RUN SOS</h1>
+  <p class="subtitle">Staffing Operating System — Complete Technical Architecture &amp; Solutions Guide</p>
+  <br>
+  <p class="subtitle">Through the Lens of 30+ Years Staffing Operations, PhD-Level Technical Architecture, and Institutional VC Microstructure</p>
+  <br>
+  <div class="meta">
+    <span><strong>Version:</strong> 2.0 (Post-Execution Engine)</span>
+    <span><strong>Date:</strong> March 2026</span>
+    <span><strong>Classification:</strong> Confidential — Internal + Authorized Partners</span>
+  </div>
+  <div class="meta">
+    <span><strong>Subject:</strong> Cloud Resources — AI-Run Staffing Operating System</span>
+    <span><strong>Codebase:</strong> ~50,000 lines TypeScript</span>
+  </div>
+</div>
+
+<!-- KPI DASHBOARD -->
+<div class="kpi-grid">
+  <div class="kpi-card"><div class="value">61M+</div><div class="label">Vendor Req Signals</div></div>
+  <div class="kpi-card"><div class="value">812K+</div><div class="label">Emails Ingested</div></div>
+  <div class="kpi-card"><div class="value">17K</div><div class="label">Consultants</div></div>
+  <div class="kpi-card"><div class="value">7.1K</div><div class="label">Vendor Companies</div></div>
+  <div class="kpi-card"><div class="value">31K</div><div class="label">Vendor Contacts</div></div>
+  <div class="kpi-card"><div class="value">12</div><div class="label">AI Agents</div></div>
+  <div class="kpi-card"><div class="value">160+</div><div class="label">API Endpoints</div></div>
+  <div class="kpi-card"><div class="value">47</div><div class="label">Database Models</div></div>
+</div>
+
+<!-- TABLE OF CONTENTS -->
+<h2>Table of Contents</h2>
+<div class="toc">
+  <a href="#s1"><span class="section-num">1.</span> Executive Summary</a>
+  <a href="#s2"><span class="section-num">2.</span> Business Context &amp; Value Proposition</a>
+  <a href="#s3"><span class="section-num">3.</span> Financial Model &amp; Unit Economics</a>
+  <a href="#s4"><span class="section-num">4.</span> System Architecture Overview</a>
+  <a href="#s5"><span class="section-num">5.</span> Technology Stack</a>
+  <a href="#s6"><span class="section-num">6.</span> Monorepo Structure</a>
+  <a href="#s7"><span class="section-num">7.</span> Data Architecture (47 Models, 28 Enums)</a>
+  <a href="#s8"><span class="section-num">8.</span> API Surface (23 Controllers, 160+ Endpoints)</a>
+  <a href="#s9"><span class="section-num">9.</span> Authentication &amp; Authorization (RBAC)</a>
+  <a href="#s10"><span class="section-num">10.</span> Agent Runtime Framework (12 AI Agents)</a>
+  <a href="#s11"><span class="section-num">11.</span> Email Intelligence Pipeline</a>
+  <a href="#s12"><span class="section-num">12.</span> Execution Engine (Epics 1–5)</a>
+  <a href="#s13"><span class="section-num">13.</span> Conversion Funnel &amp; Revenue Math</a>
+  <a href="#s14"><span class="section-num">14.</span> Call Flow Diagrams</a>
+  <a href="#s15"><span class="section-num">15.</span> Frontend Architecture (22 Pages)</a>
+  <a href="#s16"><span class="section-num">16.</span> Infrastructure &amp; DevOps</a>
+  <a href="#s17"><span class="section-num">17.</span> Security Model</a>
+  <a href="#s18"><span class="section-num">18.</span> Venture Potential &amp; Competitive Analysis</a>
+  <a href="#s19"><span class="section-num">19.</span> Implementation Roadmap</a>
+  <a href="#s20"><span class="section-num">20.</span> Knowledge Transfer Checklist</a>
+</div>
+
+<!-- ============================================ -->
+<!-- SECTION 1: EXECUTIVE SUMMARY -->
+<!-- ============================================ -->
+<h2 id="s1">1. Executive Summary</h2>
+
+<p><strong>What this is:</strong> AI-RUN SOS is a vertically integrated, AI-native staffing operating system purpose-built for the C2C/W2/Contract IT staffing market. It is not a CRM with AI bolted on. It is a <strong>system-of-record + workflow engine + agent runtime</strong> designed to replace 90–95% of human labor in the staffing lifecycle with deterministic AI agents, while preserving human judgment at high-stakes decision gates.</p>
+
+<p><strong>The core thesis:</strong> In IT contract staffing, the difference between a $2M/year shop and a $20M/year shop is not headcount — it is <strong>speed-to-submit, conversion discipline, and vendor intelligence compounding over time</strong>. This system codifies that thesis into software.</p>
+
+<div class="info-box">
+  <strong>Target:</strong> 1 closure/day at $10+/hr margin = <strong>$5M/year gross margin potential</strong><br>
+  <strong>Endgame:</strong> 1 human operator + AI agents = output of 10 recruiters
+</div>
+
+<p>The system creates a closed-loop operating system:</p>
+<pre>Email Inbox → Extraction → Trust Scoring → Matching → Submission → Follow-up → Response Detection → Trust Update</pre>
+
+<h3>Audience-Specific Value</h3>
+<table>
+  <thead><tr><th>Audience</th><th>Value Proposition</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Executives</strong></td><td>Replaces 10 recruiters with 1 operator + approval queue. Real-time pipeline visibility.</td></tr>
+    <tr><td><strong>Finance</strong></td><td>Margin guard prevents sub-$10/hr deals; rate intelligence provides market pricing</td></tr>
+    <tr><td><strong>Technical Architects</strong></td><td>Policy-bound agent framework with immutable audit trail, 47-model data architecture</td></tr>
+    <tr><td><strong>Implementation Specialists</strong></td><td>Modular NestJS services with clear API contracts, 5-day onboarding plan</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================ -->
+<!-- SECTION 2: BUSINESS CONTEXT -->
+<!-- ============================================ -->
+<div class="page-break"></div>
+<h2 id="s2">2. Business Context &amp; Value Proposition</h2>
+
+<h3>The Problem Being Solved</h3>
+<p>The US IT contract staffing market is a <strong>$180B+ annual market</strong> dominated by fragmented, labor-intensive operations. A typical bench sales operation:</p>
+<ol>
+  <li><strong>11 recruiters</strong> monitor email inboxes manually</li>
+  <li>Each receives <strong>200–500 vendor emails/day</strong> with job requirements</li>
+  <li>They manually scan, mentally filter, and decide which to act on</li>
+  <li>Resume formatting takes <strong>30–60 minutes</strong> per submission</li>
+  <li>Follow-ups are forgotten or inconsistent</li>
+  <li>Vendor trust is carried in individual recruiters' heads</li>
+  <li>When a recruiter leaves, institutional knowledge walks out the door</li>
+</ol>
+<p><strong>Result:</strong> Industry-average conversion rates of 2–5% submission-to-placement.</p>
+
+<h3>Competitive Moat (4 Layers)</h3>
+<table>
+  <thead><tr><th>#</th><th>Moat</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><strong>Email Intelligence</strong></td><td>61M+ req signals extracted from 812K emails — not available in any ATS</td></tr>
+    <tr><td>2</td><td><strong>Trust Graph</strong></td><td>Vendor scoring based on actual outcomes (ghost rate, response time, rate honesty)</td></tr>
+    <tr><td>3</td><td><strong>Execution Loop</strong></td><td>Only system that sends submissions AND detects responses automatically</td></tr>
+    <tr><td>4</td><td><strong>Agent Governance</strong></td><td>Enterprise-grade: tool allowlists, rate limits, human gates, immutable audit logs</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================ -->
+<!-- SECTION 3: FINANCIAL MODEL -->
+<!-- ============================================ -->
+<h2 id="s3">3. Financial Model &amp; Unit Economics</h2>
+
+<h3>Closure Math (1/day target)</h3>
+<pre>Daily Pipeline Required:
+├── 20-25 quality submissions/day
+│   └── 20% submission → interview rate = 4-5 interviews
+│       └── 30% interview → offer rate = 1.5 offers
+│           └── 80% offer → accept rate = 1 closure/day
+│
+Revenue Per Closure:
+├── Average margin: $10-15/hr
+├── Average hours/year: 2,000
+├── Gross margin per placement: $20-30K
+│
+Annual Projection (250 working days):
+├── 250 closures × $20K avg = $5M gross margin
+├── Operating costs: ~$500K (3 humans + infrastructure)
+└── Net margin potential: $4.5M</pre>
+
+<h3>Cost Structure</h3>
+<table>
+  <thead><tr><th>Category</th><th>Monthly Cost</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td>Infrastructure (AWS/Azure)</td><td>$2,000–5,000</td><td>PostgreSQL, Redis, compute</td></tr>
+    <tr><td>Microsoft Graph API</td><td>Included</td><td>Part of M365 license</td></tr>
+    <tr><td>RapidAPI (JSearch)</td><td>$75</td><td>50K requests/month</td></tr>
+    <tr><td>Apollo.io Enrichment</td><td>$99–299</td><td>Contact data</td></tr>
+    <tr><td>OpenAI/LLM (future)</td><td>$200–500</td><td>Classification enhancement</td></tr>
+    <tr><td>3 Human Operators</td><td>$25,000–35,000</td><td>President, MD, CFO</td></tr>
+    <tr><td><strong>Total Monthly</strong></td><td><strong>$27,000–41,000</strong></td><td></td></tr>
+  </tbody>
+</table>
+
+<h3>SaaS Revenue Model Options</h3>
+<table>
+  <thead><tr><th>Model</th><th>Pricing</th><th>Year 1 Potential</th></tr></thead>
+  <tbody>
+    <tr><td>SaaS per-seat</td><td>$299/recruiter/month</td><td>$3,588/recruiter/year</td></tr>
+    <tr><td>SaaS per-firm</td><td>$2,999/month (up to 20 seats)</td><td>$35,988/firm/year</td></tr>
+    <tr><td>Revenue share</td><td>5–10% of margin on AI-assisted closures</td><td>Aligned incentives</td></tr>
+    <tr><td>Usage-based</td><td>$0.50/submission + $50/closure</td><td>Scales with value</td></tr>
+    <tr><td>Managed service</td><td>$10K–25K/month</td><td>Premium hands-off tier</td></tr>
+  </tbody>
+</table>
+
+<h3>Unit Economics at Scale</h3>
+<pre>Per staffing firm customer:
+  ARR: $36,000 (SaaS) or $60,000 (managed)
+  CAC: $5,000–10,000 (direct sales to staffing firm owners)
+  LTV/CAC: 7–12x (assuming 24+ month retention)
+  Gross margin: 85–90% (pure software)
+  
+At 100 customers:   $3.6M–$6M ARR
+At 500 customers:   $18M–$30M ARR
+At 1,000 customers: $36M–$60M ARR → Series B territory</pre>
+
+<!-- ============================================ -->
+<!-- SECTION 4: SYSTEM ARCHITECTURE -->
+<!-- ============================================ -->
+<div class="page-break"></div>
+<h2 id="s4">4. System Architecture Overview</h2>
+
+<h3>Three-Layer Architecture</h3>
+<pre>┌─────────────────────────────────────────────────────────────────────┐
+│                        LAYER 3: AGENT RUNTIME                       │
+│                                                                     │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐│
+│  │Autopilot │ │ Market   │ │ Supply   │ │ Margin   │ │ Trust    ││
+│  │   GM     │ │  Pulse   │ │  Radar   │ │  Guard   │ │  Graph   ││
+│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘│
+│       │             │            │             │            │       │
+│  ┌────┴─────┐ ┌────┴─────┐ ┌────┴─────┐ ┌────┴─────┐ ┌────┴─────┐│
+│  │Recruiter │ │Job Intake│ │Submission│ │ Vendor   │ │Compliance││
+│  │  Agent   │ │  Agent   │ │  Agent   │ │Onboarding│ │  Agent   ││
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘│
+│                                                                     │
+│  ┌──────────┐ ┌──────────┐                                         │
+│  │   Req    │ │ Followup │       Policy Engine │ Tool Router       │
+│  │Collector │ │Scheduler │       Rate Limiter  │ Audit Logger      │
+│  └──────────┘ └──────────┘                                         │
+├─────────────────────────────────────────────────────────────────────┤
+│                     LAYER 2: WORKFLOW ENGINE                        │
+│                                                                     │
+│  Job Intake → Sourcing → Submission → Interview → Offer →          │
+│  Onboarding → Billing → Payroll                                    │
+│                                                                     │
+│  8 State Machines: Job, Consultant, Submission, Offer,              │
+│  Assignment, Timesheet, Invoice, Daily Scoreboard                   │
+├─────────────────────────────────────────────────────────────────────┤
+│                    LAYER 1: SYSTEM OF RECORD                        │
+│                                                                     │
+│  PostgreSQL 16 (RLS) │ Prisma 6 ORM │ Redis 7 Cache               │
+│  47 Models │ 28 Enums │ Row-Level Security │ Audit Logs            │
+└─────────────────────────────────────────────────────────────────────┘</pre>
+
+<h3>Full System Topology</h3>
+<pre>┌─────────────────────────────────────────────────────────────────────┐
+│                        INFRASTRUCTURE LAYER                         │
+│  PostgreSQL 16 (RLS) ─── Redis 7 ─── PgBoss (Job Queue)           │
+└─────────────────┬───────────────────────────────────────────────────┘
+                  │
+┌─────────────────┼───────────────────────────────────────────────────┐
+│                 │      BACKEND (NestJS + Prisma)                    │
+│  ┌──────────────┴──────────────┐  ┌──────────────────────────────┐ │
+│  │    23 API CONTROLLERS       │  │     WORKER JOBS              │ │
+│  │  ┌─────────────────────┐    │  │  - market-job-sync (1h)     │ │
+│  │  │ Auth + RBAC (8 roles)│   │  │  - vendor-email-sync (5m)   │ │
+│  │  │ Vendors / Clients    │   │  │  - daily-scoreboard (7am)   │ │
+│  │  │ Consultants / Resume │   │  │  - followup-check (10m)     │ │
+│  │  │ Jobs / Submissions   │   │  │  - response-detect (5m)     │ │
+│  │  │ Auto-Submit Queue    │   │  │  - req-freshness (6am)      │ │
+│  │  │ Offers / Placements  │   │  │  - url-health-check (2h)    │ │
+│  │  │ Timesheets / Invoices│   │  │  - qa-truth-sampler (8am)   │ │
+│  │  │ Market Jobs          │   │  │  - auto-submit (7am)        │ │
+│  │  │ Vendor Reqs / Trust  │   │  │  - trust-score-update       │ │
+│  │  │ Mail Intel / PST     │   │  └──────────────────────────────┘ │
+│  │  │ AI Agents (12)       │   │                                   │
+│  │  │ Command Center       │   │  ┌──────────────────────────────┐ │
+│  │  │ Analytics (30+)      │   │  │   MAIL-SYNC DAEMON          │ │
+│  │  │ Margin Guard         │   │  │  - Microsoft Graph API       │ │
+│  │  │ Email Sender         │   │  │  - 5 Extractors:             │ │
+│  │  │ Resume Formatter     │   │  │    · emailClassifier         │ │
+│  │  │ Scoreboard           │   │  │    · vendorExtractor         │ │
+│  │  └─────────────────────┘    │  │    · consultantExtractor     │ │
+│  └─────────────────────────────┘  │    · clientExtractor         │ │
+│                                    │    · reqSignalExtractor      │ │
+│                                    └──────────────────────────────┘ │
+└────────────────────────────────────────────────────────────────────┘
+                  │
+┌─────────────────┼───────────────────────────────────────────────────┐
+│                 │      FRONTEND (Next.js 14 App Router)             │
+│  22 Pages: Command Center, Auto-Submit, Live Feed, Mail Intel,     │
+│  Market Jobs, Closure Engine, AI Agents, Recruiter Analytics,      │
+│  Submissions, Jobs, Consultants, Work Queue, Sales, Accounts...    │
+└─────────────────────────────────────────────────────────────────────┘
+                  │
+┌─────────────────┼───────────────────────────────────────────────────┐
+│                 │      EXTERNAL INTEGRATIONS                        │
+│  Microsoft Graph API (email send/receive) ─── Apollo.io (enrich)  │
+│  RapidAPI: JSearch, Jooble, Adzuna, Arbeitnow, Careerjet,        │
+│  CorpToCorp, Dice, RemoteOK, LinkedIn, Indeed, ZipRecruiter       │
+└─────────────────────────────────────────────────────────────────────┘</pre>
+
+<!-- ============================================ -->
+<!-- SECTION 5: TECHNOLOGY STACK -->
+<!-- ============================================ -->
+<h2 id="s5">5. Technology Stack</h2>
+
+<h3>Backend</h3>
+<table>
+  <thead><tr><th>Component</th><th>Technology</th><th>Version</th><th>Rationale</th></tr></thead>
+  <tbody>
+    <tr><td>Runtime</td><td>Node.js</td><td>25+</td><td>Server runtime</td></tr>
+    <tr><td>Framework</td><td>NestJS</td><td>10</td><td>Module-based architecture, DI, guards/interceptors</td></tr>
+    <tr><td>Language</td><td>TypeScript</td><td>5.x</td><td>Type-safe development</td></tr>
+    <tr><td>ORM</td><td>Prisma</td><td>6.19</td><td>Type-safe CRUD; raw SQL for analytics (61M row queries)</td></tr>
+    <tr><td>Auth</td><td>Passport + JWT</td><td>10/4</td><td>Token-based authentication with 24h expiry</td></tr>
+    <tr><td>Validation</td><td>class-validator</td><td>0.14</td><td>Request validation with decorators</td></tr>
+    <tr><td>Scheduling</td><td>@nestjs/schedule</td><td>6.1</td><td>Cron jobs (follow-ups, auto-submit, response detection)</td></tr>
+    <tr><td>HTTP Client</td><td>Axios</td><td>1.13</td><td>External API calls (Graph, RapidAPI, Apollo)</td></tr>
+    <tr><td>Password</td><td>bcrypt</td><td>5</td><td>Password hashing (cost factor 10)</td></tr>
+  </tbody>
+</table>
+
+<h3>Frontend</h3>
+<table>
+  <thead><tr><th>Component</th><th>Technology</th><th>Version</th><th>Rationale</th></tr></thead>
+  <tbody>
+    <tr><td>Framework</td><td>Next.js</td><td>14.2</td><td>Server components, streaming, App Router</td></tr>
+    <tr><td>Styling</td><td>Tailwind CSS</td><td>3.x</td><td>Utility-first, rapid UI iteration</td></tr>
+    <tr><td>State</td><td>Zustand</td><td>5.0</td><td>Lightweight client state with persistence</td></tr>
+    <tr><td>UI Components</td><td>HeadlessUI</td><td>2.2</td><td>Accessible, unstyled components</td></tr>
+    <tr><td>Icons</td><td>Heroicons</td><td>2.2</td><td>Consistent icon system</td></tr>
+    <tr><td>Validation</td><td>Zod</td><td>3.23</td><td>Schema validation for API responses</td></tr>
+  </tbody>
+</table>
+
+<h3>Infrastructure</h3>
+<table>
+  <thead><tr><th>Component</th><th>Technology</th><th>Version</th><th>Rationale</th></tr></thead>
+  <tbody>
+    <tr><td>Database</td><td>PostgreSQL</td><td>16</td><td>Enterprise-grade, RLS for multi-tenancy</td></tr>
+    <tr><td>Cache</td><td>Redis</td><td>7</td><td>In-memory cache + rate limiting</td></tr>
+    <tr><td>Build System</td><td>Turborepo</td><td>2.x</td><td>Monorepo orchestration</td></tr>
+    <tr><td>Containers</td><td>Docker Compose</td><td>—</td><td>Dev environment with health checks</td></tr>
+    <tr><td>Email API</td><td>Microsoft Graph</td><td>v1.0</td><td>OAuth2 email send/receive/sync</td></tr>
+    <tr><td>Job Boards</td><td>RapidAPI</td><td>—</td><td>12-source job board aggregation</td></tr>
+    <tr><td>Enrichment</td><td>Apollo.io</td><td>—</td><td>Contact discovery and enrichment</td></tr>
+  </tbody>
+</table>
+
+<h3>Architecture Decisions (Why These Choices)</h3>
+<table>
+  <thead><tr><th>Decision</th><th>Rationale</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Prisma + raw SQL coexist</strong></td><td>Prisma handles CRUD. Analytics over 61M rows require hand-tuned SQL with CTEs and DISTINCT ON. Both coexist intentionally.</td></tr>
+    <tr><td><strong>Regex extraction, not LLMs</strong></td><td>At 812K emails, LLM extraction costs $8K–$40K per pass. Regex runs in minutes at zero cost. ~70–80% accuracy is sufficient because false negatives (missed reqs) are cheap.</td></tr>
+    <tr><td><strong>In-memory cache, not Redis</strong></td><td>Single-instance deployment uses Map&lt;string, CacheEntry&gt;. Redis available for multi-instance scaling.</td></tr>
+    <tr><td><strong>PgBoss, not BullMQ</strong></td><td>PostgreSQL-backed job queue eliminates Redis as a hard dependency for scheduling.</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================ -->
+<!-- SECTION 6: MONOREPO -->
+<!-- ============================================ -->
+<div class="page-break"></div>
+<h2 id="s6">6. Monorepo Structure</h2>
+
+<pre>ai-run-sos/
+├── apps/
+│   ├── api/                 NestJS REST API (23 controllers, 30 services)
+│   │   └── src/
+│   │       ├── auth/           JWT + RBAC (8 roles)
+│   │       ├── submissions/    Core submission lifecycle + follow-ups + response detection
+│   │       ├── auto-submit/    Auto-submit matching queue (Epic 4)
+│   │       ├── email/          Microsoft Graph email sender (Epic 1)
+│   │       ├── resume-formatter/ Pod-specific resume templates (Epic 5)
+│   │       ├── command-center/ Autopilot daily plan
+│   │       ├── ai-agents/     6 strategic AI agents
+│   │       ├── analytics/     30+ analytics endpoints
+│   │       ├── market-jobs/   12-source job board aggregation
+│   │       ├── vendor-trust/  Trust score computation
+│   │       ├── mail-intel/    Email intelligence dashboard
+│   │       ├── margin-guard/  Rate card + margin computation
+│   │       └── [14 more modules]
+│   │
+│   ├── web/                 Next.js 14 frontend (22 pages)
+│   │   └── src/
+│   │       ├── app/            App Router pages (22 routes)
+│   │       ├── components/     Sidebar, PageHeader, shared UI
+│   │       └── lib/            API client, auth store (Zustand)
+│   │
+│   └── mail-sync/           Email ingestion daemon
+│       └── src/
+│           ├── graphClient.ts    Graph API OAuth2 auth
+│           ├── syncMailbox.ts    Delta sync from 16 mailboxes
+│           ├── daemon.ts         Hourly cron daemon
+│           └── extract/          5 extractors (email, vendor, consultant, client, req)
+│
+├── packages/
+│   ├── db/                  Prisma schema + migrations + seed
+│   │   └── prisma/
+│   │       └── schema.prisma   47 models, 28 enums
+│   │
+│   ├── contracts/           Shared Zod schemas + TypeScript types
+│   │
+│   └── agent-runtime/       Agent framework
+│       └── src/
+│           ├── agent.ts         BaseAgent abstract class
+│           ├── policy-engine.ts Policy enforcement
+│           ├── tool-router.ts   Tool execution + 20 built-in tools
+│           ├── rate-limiter.ts  Sliding-window rate limiter
+│           ├── audit-logger.ts  Immutable buffered audit log
+│           ├── registry.ts      Agent singleton registry
+│           └── agents/          12 agent implementations
+│
+├── infra/
+│   ├── docker-compose.yml   PostgreSQL 16 + Redis 7
+│   └── init-db.sql          Row-Level Security policies
+│
+└── docs/
+    ├── PRD.md               Product requirements
+    ├── Workflows.md         8 state machine definitions
+    ├── AgentPolicies.md     Agent security + tool policies
+    ├── RBAC.md              Role permissions matrix
+    ├── DataModel.md         Entity relationship docs
+    └── ExecutionRoadmap.md  5-epic implementation plan</pre>
+
+<!-- ============================================ -->
+<!-- SECTION 7: DATA ARCHITECTURE -->
+<!-- ============================================ -->
+<h2 id="s7">7. Data Architecture (47 Models, 28 Enums)</h2>
+
+<h3>Database Statistics</h3>
+<table>
+  <thead><tr><th>Metric</th><th>Count</th></tr></thead>
+  <tbody>
+    <tr><td>Prisma Models</td><td>47</td></tr>
+    <tr><td>Enums</td><td>28</td></tr>
+    <tr><td>Raw SQL Tables (additional)</td><td>12</td></tr>
+    <tr><td>Total Tables</td><td>~59</td></tr>
+    <tr><td>Composite Indexes</td><td>60+</td></tr>
+    <tr><td>Unique Constraints</td><td>15+</td></tr>
+    <tr><td>Foreign Key Relations</td><td>40+</td></tr>
+  </tbody>
+</table>
+
+<h3>Entity Relationship Map</h3>
+<pre>Tenant (1)
+├── Users (N)
+├── Vendors (N)
+│   ├── VendorContacts (N)
+│   ├── Jobs (N)
+│   │   ├── Submissions (N)
+│   │   │   ├── ConsentRecord (1)
+│   │   │   ├── Interviews (N)
+│   │   │   ├── Offers (N)
+│   │   │   └── SubmissionEmailThread (N)    ← Execution Engine
+│   │   ├── Placements (N)
+│   │   └── Assignments (N)
+│   ├── Invoices (N)
+│   │   └── Payments (N)
+│   └── Offers (N)
+├── Consultants (N)
+│   ├── WorkAuths (N)
+│   ├── ResumeVersions (N)
+│   ├── Submissions (N)
+│   ├── Assignments (N)
+│   ├── Timesheets (N)
+│   ├── ImmigrationCases (N)
+│   └── AutoSubmitQueueItems (N)             ← Auto-Submit
+├── ClientCompanies (N)
+├── RateCards (N)
+├── DailyScoreboards (N)
+├── AgentAuditLogs (N)
+├── TrustEvents (N)
+├── Notifications (N)
+└── CommunicationEvents (N)</pre>
+
+<h3>Layer 1 — System of Record (Immutable Truth)</h3>
+<table>
+  <thead><tr><th>Table</th><th>Rows</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td>RawEmailMessage / raw_email_message</td><td>812K+</td><td>Every email ever received, full headers &amp; body</td></tr>
+    <tr><td>AgentAuditLog</td><td>—</td><td>Every AI agent action, immutable ledger</td></tr>
+    <tr><td>TrustEvent</td><td>—</td><td>Every trust score mutation with reason chain</td></tr>
+    <tr><td>ConsentRecord</td><td>—</td><td>GDPR/compliance consent ledger</td></tr>
+  </tbody>
+</table>
+
+<h3>Layer 2 — Intelligence Graph (Computed, Compounding)</h3>
+<table>
+  <thead><tr><th>Table</th><th>Rows</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td>vendor_req_signal</td><td>61M+</td><td>Extracted job requirement signals from emails</td></tr>
+    <tr><td>vendor_company</td><td>7,100+</td><td>Vendor companies with domain intelligence</td></tr>
+    <tr><td>vendor_contact</td><td>31K+</td><td>Direct vendor contacts from email headers</td></tr>
+    <tr><td>vendor_trust_score</td><td>3,703</td><td>Computed trust with actionability tiers</td></tr>
+    <tr><td>consultant</td><td>17K+</td><td>Talent pool with skill vectors</td></tr>
+    <tr><td>ExtractionFact</td><td>34,803</td><td>Confidence-tracked extraction evidence</td></tr>
+    <tr><td>bench_readiness_score</td><td>22,228</td><td>Pre-computed bench readiness by consultant</td></tr>
+    <tr><td>vendor_reputation</td><td>7,026</td><td>Aggregated vendor reputation metrics</td></tr>
+    <tr><td>rate_intelligence</td><td>1,094</td><td>Market rate benchmarks by skill/location</td></tr>
+  </tbody>
+</table>
+
+<h3>Layer 3 — Workflow State Machine</h3>
+<table>
+  <thead><tr><th>Entity</th><th>States</th><th>Current Pipeline</th></tr></thead>
+  <tbody>
+    <tr><td>Submission</td><td>DRAFT → CONSENT_PENDING → SUBMITTED → INTERVIEWING → OFFERED → ACCEPTED / REJECTED / WITHDRAWN / CLOSED</td><td>2,896 submitted, 40 interviewing, 13 offered, 18 accepted</td></tr>
+    <tr><td>Job</td><td>NEW → QUALIFYING → ACTIVE → ON_HOLD → FILLED / CANCELLED</td><td>1,554 total</td></tr>
+    <tr><td>Assignment</td><td>ONBOARDING → ACTIVE → ENDING → COMPLETED / TERMINATED</td><td>—</td></tr>
+    <tr><td>Invoice</td><td>DRAFT → SENT → PAID / PARTIAL / OVERDUE / DISPUTED</td><td>—</td></tr>
+    <tr><td>AutoSubmitQueue</td><td>QUEUED → APPROVED → SENT / REJECTED / EXPIRED</td><td>—</td></tr>
+  </tbody>
+</table>
+
+<h3>Layer 4 — Financial Controls</h3>
+<table>
+  <thead><tr><th>Table</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td>RateCard</td><td>Margin math: bill rate, pay rate, burden, payroll tax, portal fees</td></tr>
+    <tr><td>MarginEvent</td><td>Planned vs. realized margin tracking (leakage detection)</td></tr>
+    <tr><td>SpendGuard</td><td>API budget caps per provider per day</td></tr>
+    <tr><td>MarketQueryPlan</td><td>Job board query budget and rotation control</td></tr>
+  </tbody>
+</table>
+
+<h3>All 28 Enums</h3>
+<table>
+  <thead><tr><th>Enum</th><th>Values</th></tr></thead>
+  <tbody>
+    <tr><td>Pod</td><td>SWE, CLOUD_DEVOPS, DATA, CYBER</td></tr>
+    <tr><td>UserRole</td><td>MANAGEMENT, CONSULTANT, RECRUITMENT, SALES, HR, IMMIGRATION, ACCOUNTS, SUPERADMIN</td></tr>
+    <tr><td>SubmissionStatus</td><td>DRAFT, CONSENT_PENDING, SUBMITTED, INTERVIEWING, OFFERED, ACCEPTED, REJECTED, WITHDRAWN, CLOSED</td></tr>
+    <tr><td>AutoSubmitStatus</td><td>QUEUED, APPROVED, REJECTED, SENT, EXPIRED</td></tr>
+    <tr><td>JobStatus</td><td>NEW, QUALIFYING, ACTIVE, ON_HOLD, FILLED, CANCELLED</td></tr>
+    <tr><td>ConsultantReadiness</td><td>NEW, DOCS_PENDING, VERIFIED, SUBMISSION_READY, ON_ASSIGNMENT, OFFBOARDED</td></tr>
+    <tr><td>OfferStatus</td><td>EXTENDED, ACCEPTED, DECLINED, EXPIRED, WITHDRAWN</td></tr>
+    <tr><td>AssignmentStatus</td><td>ONBOARDING, ACTIVE, ENDING, COMPLETED, TERMINATED</td></tr>
+    <tr><td>TimesheetStatus</td><td>DRAFT, SUBMITTED, APPROVED, REJECTED, INVOICED</td></tr>
+    <tr><td>InvoiceStatus</td><td>DRAFT, SENT, PAID, PARTIAL, OVERDUE, DISPUTED</td></tr>
+    <tr><td>PaymentStatus</td><td>PENDING, COMPLETED, FAILED, REVERSED</td></tr>
+    <tr><td>WorkAuthType</td><td>USC, GC, H1B, L1, OPT, CPT, EAD, TN, OTHER</td></tr>
+    <tr><td>LocationType</td><td>REMOTE, HYBRID, ONSITE</td></tr>
+    <tr><td>EmploymentType</td><td>C2C, W2, W2_1099, FULLTIME, PARTTIME, CONTRACT, UNKNOWN</td></tr>
+    <tr><td>MarketJobSource</td><td>JSEARCH, JOOBLE, ADZUNA, ARBEITNOW, CAREERJET, CORPTOCORP, DICE, REMOTEOK, LINKEDIN, INDEED, ZIPRECRUITER, OTHER</td></tr>
+    <tr><td>SubmitterType</td><td>USER, AGENT</td></tr>
+    <tr><td>ConsentType</td><td>EXPLICIT, AUTO_POLICY</td></tr>
+    <tr><td>CommChannel</td><td>EMAIL, PHONE, SMS, PORTAL, INTERNAL_NOTE</td></tr>
+    <tr><td>CommDirection</td><td>INBOUND, OUTBOUND, INTERNAL</td></tr>
+    <tr><td colspan="2"><em>+ 9 more enums (MsaStatus, VerificationStatus, RateType, ReqSourceType, InterviewStatus, PlacementStatus, MarginEventType, MarketJobStatus, VendorReqStatus)</em></td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================ -->
+<!-- SECTION 8: API SURFACE -->
+<!-- ============================================ -->
+<div class="page-break"></div>
+<h2 id="s8">8. API Surface (23 Controllers, 160+ Endpoints)</h2>
+
+<h3>Authentication (no auth required)</h3>
+<table>
+  <thead><tr><th>Method</th><th>Endpoint</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td>POST</td><td>/api/auth/login</td><td>JWT login (email + password)</td></tr>
+    <tr><td>POST</td><td>/api/auth/register</td><td>User registration</td></tr>
+    <tr><td>POST</td><td>/api/auth/tenant</td><td>Create tenant</td></tr>
+  </tbody>
+</table>
+
+<h3>Command Center (MANAGEMENT, RECRUITMENT, SALES)</h3>
+<table>
+  <thead><tr><th>Method</th><th>Endpoint</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td>GET</td><td>/api/command-center/autopilot-plan</td><td>Daily 3-phase plan (morning/midday/evening)</td></tr>
+    <tr><td>POST</td><td>/api/command-center/compute-actionability</td><td>Recompute actionability scores</td></tr>
+  </tbody>
+</table>
+
+<h3>Auto-Submit Queue (MANAGEMENT, RECRUITMENT)</h3>
+<table>
+  <thead><tr><th>Method</th><th>Endpoint</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td>GET</td><td>/api/auto-submit/queue</td><td>Get queue items (filter by status)</td></tr>
+    <tr><td>GET</td><td>/api/auto-submit/stats</td><td>7-day stats breakdown</td></tr>
+    <tr><td>POST</td><td>/api/auto-submit/approve</td><td>Batch approve + send submissions</td></tr>
+    <tr><td>POST</td><td>/api/auto-submit/reject</td><td>Batch reject items</td></tr>
+    <tr><td>POST</td><td>/api/auto-submit/generate</td><td>Trigger queue build</td></tr>
+  </tbody>
+</table>
+
+<h3>Submissions (MANAGEMENT, RECRUITMENT, SALES)</h3>
+<table>
+  <thead><tr><th>Method</th><th>Endpoint</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td>GET</td><td>/api/submissions</td><td>List all submissions</td></tr>
+    <tr><td>GET</td><td>/api/submissions/stats</td><td>Pipeline statistics</td></tr>
+    <tr><td>GET</td><td>/api/submissions/due-followups</td><td>Follow-ups needing dispatch</td></tr>
+    <tr><td>GET</td><td>/api/submissions/:id</td><td>Single submission detail + events + follow-ups</td></tr>
+    <tr><td>POST</td><td>/api/submissions</td><td>Create new submission</td></tr>
+    <tr><td>POST</td><td>/api/submissions/from-req-signal</td><td>Quick submit from email req signal</td></tr>
+    <tr><td>POST</td><td>/api/submissions/:id/consent</td><td>Record consent decision</td></tr>
+    <tr><td>POST</td><td>/api/submissions/:id/send</td><td>Send submission via Graph email</td></tr>
+    <tr><td>PATCH</td><td>/api/submissions/:id/status</td><td>Update status + feedback</td></tr>
+    <tr><td>DELETE</td><td>/api/submissions/:id</td><td>Delete submission</td></tr>
+  </tbody>
+</table>
+
+<h3>Resume Formatter (MANAGEMENT, RECRUITMENT)</h3>
+<table>
+  <thead><tr><th>Method</th><th>Endpoint</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td>POST</td><td>/api/resumes/format</td><td>Generate 3 resume versions (clean, branded, watermarked)</td></tr>
+    <tr><td>GET</td><td>/api/resumes/:id/versions</td><td>List all resume versions</td></tr>
+    <tr><td>GET</td><td>/api/resumes/:id/current/:type</td><td>Get current version by type</td></tr>
+  </tbody>
+</table>
+
+<h3>Jobs, Vendors, Consultants</h3>
+<table>
+  <thead><tr><th>Controller</th><th>Endpoints</th><th>Operations</th></tr></thead>
+  <tbody>
+    <tr><td>Jobs</td><td>7</td><td>CRUD + AI intake (parse raw JD) + candidate matching</td></tr>
+    <tr><td>Vendors</td><td>5</td><td>Full CRUD</td></tr>
+    <tr><td>Consultants</td><td>6</td><td>CRUD + consent policy update</td></tr>
+  </tbody>
+</table>
+
+<h3>Email Intelligence, Market Jobs, Analytics</h3>
+<table>
+  <thead><tr><th>Controller</th><th>Endpoints</th><th>Key Capabilities</th></tr></thead>
+  <tbody>
+    <tr><td>Mail Intel</td><td>15+</td><td>Dashboard, sync status, vendors, contacts, consultants, clients, req signals, skills demand/supply, mailbox management, 5 CSV exports</td></tr>
+    <tr><td>Market Jobs</td><td>5</td><td>List, stats, detail, fetch boards, convert to internal job</td></tr>
+    <tr><td>Analytics</td><td>30+</td><td>Recruiter activity, email pipeline, actionable queue, closure ranking, vendor feedback loop, bench readiness, rate intelligence, closure model training, live feed, Apollo enrichment</td></tr>
+    <tr><td>AI Agents</td><td>6</td><td>Sales strategist, recruiting strategist, job search analyst, GM strategist, managerial coach, strategy research</td></tr>
+    <tr><td>Vendor Trust</td><td>4</td><td>Compute all scores, top vendors, distribution, individual score</td></tr>
+  </tbody>
+</table>
+
+<h3>Additional Controllers</h3>
+<table>
+  <thead><tr><th>Controller</th><th>Endpoints</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td>Offers</td><td>5</td><td>Offer lifecycle management</td></tr>
+    <tr><td>Timesheets</td><td>7</td><td>Timesheet CRUD + approval</td></tr>
+    <tr><td>Invoices</td><td>5</td><td>Invoice generation + payment tracking</td></tr>
+    <tr><td>Assignments</td><td>5</td><td>Assignment + onboarding</td></tr>
+    <tr><td>Scoreboard</td><td>3</td><td>Daily scoreboard CRUD</td></tr>
+    <tr><td>Dashboard</td><td>4</td><td>Role-specific dashboards</td></tr>
+    <tr><td>Vendor Reqs</td><td>5</td><td>Vendor requirement tracking</td></tr>
+    <tr><td>PST Intel</td><td>7</td><td>PST archive intelligence</td></tr>
+    <tr><td>Margin Guard</td><td>3</td><td>Margin computation + rate cards</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================ -->
+<!-- SECTION 9: AUTH -->
+<!-- ============================================ -->
+<h2 id="s9">9. Authentication &amp; Authorization (RBAC)</h2>
+
+<h3>JWT Authentication Flow</h3>
+<pre>Client                        API Server
+  │                               │
+  ├── POST /api/auth/login ──────>│
+  │   { email, password }         │
+  │                               ├── Validate credentials (bcrypt)
+  │                               ├── Generate JWT (24h expiry)
+  │<── { accessToken, user } ─────┤
+  │                               │
+  ├── GET /api/submissions ──────>│
+  │   Authorization: Bearer &lt;JWT> │
+  │                               ├── JwtAuthGuard: verify token
+  │                               ├── TenantMiddleware: extract tenantId
+  │                               ├── RolesGuard: check role permission
+  │<── { data } ─────────────────┤</pre>
+
+<h3>RBAC Permission Matrix</h3>
+<table>
+  <thead><tr><th>Resource</th><th>MGMT</th><th>RECRUIT</th><th>SALES</th><th>ACCOUNTS</th><th>CONSULTANT</th><th>HR</th><th>IMMIGRATION</th></tr></thead>
+  <tbody>
+    <tr><td>Command Center</td><td>RW</td><td>R</td><td>R</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+    <tr><td>Auto-Submit Queue</td><td>RW</td><td>RW</td><td>R</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+    <tr><td>Jobs</td><td>RW</td><td>RW</td><td>RW</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+    <tr><td>Submissions</td><td>RW</td><td>RW</td><td>R</td><td>—</td><td>R (own)</td><td>—</td><td>—</td></tr>
+    <tr><td>Consultants</td><td>RW</td><td>RW</td><td>R</td><td>—</td><td>R (own)</td><td>RW</td><td>—</td></tr>
+    <tr><td>Vendors</td><td>RW</td><td>R</td><td>RW</td><td>R</td><td>—</td><td>—</td><td>—</td></tr>
+    <tr><td>Timesheets</td><td>RW</td><td>R</td><td>—</td><td>RW</td><td>RW (own)</td><td>—</td><td>—</td></tr>
+    <tr><td>Invoices</td><td>RW</td><td>—</td><td>—</td><td>RW</td><td>—</td><td>—</td><td>—</td></tr>
+    <tr><td>Trust Scores</td><td>RW</td><td>R</td><td>R</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+    <tr><td>Agent Audit Logs</td><td>R</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+    <tr><td>Immigration</td><td>RW</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>RW</td></tr>
+    <tr><td>Compliance</td><td>RW</td><td>—</td><td>—</td><td>—</td><td>—</td><td>RW</td><td>—</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================ -->
+<!-- SECTION 10: AGENT RUNTIME -->
+<!-- ============================================ -->
+<div class="page-break"></div>
+<h2 id="s10">10. Agent Runtime Framework (12 AI Agents)</h2>
+
+<h3>Agent Execution Pipeline</h3>
+<pre>┌─────────────────────────────────────────────┐
+│              Agent Request                   │
+│  { agentId, tool, input, reason }           │
+└──────────────────┬──────────────────────────┘
+                   │
+         ┌─────────▼─────────┐
+         │  POLICY ENGINE    │  1. Tool allowlist check
+         │                   │  2. Tenant isolation check
+         │                   │  3. Approval gate check
+         └─────────┬─────────┘
+                   │
+         ┌─────────▼─────────┐
+         │  RATE LIMITER     │  Per-minute window
+         │                   │  Per-hour window
+         │                   │  Daily window
+         └─────────┬─────────┘
+                   │
+         ┌─────────▼─────────┐
+         │  TOOL ROUTER      │  Execute handler
+         │                   │  Measure duration
+         └─────────┬─────────┘
+                   │
+         ┌─────────▼─────────┐
+         │  AUDIT LOGGER     │  Immutable entry
+         │                   │  Object.freeze()
+         │                   │  Buffered flush (100 entries)
+         └────────────────────┘</pre>
+
+<h3>12 Agent Specifications</h3>
+<table>
+  <thead><tr><th>#</th><th>Agent</th><th>Role</th><th>Purpose</th><th>Rate Limit</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><strong>AutopilotGM</strong></td><td>Boss Agent</td><td>Daily scoreboard, pipeline tracking, action plans</td><td>10/min</td></tr>
+    <tr><td>2</td><td><strong>MarketPulse</strong></td><td>Sales Strategist</td><td>Pod focus, rate bands, vendor ranking</td><td>30/min</td></tr>
+    <tr><td>3</td><td><strong>SupplyRadar</strong></td><td>Recruiting Strategist</td><td>Hot bench, skill gaps, nurture plans</td><td>30/min</td></tr>
+    <tr><td>4</td><td><strong>MarginGuard</strong></td><td>Deal Desk</td><td>Margin computation, rate approval/block</td><td>20/min</td></tr>
+    <tr><td>5</td><td><strong>TrustGraph</strong></td><td>Analytics</td><td>Trust score computation from events</td><td>20/min</td></tr>
+    <tr><td>6</td><td><strong>Recruiter</strong></td><td>Sourcing</td><td>Candidate search + shortlisting</td><td>30/min</td></tr>
+    <tr><td>7</td><td><strong>JobIntake</strong></td><td>Job Ops</td><td>JD parsing → structured requirements</td><td>40/min</td></tr>
+    <tr><td>8</td><td><strong>Submission</strong></td><td>Submissions</td><td>Consent check + dedup + create</td><td>30/min</td></tr>
+    <tr><td>9</td><td><strong>VendorOnboarding</strong></td><td>Vendor Ops</td><td>Vendor setup + doc collection</td><td>20/min</td></tr>
+    <tr><td>10</td><td><strong>Compliance</strong></td><td>Compliance</td><td>Doc verification + blocking</td><td>20/min</td></tr>
+    <tr><td>11</td><td><strong>ReqCollector</strong></td><td>JD Intake Swarm</td><td>Bulk JD parsing + pod assignment</td><td>60/min</td></tr>
+    <tr><td>12</td><td><strong>FollowupScheduler</strong></td><td>Follow-ups</td><td>Follow-up sequences + interview prep</td><td>30/min</td></tr>
+  </tbody>
+</table>
+
+<h3>Agent Scoring Algorithms</h3>
+
+<h4>MarginGuard — Margin Computation</h4>
+<pre>grossMarginHr = billRate - payRate
+burdenCost    = payRate × burdenPct
+payrollTax    = payRate × payrollTaxPct
+vendorCut     = billRate × vendorCutPct
+portalFee     = billRate × portalFeePct
+netMarginHr   = grossMarginHr - burdenCost - payrollTax - vendorCut - portalFee - otherFees
+
+If netMarginHr >= $10/hr  → APPROVE
+If netMarginHr >= $5/hr   → SOFT BLOCK (warning, override available)
+If netMarginHr &lt; $5/hr    → HARD BLOCK (CFO escalation required)</pre>
+
+<h4>TrustGraph — Trust Score Events</h4>
+<table>
+  <thead><tr><th>Event</th><th>Impact</th><th>Event</th><th>Impact</th></tr></thead>
+  <tbody>
+    <tr><td>submission_accepted</td><td style="color:green">+0.05</td><td>late_payment</td><td style="color:red">-0.05</td></tr>
+    <tr><td>placement_completed</td><td style="color:green">+0.08</td><td>compliance_violation</td><td style="color:red">-0.15</td></tr>
+    <tr><td>on_time_payment</td><td style="color:green">+0.03</td><td>ghosting</td><td style="color:red">-0.10</td></tr>
+    <tr><td>positive_feedback</td><td style="color:green">+0.02</td><td>contract_dispute</td><td style="color:red">-0.12</td></tr>
+    <tr><td>interview_granted</td><td style="color:green">+0.04</td><td>poor_feedback</td><td style="color:red">-0.07</td></tr>
+  </tbody>
+</table>
+
+<h4>AutoSubmit — Match Scoring (0–100)</h4>
+<table>
+  <thead><tr><th>Factor</th><th>Max Points</th><th>Logic</th></tr></thead>
+  <tbody>
+    <tr><td>Skill Overlap</td><td>60</td><td>4+ skills = 60, 3 = 45, 2 = 30, 1 = 15</td></tr>
+    <tr><td>Vendor Trust</td><td>15</td><td>Score ≥ 70 = 15, ≥ 50 = 8</td></tr>
+    <tr><td>Source Quality</td><td>10</td><td>JSearch = 10, CorpToCorp = 8</td></tr>
+    <tr><td>Readiness</td><td>10</td><td>ON_BENCH/READY = 10</td></tr>
+    <tr><td>Rate Fit</td><td>5</td><td>Req rate ≥ consultant + $10 = 5</td></tr>
+    <tr><td><strong>Total</strong></td><td><strong>100</strong></td><td><strong>Min threshold: 30</strong></td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================ -->
+<!-- SECTION 11: EMAIL PIPELINE -->
+<!-- ============================================ -->
+<h2 id="s11">11. Email Intelligence Pipeline</h2>
+
+<h3>End-to-End Flow</h3>
+<pre>Microsoft 365 Mailboxes (16 accounts)
+         │
+         ▼
+┌──────────────────────────┐
+│ GRAPH API DELTA SYNC     │  (daemon.ts — every 60 min)
+│ OAuth2 client_credentials│
+│ Delta tokens per folder  │
+│ 429 throttle handling    │
+└──────────┬───────────────┘
+           │
+           ▼
+┌──────────────────────────┐
+│ RAW EMAIL STORAGE        │  raw_email_message (812K+ rows)
+│ body_text, body_preview  │
+│ from_email, to_emails[]  │
+│ sent_at, folder          │
+└──────────┬───────────────┘
+           │
+           ▼
+┌──────────────────────────┐
+│ EMAIL CLASSIFIER         │  emailClassifier.ts
+│ 8 categories:            │
+│ VENDOR_REQ, CONSULTANT,  │
+│ CLIENT, INTERNAL,        │
+│ SYSTEM, PERSONAL, OTHER  │
+│ Rule-based (50+ rules)   │
+└──────────┬───────────────┘
+           │
+     ┌─────┼──────┬─────────┐
+     ▼     ▼      ▼         ▼
+┌────────┐┌─────┐┌────────┐┌───────┐
+│VENDOR  ││CONS.││CLIENT  ││REQ    │
+│Extract ││Ext. ││Extract ││SIGNAL │
+│        ││     ││        ││Extract│
+│7.1K co.││17K  ││308 co. ││61M+   │
+│31K cont││prof.││696 cont││signals│
+└────────┘└─────┘└────────┘└───────┘</pre>
+
+<h3>Extraction Algorithms</h3>
+<h4>Email Classifier (Priority Order)</h4>
+<ol>
+  <li>Own domain → INTERNAL</li>
+  <li>System/no-reply → SYSTEM</li>
+  <li>Free email + resume patterns → CONSULTANT</li>
+  <li>VMS domains (vectorvms, fieldglass) → CLIENT</li>
+  <li>Client subject patterns (interview, PO, timesheet) → CLIENT</li>
+  <li>Resume score ≥ 2 → CONSULTANT</li>
+  <li>Req score ≥ 2 → VENDOR_REQ</li>
+  <li>Company domain → VENDOR_OTHER</li>
+</ol>
+
+<h4>Req Signal Extractor</h4>
+<ul>
+  <li><strong>Subject patterns:</strong> c2c, w2, requirement, hiring, hot req</li>
+  <li><strong>Body patterns:</strong> location:, duration:, rate:, client:, $/hr (needs ≥2 hits)</li>
+  <li><strong>Extracts:</strong> title, location, rate text, employment type, skills</li>
+  <li><strong>Links to:</strong> vendor_company + vendor_contact by domain</li>
+</ul>
+
+<h4>Actionability Score Computation</h4>
+<div class="info-box">
+  Composite score (0–100) from: employment type match (C2C/W2 get higher), rate presence, skill specificity, vendor trust, and location clarity.<br>
+  <strong>Thresholds:</strong> 30 (display), 60 (premium) — operationally calibrated, not statistically derived.
+</div>
+
+<!-- ============================================ -->
+<!-- SECTION 12: EXECUTION ENGINE -->
+<!-- ============================================ -->
+<div class="page-break"></div>
+<h2 id="s12">12. Execution Engine (Epics 1–5)</h2>
+
+<h3>Epic 1: Graph Outbound + Threading</h3>
+<p><strong>Service:</strong> <code>EmailSenderService</code> (<code>apps/api/src/email/email-sender.service.ts</code>)</p>
+<pre>SubmissionsService.send()
+    │
+    ├── Generate email draft (to, subject, body)
+    │
+    ├── EmailSenderService.sendMail()
+    │   ├── getAccessToken() (OAuth2 client_credentials, cached)
+    │   ├── POST /users/{from}/messages (create draft)
+    │   │   └── Returns: id, conversationId, internetMessageId
+    │   ├── POST /users/{from}/messages/{id}/send
+    │   └── Retry with exponential backoff on 429/503/504
+    │
+    ├── Store sent evidence on Submission:
+    │   sentEmailId, sentConversationId, sentAt, sentTo, sentFrom, sentSubject
+    │
+    ├── Create SubmissionEmailThread entry (OUTBOUND, INITIAL)
+    │
+    ├── Log submission_event (SENT)
+    │
+    └── Schedule follow-ups: T+4h, T+24h, T+48h</pre>
+
+<h3>Epic 2: Follow-up Dispatcher</h3>
+<p><strong>Service:</strong> <code>FollowupDispatcherService</code> (cron: every 10 minutes)</p>
+<pre>Cron fires every 10 minutes
+    │
+    ├── Query: submission_followup WHERE status='PENDING' AND scheduled_at &lt;= NOW()
+    │   JOIN Submission, Consultant, Job, Vendor, vendor_trust_score
+    │
+    ├── For each due follow-up:
+    │   ├── IF follow-up #3+ AND vendor trust ≥ 70
+    │   │   └── ESCALATE to human (don't spam high-value vendors)
+    │   │
+    │   ├── IF no original Graph message ID
+    │   │   └── Mark as sent (manual follow-up needed)
+    │   │
+    │   └── ELSE:
+    │       ├── EmailSenderService.replyToMessage() (in-thread reply)
+    │       ├── Create SubmissionEmailThread entry
+    │       └── Mark follow-up as SENT
+    │
+    └── Log: "N sent, N failed, N escalated"</pre>
+
+<h3>Epic 3: Response Detection</h3>
+<p><strong>Service:</strong> <code>ResponseDetectorService</code> (cron: every 5 minutes)</p>
+<pre>Cron fires every 5 minutes
+    │
+    ├── Query: raw_email_message WHERE sent_at >= NOW()-24h
+    │   AND category IN (vendor_req, vendor_reply, general)
+    │   AND NOT already processed for response detection
+    │
+    ├── For each email:
+    │   ├── MATCH to submission:
+    │   │   ├── Strategy 1: conversationId match (reliable)
+    │   │   └── Strategy 2: subject + sender domain match (fallback)
+    │   │
+    │   ├── CLASSIFY response (30+ regex patterns):
+    │   │   ├── INTERVIEW_REQUEST (0.9 confidence)  → INTERVIEWING
+    │   │   ├── NEED_RTR (0.85)
+    │   │   ├── CLIENT_SUBMITTED (0.85)
+    │   │   ├── RATE_TOO_HIGH (0.8)
+    │   │   ├── NOT_A_MATCH (0.75)                  → REJECTED
+    │   │   ├── POSITION_CLOSED (0.9)               → CLOSED
+    │   │   ├── NO_THIRD_PARTY (0.95)               → REJECTED
+    │   │   └── ACKNOWLEDGED (0.6)
+    │   │
+    │   ├── AUTO-UPDATE submission status (if confidence ≥ 0.8)
+    │   ├── Cancel pending follow-ups on terminal status
+    │   └── EMIT vendor_feedback_event (trust loop)
+    │
+    └── Log results</pre>
+
+<h3>Epic 4: Auto-Submit Queue</h3>
+<p><strong>Service:</strong> <code>AutoSubmitService</code> (cron: 7 AM weekdays + hourly expiry)</p>
+<pre>Daily at 7 AM (weekdays):
+    │
+    ├── Fetch premium reqs (last 48h):
+    │   ├── Email reqs: C2C, actionability ≥ 50, trust ≥ 40, no spam
+    │   └── Market jobs: JSEARCH + CORPTOCORP, actionability ≥ 50
+    │
+    ├── Fetch available consultants (READY/ON_BENCH/AVAILABLE, limit 200)
+    │
+    ├── For each req, score all consultants:
+    │   ├── Skill overlap (0-60 pts)
+    │   ├── Vendor trust bonus (0-15 pts)
+    │   ├── Source quality bonus (0-10 pts)
+    │   ├── Readiness bonus (0-10 pts)
+    │   └── Rate fit bonus (0-5 pts)
+    │
+    ├── Take top 3 matches per req (score ≥ 30)
+    ├── Dedup against last 7 days
+    ├── Cap at 50 items/day
+    └── Create AutoSubmitQueueItem (QUEUED, expires 24h)
+
+On Approve (batch):
+    ├── Create Submission (via SubmissionsService)
+    ├── Send via Graph (SubmissionsService.send())
+    ├── Schedule follow-ups (T+4h, T+24h, T+48h)
+    └── Mark queue item as SENT</pre>
+
+<h3>Epic 5: Resume Formatter</h3>
+<p><strong>Service:</strong> <code>ResumeFormatterService</code></p>
+<pre>POST /api/resumes/format { consultantId, rawContent, pod }
+    │
+    ├── Look up consultant
+    ├── Select pod template (SWE=blue, CLOUD=green, DATA=purple, CYBER=red)
+    │
+    ├── Generate 3 versions:
+    │   ├── CLEAN: strip address, keep phone
+    │   ├── VENDOR_BRANDED: strip address + add branding header
+    │   └── WATERMARKED: strip address + invisible tracking code
+    │
+    ├── For each version:
+    │   ├── Apply regex PII stripping (address, optional phone)
+    │   ├── Build HTML with pod-colored header, skill tags
+    │   ├── SHA-256 hash for dedup
+    │   ├── Deactivate previous versions (isCurrent = false)
+    │   └── Store in ResumeVersion table
+    │
+    └── Return { clean, vendorBranded, watermarked }</pre>
+
+<!-- ============================================ -->
+<!-- SECTION 13: CONVERSION FUNNEL -->
+<!-- ============================================ -->
+<h2 id="s13">13. Conversion Funnel &amp; Revenue Math</h2>
+
+<h3>Institutional Microstructure View</h3>
+<p>The staffing conversion funnel is structurally identical to an <strong>order flow microstructure problem</strong> in quantitative finance:</p>
+<pre>61,000,000+ Vendor Req Signals   ← Raw order flow (every bid in the market)
+    │ Actionability filter (score ≥ 30)
+    ▼
+  ~18M      Qualified Signals    ← Limit orders in the book
+    │ Premium filter (score ≥ 60)
+    ▼
+ 2,540,017  Premium Signals      ← Marketable orders (high fill probability)
+    │ Human/AI selection + submission
+    ▼
+     2,896   Submissions         ← Orders sent to market
+    │ Vendor response
+    ▼
+        40   Interviews          ← Partial fills (counterparty engagement)
+    │ Client selection
+    ▼
+        13   Offers              ← Price negotiation (bid-ask spread)
+    │ Acceptance
+    ▼
+        18   Closures            ← Executed trades (revenue realized)</pre>
+
+<h3>Current Conversion Rates</h3>
+<table>
+  <thead><tr><th>Stage</th><th>Rate</th><th>Industry Benchmark</th><th>Gap</th></tr></thead>
+  <tbody>
+    <tr><td>Signal → Submission</td><td>0.013%</td><td>N/A (volume not bottleneck)</td><td>—</td></tr>
+    <tr><td>Submission → Interview</td><td><span class="badge badge-red">1.38%</span></td><td>8–15%</td><td><strong>5.8–10.9x improvement opportunity</strong></td></tr>
+    <tr><td>Interview → Offer</td><td><span class="badge badge-green">32.5%</span></td><td>25–40%</td><td>At benchmark</td></tr>
+    <tr><td>Offer → Closure</td><td><span class="badge badge-green">~60%</span></td><td>50–70%</td><td>At benchmark</td></tr>
+  </tbody>
+</table>
+
+<div class="warn-box">
+  <strong>Critical Insight:</strong> The bottleneck is <strong>NOT</strong> at the top of the funnel (61M+ signals). The bottleneck is the <strong>submission-to-interview conversion rate of 1.38%</strong> versus the industry benchmark of 8–15%. Root causes: (1) submission quality, (2) follow-up discipline.
+</div>
+
+<h3>Revenue Impact Scenarios</h3>
+<table>
+  <thead><tr><th>Scenario</th><th>Sub→Interview Rate</th><th>Subs/Day Needed</th><th>Human Effort</th></tr></thead>
+  <tbody>
+    <tr><td>Current state</td><td>1.38%</td><td>377/day</td><td>Impossible manually</td></tr>
+    <tr><td>Improved to 5%</td><td>5%</td><td>104/day</td><td>Stretch with automation</td></tr>
+    <tr><td>Improved to 8%</td><td>8%</td><td>65/day</td><td>Achievable with auto-submit</td></tr>
+    <tr><td style="font-weight:bold; color:#166534;">Target: 15%</td><td style="font-weight:bold">15%</td><td style="font-weight:bold">35/day</td><td style="font-weight:bold; color:#166534">45 min/day human oversight</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================ -->
+<!-- SECTION 14: CALL FLOW DIAGRAMS -->
+<!-- ============================================ -->
+<div class="page-break"></div>
+<h2 id="s14">14. Call Flow Diagrams</h2>
+
+<h3>Flow 1: Complete Submission Lifecycle</h3>
+<pre>User clicks "Submit" in Auto-Submit Queue
+    │
+    ▼
+POST /api/auto-submit/approve { itemIds: ["abc123"] }
+    │
+    ├── [Auth] JwtAuthGuard → validate JWT
+    ├── [Auth] TenantMiddleware → extract tenantId
+    ├── [Auth] RolesGuard → verify MANAGEMENT or RECRUITMENT
+    │
+    ├── AutoSubmitService.batchApprove()
+    │   │
+    │   ├── Load AutoSubmitQueueItem
+    │   │
+    │   ├── IF email req signal:
+    │   │   └── SubmissionsService.createFromReqSignal()
+    │   │       ├── Query vendor_req_signal + vendor_company + vendor_contact
+    │   │       ├── Find or create Vendor in Prisma
+    │   │       ├── Create Job from req signal data
+    │   │       └── Call SubmissionsService.create()
+    │   │
+    │   ├── SubmissionsService.create()
+    │   │   ├── Validate job exists + consultant exists
+    │   │   ├── GUARD: Check duplicate submission
+    │   │   ├── GUARD: C2C/W2 mismatch detection
+    │   │   ├── GUARD: MarginGuard.checkSubmission()
+    │   │   ├── Create Submission (status: DRAFT)
+    │   │   ├── Log submission_event: CREATED
+    │   │   ├── Evaluate consent policy
+    │   │   │   ├── AUTO_APPROVED → status: SUBMITTED
+    │   │   │   ├── BLOCKED → status: WITHDRAWN
+    │   │   │   └── NEEDS_CONSENT → status: CONSENT_PENDING
+    │   │   └── Return submission
+    │   │
+    │   ├── SubmissionsService.send()
+    │   │   ├── Generate email draft (to, subject, body)
+    │   │   ├── EmailSenderService.sendMail()
+    │   │   │   ├── OAuth2 → get Graph API token
+    │   │   │   ├── POST /users/{from}/messages → create draft
+    │   │   │   ├── POST /users/{from}/messages/{id}/send
+    │   │   │   └── Return { messageId, conversationId }
+    │   │   ├── Update Submission: sentEmailId, sentAt, sentTo, ...
+    │   │   ├── Create SubmissionEmailThread (OUTBOUND, INITIAL)
+    │   │   ├── Log submission_event: SENT
+    │   │   └── Schedule follow-ups: T+4h, T+24h, T+48h
+    │   │
+    │   └── Update AutoSubmitQueueItem: status=SENT, submissionId
+    │
+    └── Return results to frontend
+
+--- [LATER: T+4h, T+24h, T+48h] ---
+
+FollowupDispatcherService (cron every 10 min)
+    ├── Find due follow-ups
+    ├── EmailSenderService.replyToMessage() → in-thread reply
+    └── Mark follow-up SENT
+
+--- [LATER: Vendor replies] ---
+
+ResponseDetectorService (cron every 5 min)
+    ├── Scan raw_email_message for new inbound
+    ├── Match to submission by conversationId
+    ├── Classify: "INTERVIEW_REQUEST" (confidence 0.9)
+    ├── Auto-update submission: SUBMITTED → INTERVIEWING
+    ├── Cancel remaining follow-ups
+    └── Emit vendor_feedback_event: INTERVIEW_GRANTED</pre>
+
+<h3>Flow 2: Daily Autopilot Plan Generation</h3>
+<pre>GET /api/command-center/autopilot-plan
+    │
+    ├── CommandCenterService.getAutopilotPlan()
+    │   │
+    │   ├── [Cache Check] 2-minute TTL in-memory cache
+    │   │
+    │   ├── PARALLEL QUERIES:
+    │   │   ├── getActionableReqs(50)
+    │   │   │   ├── Query vendor_req_signal (C2C, last 48h, trust ≥ 40)
+    │   │   │   ├── Query MarketJob (JSEARCH + CORPTOCORP, last 3 days)
+    │   │   │   └── Sort: JSearch &gt; CorpToCorp &gt; Email, then createdAt DESC
+    │   │   │
+    │   │   ├── getBenchMatchReqs(20)
+    │   │   │   └── Reqs with matching ON_BENCH consultants
+    │   │   │
+    │   │   ├── getDueFollowups()
+    │   │   │   └── WHERE status=PENDING AND scheduled_at &lt;= NOW()
+    │   │   │
+    │   │   ├── getStuckSubmissions()
+    │   │   │   └── status=SUBMITTED for &gt;48h, no response
+    │   │   │
+    │   │   ├── getTodayActivity()
+    │   │   │   └── Submissions, interviews, offers created today
+    │   │   │
+    │   │   └── getVendorLeaderboard(10)
+    │   │       └── Top 10 vendors by trust_score
+    │   │
+    │   └── Assemble 3-phase plan:
+    │       ├── Morning (9 AM): actionableReqs + benchMatches + submissionQuota
+    │       ├── Midday (2 PM):  followupsDue + stuckSubmissions
+    │       └── Evening (6 PM): todayActivity + closureProbability + vendorLeaderboard
+    │
+    └── Return plan to Command Center UI</pre>
+
+<h3>Flow 3: Email Sync + Extraction</h3>
+<pre>mail:daemon (cron every 60 min)
+    │
+    ├── validateCredentials()
+    │   └── OAuth2 client_credentials → Graph API token
+    │
+    ├── Query mailbox table → 16 email accounts
+    │   └── Exclude: akkayya.chavala@, accounts@, info@
+    │
+    ├── For each mailbox:
+    │   └── syncMailbox(email)
+    │       ├── discoverFolders() → list all mail folders
+    │       ├── Filter out: Conversation History, RSS, Outbox
+    │       ├── For each folder:
+    │       │   └── syncFolder()
+    │       │       ├── GET /users/{email}/mailFolders/{id}/messages?$top=50
+    │       │       ├── INSERT INTO raw_email_message ON CONFLICT DO NOTHING
+    │       │       ├── Stop after 3 consecutive pages with 0 new inserts
+    │       │       └── Handle 429 (wait retry-after) + 401 (refresh token)
+    │       └── Update mailbox.last_synced_at
+    │
+    ├── IF any new emails found:
+    │   ├── classifyNewEmails()      → categorize by 50+ rules
+    │   ├── extractVendors()         → upsert vendor_company + vendor_contact
+    │   ├── extractConsultants()     → upsert consultant (skills, resume detect)
+    │   ├── extractClients()         → upsert client_company + client_contact
+    │   └── extractReqSignals()      → create vendor_req_signal entries
+    │
+    └── Log totals</pre>
+
+<!-- ============================================ -->
+<!-- SECTION 15: FRONTEND -->
+<!-- ============================================ -->
+<h2 id="s15">15. Frontend Architecture (22 Pages)</h2>
+
+<table>
+  <thead><tr><th>#</th><th>Route</th><th>Purpose</th><th>Audience</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>/login</td><td>Authentication</td><td>All</td></tr>
+    <tr><td>2</td><td>/dashboard/command-center</td><td>Autopilot daily plan (3-phase)</td><td>Management</td></tr>
+    <tr><td>3</td><td>/dashboard/auto-submit</td><td>1-click submit queue</td><td>Management, Recruitment</td></tr>
+    <tr><td>4</td><td>/dashboard/closure-engine</td><td>Closure pipeline (7 tabs)</td><td>Management</td></tr>
+    <tr><td>5</td><td>/dashboard/work-queue</td><td>Recruiter work queue</td><td>Management, Recruitment</td></tr>
+    <tr><td>6</td><td>/dashboard/ai-agents</td><td>6 AI agent dashboards</td><td>Management</td></tr>
+    <tr><td>7</td><td>/dashboard/recruiter-analytics</td><td>Recruiter performance</td><td>Management</td></tr>
+    <tr><td>8</td><td>/dashboard/live-feed</td><td>Real-time job feed (dual-tab)</td><td>All</td></tr>
+    <tr><td>9</td><td>/dashboard/jobs</td><td>Job management</td><td>Recruitment, Sales</td></tr>
+    <tr><td>10</td><td>/dashboard/jobs/[id]</td><td>Job detail</td><td>Recruitment, Sales</td></tr>
+    <tr><td>11</td><td>/dashboard/vendor-reqs</td><td>Vendor requirements</td><td>Recruitment, Sales</td></tr>
+    <tr><td>12</td><td>/dashboard/market-jobs</td><td>Job board aggregation</td><td>Recruitment, Sales</td></tr>
+    <tr><td>13</td><td>/dashboard/mail-intel</td><td>Email intelligence</td><td>Management</td></tr>
+    <tr><td>14</td><td>/dashboard/consultants</td><td>Consultant profiles</td><td>Recruitment, HR</td></tr>
+    <tr><td>15</td><td>/dashboard/submissions</td><td>Submission pipeline</td><td>Recruitment</td></tr>
+    <tr><td>16</td><td>/dashboard/timesheets</td><td>Timesheet management</td><td>Accounts</td></tr>
+    <tr><td>17</td><td>/dashboard/sales</td><td>Sales dashboard</td><td>Sales</td></tr>
+    <tr><td>18</td><td>/dashboard/recruitment</td><td>Recruitment dashboard</td><td>Recruitment</td></tr>
+    <tr><td>19</td><td>/dashboard/accounts</td><td>Accounts dashboard</td><td>Accounts</td></tr>
+    <tr><td>20</td><td>/dashboard/pst-intel</td><td>PST archive intelligence</td><td>Management</td></tr>
+  </tbody>
+</table>
+
+<h3>State Management</h3>
+<ul>
+  <li><strong>Auth:</strong> Zustand store (<code>useAuthStore</code>) with <code>persist</code> middleware → <code>localStorage</code> key <code>sos-auth</code></li>
+  <li><strong>API Client:</strong> Centralized <code>api</code> module wrapping <code>fetch</code> with auto JWT injection, 401 redirect, error handling</li>
+  <li><strong>Page State:</strong> Local <code>useState</code> per page — no global state pollution</li>
+</ul>
+
+<!-- ============================================ -->
+<!-- SECTION 16: INFRASTRUCTURE -->
+<!-- ============================================ -->
+<h2 id="s16">16. Infrastructure &amp; DevOps</h2>
+
+<h3>Docker Compose (Development)</h3>
+<pre>services:
+  postgres:
+    image: postgres:16
+    ports: ["5432:5432"]
+    environment:
+      POSTGRES_DB: ai_run_sos
+      POSTGRES_USER: sos_admin
+      POSTGRES_PASSWORD: sos_dev_password
+    volumes:
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]</pre>
+
+<h3>Environment Variables</h3>
+<table>
+  <thead><tr><th>Variable</th><th>Purpose</th><th>Example</th></tr></thead>
+  <tbody>
+    <tr><td>DATABASE_URL</td><td>PostgreSQL connection</td><td>postgresql://sos_admin:...@localhost:5432/ai_run_sos</td></tr>
+    <tr><td>JWT_SECRET</td><td>JWT signing key</td><td>(random 64-byte string)</td></tr>
+    <tr><td>JWT_EXPIRES_IN</td><td>Token TTL</td><td>24h</td></tr>
+    <tr><td>REDIS_URL</td><td>Redis connection</td><td>redis://localhost:6379</td></tr>
+    <tr><td>GRAPH_TENANT_ID</td><td>Azure AD tenant</td><td>(GUID)</td></tr>
+    <tr><td>GRAPH_CLIENT_ID</td><td>App registration ID</td><td>(GUID)</td></tr>
+    <tr><td>GRAPH_CLIENT_SECRET</td><td>App secret</td><td>(secret value)</td></tr>
+    <tr><td>RAPIDAPI_KEY</td><td>JSearch API key</td><td>(key)</td></tr>
+    <tr><td>APOLLO_SEARCH_KEY</td><td>Apollo search API</td><td>(key)</td></tr>
+    <tr><td>APOLLO_ENRICH_KEY</td><td>Apollo enrichment API</td><td>(key)</td></tr>
+    <tr><td>SUBMISSION_SENDER_EMAIL</td><td>Outbound mailbox</td><td>recruiter@cloudresources.net</td></tr>
+  </tbody>
+</table>
+
+<h3>Startup Commands</h3>
+<pre># Start infrastructure
+cd infra && docker-compose up -d
+
+# Install dependencies
+npm install
+
+# Generate Prisma client
+npm run db:generate
+
+# Run migrations
+npm run db:migrate
+
+# Seed database
+npm run db:seed
+
+# Start both API + Web
+npm run dev
+
+# Start mail sync daemon (separate terminal)
+npm run mail:daemon</pre>
+
+<!-- ============================================ -->
+<!-- SECTION 17: SECURITY -->
+<!-- ============================================ -->
+<h2 id="s17">17. Security Model</h2>
+
+<h3>Multi-Tenant Isolation</h3>
+<ul>
+  <li>Every table has <code>tenantId</code> column</li>
+  <li>PostgreSQL Row-Level Security (RLS) policies in <code>init-db.sql</code></li>
+  <li>Prisma queries automatically scoped by tenant</li>
+  <li>JWT contains <code>tenantId</code> claim</li>
+  <li><code>TenantMiddleware</code> extracts and validates on every request</li>
+</ul>
+
+<h3>Agent Security (6 Principles)</h3>
+<table>
+  <thead><tr><th>#</th><th>Principle</th><th>Implementation</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><strong>Disclosure</strong></td><td>All agent communications identify as AI</td></tr>
+    <tr><td>2</td><td><strong>Least Privilege</strong></td><td>Tool allowlists per agent (no agent has all tools)</td></tr>
+    <tr><td>3</td><td><strong>Audit Trail</strong></td><td>Every tool call logged with input, output, reason, duration</td></tr>
+    <tr><td>4</td><td><strong>Human Gates</strong></td><td>Immigration, payroll, contracts require human sign-off</td></tr>
+    <tr><td>5</td><td><strong>Rate Limits</strong></td><td>Per-minute, per-hour, daily windows per agent</td></tr>
+    <tr><td>6</td><td><strong>Sandboxing</strong></td><td>Agents cannot access other tenants' data</td></tr>
+  </tbody>
+</table>
+
+<h3>API Security</h3>
+<ul>
+  <li>Global <code>ValidationPipe</code> with <code>whitelist: true, forbidNonWhitelisted: true</code></li>
+  <li>CORS enabled</li>
+  <li>JWT tokens expire in 24h</li>
+  <li>bcrypt password hashing (cost factor 10)</li>
+  <li>No secrets in client-side code</li>
+</ul>
+
+<!-- ============================================ -->
+<!-- SECTION 18: VENTURE POTENTIAL -->
+<!-- ============================================ -->
+<div class="page-break"></div>
+<h2 id="s18">18. Venture Potential &amp; Competitive Analysis</h2>
+
+<h3>Market Size &amp; Positioning</h3>
+<table>
+  <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+  <tbody>
+    <tr><td>US IT staffing market (TAM)</td><td>$180B+/year</td></tr>
+    <tr><td>C2C/W2 contract staffing (SAM)</td><td>~$40B/year</td></tr>
+    <tr><td>Small-to-mid staffing firms (SOM)</td><td>~$12B/year</td></tr>
+    <tr><td>Target customer</td><td>Staffing firms with 5–50 recruiters</td></tr>
+    <tr><td>Estimated addressable firms</td><td>~15,000 in the US</td></tr>
+    <tr><td>Average revenue per firm</td><td>$800K–$5M/year</td></tr>
+  </tbody>
+</table>
+
+<h3>Comparable Valuations</h3>
+<table>
+  <thead><tr><th>Company</th><th>What They Do</th><th>Last Valuation</th><th>Revenue Multiple</th></tr></thead>
+  <tbody>
+    <tr><td>Bullhorn</td><td>Staffing CRM (no AI)</td><td>~$2B</td><td>10–15x ARR</td></tr>
+    <tr><td>Sense</td><td>Staffing engagement automation</td><td>$500M</td><td>20x ARR</td></tr>
+    <tr><td>Paradox (Olivia)</td><td>Recruiting chatbot</td><td>$1.5B</td><td>25x ARR</td></tr>
+    <tr><td>Eightfold.ai</td><td>Talent intelligence</td><td>$2.1B</td><td>30x+ ARR</td></tr>
+    <tr><td>Hireflow</td><td>AI outbound recruiter</td><td>$50M seed</td><td>Pre-revenue</td></tr>
+  </tbody>
+</table>
+
+<div class="info-box">
+  <strong>AI-RUN SOS positioning:</strong> More vertical than Bullhorn (owns the entire stack), more data-driven than Sense (61M+ signals), more operationally deep than Paradox (full submission-to-placement), and uniquely focused on C2C/W2 contract staffing where margins are highest ($15–40/hr spread).
+</div>
+
+<h3>Risk Factors</h3>
+<ol>
+  <li><strong>Single-tenant dependency:</strong> Currently running for one firm. Multi-tenant data isolation needs hardening.</li>
+  <li><strong>Email API dependency:</strong> Microsoft Graph API is the lifeline. Google Workspace support should be added.</li>
+  <li><strong>Extraction accuracy:</strong> Regex-based extraction has known limits. LLM augmentation should be prioritized.</li>
+  <li><strong>No mobile experience:</strong> Staffing is a speed game. No mobile app = lost reqs.</li>
+  <li><strong>Regulatory:</strong> GDPR consent ledger exists, but CCPA and state-level staffing regulations vary.</li>
+</ol>
+
+<!-- ============================================ -->
+<!-- SECTION 19: IMPLEMENTATION ROADMAP -->
+<!-- ============================================ -->
+<h2 id="s19">19. Implementation Roadmap</h2>
+
+<h3>What Is Complete</h3>
+<table>
+  <thead><tr><th>#</th><th>Component</th><th>Status</th><th>Details</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>Email Ingestion Pipeline</td><td><span class="badge badge-green">COMPLETE</span></td><td>16 mailboxes, Graph API, 812K emails</td></tr>
+    <tr><td>2</td><td>Requirement Signal Extraction</td><td><span class="badge badge-green">COMPLETE</span></td><td>Deterministic regex+NLP, 61M+ signals</td></tr>
+    <tr><td>3</td><td>Vendor Intelligence Graph</td><td><span class="badge badge-green">COMPLETE</span></td><td>7.1K companies, 31K contacts, trust scores</td></tr>
+    <tr><td>4</td><td>Consultant Talent Pool</td><td><span class="badge badge-green">COMPLETE</span></td><td>17K consultants with skill vectors</td></tr>
+    <tr><td>5</td><td>Market Job Aggregation</td><td><span class="badge badge-green">COMPLETE</span></td><td>12+ job boards, hourly sync, dedup</td></tr>
+    <tr><td>6</td><td>Full Submission Workflow</td><td><span class="badge badge-green">COMPLETE</span></td><td>DRAFT → CONSENT → SUBMITTED → ... → ACCEPTED</td></tr>
+    <tr><td>7</td><td>Command Center</td><td><span class="badge badge-green">COMPLETE</span></td><td>Real-time 3-phase management dashboard</td></tr>
+    <tr><td>8</td><td>Live Feed</td><td><span class="badge badge-green">COMPLETE</span></td><td>Dual-tab, search, filters, auto-refresh</td></tr>
+    <tr><td>9</td><td>Closure Engine</td><td><span class="badge badge-green">COMPLETE</span></td><td>7-tab analytics dashboard</td></tr>
+    <tr><td>10</td><td>12 AI Agents</td><td><span class="badge badge-green">COMPLETE</span></td><td>Full agent runtime with policy engine</td></tr>
+    <tr><td>11</td><td>Financial Stack</td><td><span class="badge badge-green">COMPLETE</span></td><td>Rate cards, margin guard, timesheets, invoices</td></tr>
+    <tr><td>12</td><td>Compliance &amp; Immigration</td><td><span class="badge badge-green">COMPLETE</span></td><td>Consent ledger, immigration case management</td></tr>
+    <tr><td>13</td><td>Multi-Tenancy</td><td><span class="badge badge-green">COMPLETE</span></td><td>Full RLS, 8 RBAC roles</td></tr>
+    <tr><td>14</td><td>Execution Engine (Epics 1–5)</td><td><span class="badge badge-green">COMPLETE</span></td><td>Graph outbound, follow-ups, response detection, auto-submit, resume formatter</td></tr>
+  </tbody>
+</table>
+
+<h3>Remaining Gaps (Priority Order)</h3>
+<table>
+  <thead><tr><th>Priority</th><th>Gap</th><th>Impact</th><th>Effort</th></tr></thead>
+  <tbody>
+    <tr><td><span class="badge badge-red">P1</span></td><td>Real-time Dashboard Refresh</td><td>Management needs live visibility</td><td>3 days</td></tr>
+    <tr><td><span class="badge badge-red">P2</span></td><td>Recruiter Daily Digest Email</td><td>Removes need to log in</td><td>3 days</td></tr>
+    <tr><td><span class="badge badge-yellow">P3</span></td><td>Interview Scheduling Integration</td><td>Auto-detect interview confirmations</td><td>1 week</td></tr>
+    <tr><td><span class="badge badge-yellow">P4</span></td><td>Offer Detection &amp; Auto-Update</td><td>Eliminates manual offer tracking</td><td>3 days</td></tr>
+    <tr><td><span class="badge badge-blue">P5</span></td><td>LLM-Augmented Extraction</td><td>Increase accuracy from ~70% to ~95%</td><td>2 weeks</td></tr>
+    <tr><td><span class="badge badge-blue">P6</span></td><td>Predictive Closure Scoring</td><td>Prioritize by likelihood</td><td>2 weeks</td></tr>
+    <tr><td><span class="badge badge-blue">P7</span></td><td>Vendor Negotiation Agent</td><td>Increase margins 5–15%</td><td>3 weeks</td></tr>
+    <tr><td><span class="badge badge-blue">P8</span></td><td>Mobile App / SMS Alerts</td><td>Speed-to-submit improvement</td><td>3 weeks</td></tr>
+  </tbody>
+</table>
+
+<h3>Daily Workflow After Full Automation</h3>
+<div class="success-box"><strong>Human time required: ~45 minutes/day</strong></div>
+<table>
+  <thead><tr><th>Time</th><th>Action</th><th>Duration</th><th>AI vs Human</th></tr></thead>
+  <tbody>
+    <tr><td>8:00 AM</td><td>Review AI-generated daily scoreboard</td><td>5 min</td><td>AI generates, human reads</td></tr>
+    <tr><td>8:15 AM</td><td>Batch-approve/reject AI submissions (50 candidates)</td><td>15 min</td><td>AI generates, human 1-click</td></tr>
+    <tr><td>11:00 AM</td><td>Review interview confirmations</td><td>5 min</td><td>AI detects most</td></tr>
+    <tr><td>2:00 PM</td><td>Check follow-up responses, handle escalations</td><td>10 min</td><td>AI follows up, human handles edge cases</td></tr>
+    <tr><td>4:00 PM</td><td>Review premium reqs flagged for attention</td><td>5 min</td><td>AI flags, human decides</td></tr>
+    <tr><td>5:00 PM</td><td>End-of-day pipeline review</td><td>5 min</td><td>AI summarizes</td></tr>
+  </tbody>
+</table>
+
+<h3>For Implementation Specialists (5-Day Onboarding)</h3>
+<table>
+  <thead><tr><th>Day</th><th>Focus</th><th>Tasks</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Day 1</strong></td><td>Environment Setup</td><td>Clone repo, <code>npm install</code>, Docker up, Prisma migrate + seed, start dev. Login: md@apex-staffing.com / Password123!</td></tr>
+    <tr><td><strong>Day 2</strong></td><td>Data Ingestion</td><td>Add mailboxes, run initial sync, run extraction, verify data counts</td></tr>
+    <tr><td><strong>Day 3</strong></td><td>Trust + Scoring</td><td>Trigger trust computation, compute actionability, verify Command Center</td></tr>
+    <tr><td><strong>Day 4</strong></td><td>Auto-Submit</td><td>Ensure consultant readiness, trigger queue build, review queue, test approve</td></tr>
+    <tr><td><strong>Day 5</strong></td><td>Production</td><td>Configure sender mailbox, start daemon, verify follow-up + response detection</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================ -->
+<!-- SECTION 20: KNOWLEDGE TRANSFER -->
+<!-- ============================================ -->
+<h2 id="s20">20. Knowledge Transfer Checklist</h2>
+
+<h3>For New Team Members</h3>
+<ul>
+  <li>Read this Solutions Guide end-to-end</li>
+  <li>Read <code>docs/PRD.md</code> for product vision</li>
+  <li>Read <code>docs/Workflows.md</code> for state machine definitions</li>
+  <li>Read <code>docs/AgentPolicies.md</code> for agent security model</li>
+  <li>Read <code>docs/RBAC.md</code> for role permissions</li>
+  <li>Set up local environment (Day 1 onboarding)</li>
+  <li>Login and explore all dashboard pages</li>
+  <li>Trace a submission through the system (create → send → follow-up)</li>
+  <li>Review <code>submissions.service.ts</code> (core business logic)</li>
+  <li>Review <code>email-sender.service.ts</code> (Graph integration)</li>
+  <li>Review <code>agent.ts</code> (agent framework)</li>
+</ul>
+
+<h3>For Executives</h3>
+<ul>
+  <li>Understand the 1-closure/day math (Section 3 &amp; 13)</li>
+  <li>Review the competitive moat (Section 2 &amp; 18)</li>
+  <li>Understand the trust graph value prop (vendor scoring from real outcomes)</li>
+  <li>Review the API surface breadth (160+ endpoints = mature platform)</li>
+  <li>Understand the execution loop (email → send → follow-up → detect → trust update)</li>
+</ul>
+
+<h3>For Finance</h3>
+<ul>
+  <li>Review unit economics (Section 3)</li>
+  <li>Understand MarginGuard ($10/hr floor with $5/hr hard block)</li>
+  <li>Review rate intelligence capabilities</li>
+  <li>Understand timesheet → invoice → payment flow</li>
+  <li>Review margin event tracking (planned vs. realized vs. leakage)</li>
+</ul>
+
+<h3>For Technical Architects — Extension Points</h3>
+<table>
+  <thead><tr><th>Extension</th><th>Steps</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Adding a New Agent</strong></td><td>1. Create <code>my-agent.agent.ts</code> in <code>packages/agent-runtime/src/agents/</code><br>2. Extend <code>BaseAgent</code>, implement <code>execute()</code><br>3. Define allowedTools, rateLimits in config<br>4. Register in <code>packages/agent-runtime/src/index.ts</code></td></tr>
+    <tr><td><strong>Adding a New API Module</strong></td><td>1. Create folder in <code>apps/api/src/my-module/</code><br>2. Create service, controller, module files<br>3. Register in <code>app.module.ts</code><br>4. Apply <code>@UseGuards(JwtAuthGuard, RolesGuard)</code></td></tr>
+    <tr><td><strong>Adding a New Frontend Page</strong></td><td>1. Create <code>apps/web/src/app/dashboard/my-page/page.tsx</code><br>2. Use <code>'use client'</code> directive<br>3. Import <code>api</code> from <code>@/lib/api</code><br>4. Add nav item in <code>sidebar.tsx</code></td></tr>
+  </tbody>
+</table>
+
+<!-- FOOTER -->
+<div class="footer">
+  <p><strong>AI-RUN SOS v2.0</strong> — Complete Technical Architecture &amp; Solutions Guide</p>
+  <p>Generated March 2026 | Cloud Resources — Confidential</p>
+  <p>Total codebase: ~50,000 lines TypeScript | 47 models | 28 enums | 12 agents | 160+ endpoints | 22 pages</p>
+</div>
+
+</body>
+</html>

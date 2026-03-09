@@ -97,6 +97,8 @@ export default function LiveFeedPage() {
   const [visibleCount, setVisibleCount] = useState(50);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [nextRefreshIn, setNextRefreshIn] = useState(60);
+  const [extracting, setExtracting] = useState(false);
+  const [extractResult, setExtractResult] = useState<string | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const countdownRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -200,6 +202,26 @@ export default function LiveFeedPage() {
               <span>Refreshes in {nextRefreshIn}m</span>
             </div>
             <button
+              onClick={async () => {
+                setExtracting(true);
+                setExtractResult(null);
+                try {
+                  const res: any = await api.post('/mail-intel/re-extract');
+                  setExtractResult(`Extracted ${res.signalsCreated} new signals from ${res.emailsScanned} emails`);
+                  await load();
+                } catch {
+                  setExtractResult('Extraction failed');
+                } finally {
+                  setExtracting(false);
+                }
+              }}
+              disabled={extracting}
+              className="flex items-center gap-1.5 rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50"
+            >
+              <InboxArrowDownIcon className={`h-3.5 w-3.5 ${extracting ? 'animate-pulse' : ''}`} />
+              {extracting ? 'Extracting...' : 'Re-Extract Emails'}
+            </button>
+            <button
               onClick={load}
               disabled={loading}
               className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
@@ -210,6 +232,13 @@ export default function LiveFeedPage() {
           </div>
         }
       />
+
+      {extractResult && (
+        <div className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-2 text-sm text-violet-700 flex items-center justify-between">
+          <span>{extractResult}</span>
+          <button onClick={() => setExtractResult(null)} className="text-violet-400 hover:text-violet-600 text-xs">dismiss</button>
+        </div>
+      )}
 
       {/* Stats Bar */}
       {activeTab !== 'highpaid' ? (

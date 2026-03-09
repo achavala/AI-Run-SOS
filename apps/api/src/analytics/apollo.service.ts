@@ -115,38 +115,45 @@ export class ApolloService {
    * Stores enriched data back into vendor_contact.
    */
   async enrichTopVendorContacts(limit = 20) {
-    await this.prisma.$executeRaw`
-      CREATE TABLE IF NOT EXISTS vendor_contact_enrichment (
-        id SERIAL PRIMARY KEY,
-        contact_email TEXT NOT NULL UNIQUE,
-        vendor_domain TEXT,
-        first_name TEXT,
-        last_name TEXT,
-        title TEXT,
-        linkedin_url TEXT,
-        phone TEXT,
-        company_name TEXT,
-        industry TEXT,
-        city TEXT,
-        state TEXT,
-        enriched_at TIMESTAMPTZ DEFAULT NOW(),
-        source TEXT DEFAULT 'apollo'
-      )
-    `;
-
-    const contacts = await this.prisma.$queryRaw`
-      SELECT vct.id, vct.email, vct.name, vc.domain, vc.name as company_name,
-        vts.trust_score
-      FROM vendor_contact vct
-      JOIN vendor_company vc ON vc.id = vct.vendor_company_id
-      LEFT JOIN vendor_trust_score vts ON vts.vendor_company_id = vc.id
-      WHERE vct.email IS NOT NULL AND vct.email != ''
-        AND NOT EXISTS (
-          SELECT 1 FROM vendor_contact_enrichment e WHERE e.contact_email = vct.email
+    try {
+      await this.prisma.$executeRaw`
+        CREATE TABLE IF NOT EXISTS vendor_contact_enrichment (
+          id SERIAL PRIMARY KEY,
+          contact_email TEXT NOT NULL UNIQUE,
+          vendor_domain TEXT,
+          first_name TEXT,
+          last_name TEXT,
+          title TEXT,
+          linkedin_url TEXT,
+          phone TEXT,
+          company_name TEXT,
+          industry TEXT,
+          city TEXT,
+          state TEXT,
+          enriched_at TIMESTAMPTZ DEFAULT NOW(),
+          source TEXT DEFAULT 'apollo'
         )
-      ORDER BY COALESCE(vts.trust_score, 0) DESC
-      LIMIT ${limit}
-    ` as any[];
+      `;
+    } catch {
+      // vendor_contact_enrichment table cannot be created
+    }
+
+    let contacts: any[] = [];
+    try {
+      contacts = await this.prisma.$queryRaw`
+        SELECT vct.id, vct.email, vct.name, vc.domain, vc.name as company_name,
+          v."trustScore" as trust_score
+        FROM "ExtractedVendorContact" vct
+        JOIN "ExtractedVendorCompany" vc ON vc.id = vct."vendorCompanyId"
+        LEFT JOIN "Vendor" v ON v.domain = vc.domain
+        WHERE vct.email IS NOT NULL AND vct.email != ''
+        ORDER BY COALESCE(v."trustScore", 0) DESC
+        LIMIT ${limit}
+      ` as any[];
+    } catch (err: any) {
+      this.logger.warn(`enrichTopVendorContacts query failed: ${err.message?.slice(0, 120)}`);
+      return { attempted: 0, enriched: 0, results: [] };
+    }
 
     let enriched = 0;
     const results: any[] = [];
@@ -155,25 +162,29 @@ export class ApolloService {
       try {
         const person = await this.enrichEmail(contact.email);
         if (person) {
-          await this.prisma.$executeRaw`
-            INSERT INTO vendor_contact_enrichment
-              (contact_email, vendor_domain, first_name, last_name, title,
-               linkedin_url, phone, company_name, industry, city, state, source)
-            VALUES (
-              ${contact.email}, ${contact.domain},
-              ${person.first_name || null}, ${person.last_name || null},
-              ${person.title || null}, ${person.linkedin_url || null},
-              ${person.phone_numbers?.[0]?.raw_number || null},
-              ${person.organization?.name || contact.company_name},
-              ${person.organization?.industry || null},
-              ${person.city || null}, ${person.state || null},
-              'apollo'
-            )
-            ON CONFLICT (contact_email) DO UPDATE SET
-              first_name = EXCLUDED.first_name, last_name = EXCLUDED.last_name,
-              title = EXCLUDED.title, linkedin_url = EXCLUDED.linkedin_url,
-              phone = EXCLUDED.phone, enriched_at = NOW()
-          `;
+          try {
+            await this.prisma.$executeRaw`
+              INSERT INTO vendor_contact_enrichment
+                (contact_email, vendor_domain, first_name, last_name, title,
+                 linkedin_url, phone, company_name, industry, city, state, source)
+              VALUES (
+                ${contact.email}, ${contact.domain},
+                ${person.first_name || null}, ${person.last_name || null},
+                ${person.title || null}, ${person.linkedin_url || null},
+                ${person.phone_numbers?.[0]?.raw_number || null},
+                ${person.organization?.name || contact.company_name},
+                ${person.organization?.industry || null},
+                ${person.city || null}, ${person.state || null},
+                'apollo'
+              )
+              ON CONFLICT (contact_email) DO UPDATE SET
+                first_name = EXCLUDED.first_name, last_name = EXCLUDED.last_name,
+                title = EXCLUDED.title, linkedin_url = EXCLUDED.linkedin_url,
+                phone = EXCLUDED.phone, enriched_at = NOW()
+            `;
+          } catch {
+            // vendor_contact_enrichment table may not exist
+          }
           enriched++;
           results.push({
             email: contact.email,
@@ -183,7 +194,6 @@ export class ApolloService {
             company: person.organization?.name,
           });
         }
-        // Rate limit: 1 req/sec for Apollo
         await new Promise(r => setTimeout(r, 1100));
       } catch (err: any) {
         this.logger.warn(`Enrich failed for ${contact.email}: ${err.message}`);
@@ -198,24 +208,28 @@ export class ApolloService {
    * Useful for discovering decision-makers at high-value vendors.
    */
   async discoverVendorContacts(domain: string) {
-    await this.prisma.$executeRaw`
-      CREATE TABLE IF NOT EXISTS vendor_contact_enrichment (
-        id SERIAL PRIMARY KEY,
-        contact_email TEXT NOT NULL UNIQUE,
-        vendor_domain TEXT,
-        first_name TEXT,
-        last_name TEXT,
-        title TEXT,
-        linkedin_url TEXT,
-        phone TEXT,
-        company_name TEXT,
-        industry TEXT,
-        city TEXT,
-        state TEXT,
-        enriched_at TIMESTAMPTZ DEFAULT NOW(),
-        source TEXT DEFAULT 'apollo'
-      )
-    `;
+    try {
+      await this.prisma.$executeRaw`
+        CREATE TABLE IF NOT EXISTS vendor_contact_enrichment (
+          id SERIAL PRIMARY KEY,
+          contact_email TEXT NOT NULL UNIQUE,
+          vendor_domain TEXT,
+          first_name TEXT,
+          last_name TEXT,
+          title TEXT,
+          linkedin_url TEXT,
+          phone TEXT,
+          company_name TEXT,
+          industry TEXT,
+          city TEXT,
+          state TEXT,
+          enriched_at TIMESTAMPTZ DEFAULT NOW(),
+          source TEXT DEFAULT 'apollo'
+        )
+      `;
+    } catch {
+      // vendor_contact_enrichment table cannot be created
+    }
 
     const people = await this.searchContacts(domain, 10);
 
@@ -242,7 +256,9 @@ export class ApolloService {
             phone = EXCLUDED.phone, enriched_at = NOW()
         `;
         stored++;
-      } catch { /* skip */ }
+      } catch {
+        // vendor_contact_enrichment table may not exist
+      }
     }
 
     return { domain, found: people.length, stored };

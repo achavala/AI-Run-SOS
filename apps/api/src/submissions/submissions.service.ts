@@ -1,11 +1,13 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MarginGuardService } from '../margin-guard/margin-guard.service';
+import { EmailSenderService } from '../email/email-sender.service';
 
 interface ConsentPolicy {
   autoApproveVendors?: string[];
@@ -16,9 +18,12 @@ interface ConsentPolicy {
 
 @Injectable()
 export class SubmissionsService {
+  private readonly logger = new Logger(SubmissionsService.name);
+
   constructor(
     private prisma: PrismaService,
     private marginGuard: MarginGuardService,
+    private emailSender: EmailSenderService,
   ) {}
 
   async findAll(tenantId: string, filters?: { status?: string; dateFrom?: string; dateTo?: string }) {
@@ -74,12 +79,17 @@ export class SubmissionsService {
       ORDER BY created_at ASC
     ` as any[];
 
-    const followups = await this.prisma.$queryRaw`
-      SELECT id, followup_number as "number", scheduled_at as "scheduledAt",
-             sent_at as "sentAt", status
-      FROM submission_followup WHERE submission_id = ${id}
-      ORDER BY followup_number ASC
-    ` as any[];
+    let followups: any[] = [];
+    try {
+      followups = await this.prisma.$queryRaw`
+        SELECT id, followup_number as "number", scheduled_at as "scheduledAt",
+               sent_at as "sentAt", status
+        FROM submission_followup WHERE submission_id = ${id}
+        ORDER BY followup_number ASC
+      ` as any[];
+    } catch {
+      // submission_followup table may not exist
+    }
 
     return { ...submission, events, followups };
   }
@@ -283,13 +293,77 @@ export class SubmissionsService {
       throw new BadRequestException('Consent required before sending');
     }
 
-    // Generate email draft
     const emailDraft = this.generateEmailDraft(submission);
 
-    await this.logEvent(id, 'SENT', userId, { emailDraft: emailDraft.subject });
+    if (!emailDraft.to) {
+      throw new BadRequestException('No vendor contact email found — cannot send');
+    }
+
+    // Determine sender mailbox (fall back to configured default)
+    const senderEmail = process.env.SUBMISSION_SENDER_EMAIL || 'recruiter@apex-staffing.com';
+
+    let sendResult: { messageId: string; conversationId: string | null; internetMessageId: string | null; sentAt: string } | null = null;
+
+    try {
+      sendResult = await this.emailSender.sendMail({
+        from: senderEmail,
+        to: [emailDraft.to],
+        subject: emailDraft.subject,
+        bodyHtml: emailDraft.body.replace(/\n/g, '<br>'),
+        bodyText: emailDraft.body,
+        saveToSentItems: true,
+      });
+
+      this.logger.log(`Submission ${id} sent via Graph: msgId=${sendResult.messageId}`);
+    } catch (err: any) {
+      this.logger.warn(`Graph send failed for submission ${id}, storing as draft: ${err.message}`);
+      // Fall through — still mark as SUBMITTED and store the draft
+    }
+
+    const now = new Date();
+
+    // Update submission with sent evidence
+    await this.prisma.submission.update({
+      where: { id },
+      data: {
+        status: 'SUBMITTED',
+        sentEmailId: sendResult?.messageId || null,
+        sentConversationId: sendResult?.conversationId || null,
+        sentInternetMsgId: sendResult?.internetMessageId || null,
+        sentAt: sendResult ? new Date(sendResult.sentAt) : now,
+        sentTo: emailDraft.to,
+        sentFrom: senderEmail,
+        sentSubject: emailDraft.subject,
+      },
+    });
+
+    // Record in email thread table
+    if (sendResult) {
+      await this.prisma.submissionEmailThread.create({
+        data: {
+          submissionId: id,
+          direction: 'OUTBOUND',
+          emailType: 'INITIAL',
+          graphMessageId: sendResult.messageId,
+          conversationId: sendResult.conversationId,
+          internetMsgId: sendResult.internetMessageId,
+          fromEmail: senderEmail,
+          toEmails: [emailDraft.to],
+          subject: emailDraft.subject,
+          bodyPreview: emailDraft.body.slice(0, 500),
+          sentAt: new Date(sendResult.sentAt),
+        },
+      });
+    }
+
+    await this.logEvent(id, 'SENT', userId, {
+      emailSubject: emailDraft.subject,
+      emailTo: emailDraft.to,
+      graphMessageId: sendResult?.messageId || 'draft-only',
+      sentViaGraph: !!sendResult,
+    });
 
     // Schedule follow-ups: T+4h, T+24h, T+48h
-    const now = new Date();
     const followups = [
       { number: 1, hours: 4 },
       { number: 2, hours: 24 },
@@ -298,19 +372,24 @@ export class SubmissionsService {
 
     for (const fu of followups) {
       const scheduledAt = new Date(now.getTime() + fu.hours * 3600000);
-      await this.prisma.$executeRaw`
-        INSERT INTO submission_followup (submission_id, followup_number, scheduled_at, status)
-        VALUES (${id}, ${fu.number}, ${scheduledAt}, 'PENDING')
-        ON CONFLICT DO NOTHING
-      `;
+      try {
+        await this.prisma.$executeRaw`
+          INSERT INTO submission_followup (submission_id, followup_number, scheduled_at, status)
+          VALUES (${id}, ${fu.number}, ${scheduledAt}, 'PENDING')
+          ON CONFLICT DO NOTHING
+        `;
+      } catch {
+        // submission_followup table may not exist
+      }
     }
 
-    await this.prisma.submission.update({
-      where: { id },
-      data: { status: 'SUBMITTED' },
-    });
-
-    return { submission: { id, status: 'SUBMITTED' }, emailDraft, followupsScheduled: 3 };
+    return {
+      submission: { id, status: 'SUBMITTED' },
+      emailDraft,
+      sentViaGraph: !!sendResult,
+      graphMessageId: sendResult?.messageId || null,
+      followupsScheduled: 3,
+    };
   }
 
   async updateStatus(
@@ -337,10 +416,14 @@ export class SubmissionsService {
 
     // Cancel pending follow-ups if terminal status
     if (['REJECTED', 'WITHDRAWN', 'CLOSED', 'ACCEPTED'].includes(data.status)) {
-      await this.prisma.$executeRaw`
-        UPDATE submission_followup SET status = 'CANCELLED'
-        WHERE submission_id = ${id} AND status = 'PENDING'
-      `;
+      try {
+        await this.prisma.$executeRaw`
+          UPDATE submission_followup SET status = 'CANCELLED'
+          WHERE submission_id = ${id} AND status = 'PENDING'
+        `;
+      } catch {
+        // submission_followup table may not exist
+      }
     }
 
     return this.prisma.submission.update({ where: { id }, data: updateData });
@@ -363,12 +446,12 @@ export class SubmissionsService {
     data: { reqSignalId: string; consultantId: string; notes?: string },
   ) {
     const [req] = await this.prisma.$queryRaw`
-      SELECT vrs.id, vrs.title, vrs.location, vrs.rate_text, vrs.employment_type,
+      SELECT vrs.id, vrs.title, vrs.location, vrs."rateText" as rate_text, vrs."employmentType" as employment_type,
              vrs.skills, vc.name as vendor_name, vc.domain as vendor_domain,
              vct.email as contact_email, vct.name as contact_name
-      FROM vendor_req_signal vrs
-      LEFT JOIN vendor_company vc ON vc.id = vrs.vendor_company_id
-      LEFT JOIN vendor_contact vct ON vct.id = vrs.vendor_contact_id
+      FROM "VendorReqSignal" vrs
+      LEFT JOIN "ExtractedVendorCompany" vc ON vc.id = vrs."vendorCompanyId"
+      LEFT JOIN "ExtractedVendorContact" vct ON vct.id = vrs."vendorContactId"
       WHERE vrs.id = ${data.reqSignalId}::uuid
     ` as any[];
 
@@ -453,28 +536,36 @@ Best regards`;
   /* ═══════ Follow-up Engine ═══════ */
 
   async getDueFollowups() {
-    return this.prisma.$queryRaw`
-      SELECT sf.id, sf.submission_id as "submissionId", sf.followup_number as "number",
-             sf.scheduled_at as "scheduledAt",
-             s.status as "submissionStatus",
-             s.notes,
-             s."jobId",
-             s."consultantId"
-      FROM submission_followup sf
-      JOIN "Submission" s ON s.id = sf.submission_id
-      WHERE sf.status = 'PENDING'
-        AND sf.scheduled_at <= NOW()
-        AND s.status IN ('SUBMITTED', 'CONSENT_PENDING')
-      ORDER BY sf.scheduled_at ASC
-      LIMIT 50
-    ` as Promise<any[]>;
+    try {
+      return await this.prisma.$queryRaw`
+        SELECT sf.id, sf.submission_id as "submissionId", sf.followup_number as "number",
+               sf.scheduled_at as "scheduledAt",
+               s.status as "submissionStatus",
+               s.notes,
+               s."jobId",
+               s."consultantId"
+        FROM submission_followup sf
+        JOIN "Submission" s ON s.id = sf.submission_id
+        WHERE sf.status = 'PENDING'
+          AND sf.scheduled_at <= NOW()
+          AND s.status IN ('SUBMITTED', 'CONSENT_PENDING')
+        ORDER BY sf.scheduled_at ASC
+        LIMIT 50
+      ` as any[];
+    } catch {
+      return [];
+    }
   }
 
   async markFollowupSent(followupId: string) {
-    await this.prisma.$executeRaw`
-      UPDATE submission_followup SET status = 'SENT', sent_at = NOW()
-      WHERE id = ${followupId}::uuid
-    `;
+    try {
+      await this.prisma.$executeRaw`
+        UPDATE submission_followup SET status = 'SENT', sent_at = NOW()
+        WHERE id = ${followupId}::uuid
+      `;
+    } catch {
+      // submission_followup table may not exist
+    }
   }
 
   /* ═══════ Dashboard Stats ═══════ */

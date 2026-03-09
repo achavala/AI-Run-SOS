@@ -69,14 +69,14 @@ export default function CommandCenterPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [planData, distData, vendorData] = await Promise.all([
+      const [planRes, distRes, vendorRes] = await Promise.allSettled([
         api.get<any>('/command-center/autopilot-plan'),
         api.get<any[]>('/vendor-trust/distribution'),
         api.get<any[]>('/vendor-trust/top?limit=15'),
       ]);
-      setPlan(planData);
-      setTrustDist(distData);
-      setTopVendors(vendorData);
+      if (planRes.status === 'fulfilled') setPlan(planRes.value);
+      if (distRes.status === 'fulfilled') setTrustDist(distRes.value);
+      if (vendorRes.status === 'fulfilled') setTopVendors(vendorRes.value);
     } catch (err) {
       console.error('Failed to fetch command center data:', err);
     }
@@ -479,27 +479,30 @@ export default function CommandCenterPage() {
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase text-gray-500">Vendor</th>
                     <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Trust</th>
                     <th className="px-4 py-3 text-center text-xs font-medium uppercase text-gray-500">Tier</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Reqs (30d)</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Rate %</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Placements</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Response</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {(topVendors || []).map((v: any, i: number) => (
-                    <tr key={v.id || i} className="hover:bg-gray-50">
-                      <td className="px-6 py-3">
-                        <div className="font-medium text-gray-900">{v.vendor_name}</div>
-                        <div className="text-xs text-gray-400">{v.domain}</div>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <ScoreBadge score={v.trust_score} />
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <TierBadge tier={v.actionability_tier} />
-                      </td>
-                      <td className="px-4 py-3 text-right text-gray-600">{v.req_count_30d}</td>
-                      <td className="px-4 py-3 text-right text-gray-600">{v.has_rate_pct}%</td>
-                    </tr>
-                  ))}
+                  {(() => {
+                    const vendors = topVendors?.length > 0 ? topVendors : (evening?.vendorLeaderboard || []);
+                    return vendors.map((v: any, i: number) => (
+                      <tr key={v.id || i} className="hover:bg-gray-50">
+                        <td className="px-6 py-3">
+                          <div className="font-medium text-gray-900">{v.companyName || v.vendorName || v.vendor_name}</div>
+                          <div className="text-xs text-gray-400">{v.domain}</div>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <ScoreBadge score={v.trustScore ?? v.trust_score} />
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <TierBadge tier={v.tier || v.actionability_tier || 'UNCLASSIFIED'} />
+                        </td>
+                        <td className="px-4 py-3 text-right text-gray-600">{v.placementCount ?? v.req_count_30d ?? '—'}</td>
+                        <td className="px-4 py-3 text-right text-gray-600">{v.responseRate != null ? `${Math.round(v.responseRate)}%` : (v.has_rate_pct != null ? `${v.has_rate_pct}%` : '—')}</td>
+                      </tr>
+                    ));
+                  })()}
                 </tbody>
               </table>
             </div>

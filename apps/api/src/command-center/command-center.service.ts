@@ -34,6 +34,7 @@ export class CommandCenterService {
       stuckSubmissions,
       todayActivity,
       vendorLeaderboard,
+      laneMetrics,
     ] = await Promise.all([
       this.getActionableReqs(50),
       this.getBenchMatchReqs(10),
@@ -42,9 +43,12 @@ export class CommandCenterService {
       this.getStuckSubmissions(tenantId),
       this.getTodayActivity(tenantId),
       this.getVendorLeaderboard(),
+      this.getLaneMetrics(tenantId),
     ]);
 
     const submissionQuota = this.calculateDailyQuota(submissionStats);
+    const premiumReqs = actionableReqs.filter((r: any) => r.premiumSkillFamily);
+    const primeVendorReqs = actionableReqs.filter((r: any) => r.vendorTier === 'PRIME' || r.vendorTier === 'DIRECT');
 
     const plan = {
       generatedAt: new Date().toISOString(),
@@ -53,8 +57,11 @@ export class CommandCenterService {
         actionableReqs,
         benchMatches,
         submissionQuota,
-        message: `${actionableReqs.length} high-signal reqs ready. ${benchMatches.length} have bench matches. Target: ${submissionQuota} submissions today.`,
+        premiumReqCount: premiumReqs.length,
+        primeVendorReqCount: primeVendorReqs.length,
+        message: `${actionableReqs.length} high-signal reqs ready (${premiumReqs.length} premium, ${primeVendorReqs.length} from prime vendors). ${benchMatches.length} have bench matches. Target: ${submissionQuota} submissions today.`,
       },
+      laneQueues: laneMetrics,
       midday: {
         title: 'Midday Check (2 PM)',
         followupsDue,
@@ -76,30 +83,32 @@ export class CommandCenterService {
   private async getActionableReqs(limit: number) {
     const emailReqs = await this.prisma.$queryRaw`
       WITH top_signals AS (
-        SELECT id, title, location, rate_text, employment_type, skills,
-               COALESCE(actionability_score, 50) as actionability_score, created_at,
-               vendor_company_id, vendor_contact_id
-        FROM vendor_req_signal
+        SELECT id, title, location, "rateText", "employmentType", skills,
+               COALESCE("actionabilityScore", 50) as "actionabilityScore", "createdAt",
+               "vendorCompanyId", "vendorContactId",
+               "premiumSkillFamily", "premiumSkillBonus"
+        FROM "VendorReqSignal"
         WHERE title IS NOT NULL AND title != '' AND length(title) > 15
-          AND employment_type = 'C2C'
+          AND "employmentType" = 'C2C'
           AND title !~* '(unsubscribe|no third party|no c2c|w2 only|hot.?list|bench|available|looking for|h1b)'
-        ORDER BY created_at DESC
+        ORDER BY "createdAt" DESC
         LIMIT 500
       )
-      SELECT ts.id::text, ts.title, ts.location, ts.rate_text as "rateText",
-             ts.employment_type as "employmentType", ts.skills,
-             ts.actionability_score as "actionabilityScore",
-             ts.created_at as "createdAt",
+      SELECT ts.id::text, ts.title, ts.location, ts."rateText",
+             ts."employmentType", ts.skills,
+             ts."actionabilityScore",
+             ts."createdAt",
+             ts."premiumSkillFamily", ts."premiumSkillBonus",
              vc.name as "vendorName", vc.domain as "vendorDomain",
              vct.email as "contactEmail", vct.name as "contactName",
-             COALESCE(vts.trust_score, 30) as "vendorTrustScore",
-             vts.actionability_tier as "vendorTier",
+             COALESCE(v."trustScore", 30) as "vendorTrustScore",
+             COALESCE(v.tier::text, 'UNCLASSIFIED') as "vendorTier",
              'EMAIL' as "source"
       FROM top_signals ts
-      LEFT JOIN vendor_company vc ON vc.id = ts.vendor_company_id
-      LEFT JOIN vendor_contact vct ON vct.id = ts.vendor_contact_id
-      LEFT JOIN vendor_trust_score vts ON vts.vendor_company_id = vc.id
-      ORDER BY ts.created_at DESC
+      LEFT JOIN "ExtractedVendorCompany" vc ON vc.id = ts."vendorCompanyId"
+      LEFT JOIN "ExtractedVendorContact" vct ON vct.id = ts."vendorContactId"
+      LEFT JOIN "Vendor" v ON v.domain = vc.domain
+      ORDER BY ts."premiumSkillBonus" DESC NULLS LAST, ts."createdAt" DESC
       LIMIT 100
     ` as any[];
 
@@ -142,40 +151,39 @@ export class CommandCenterService {
   private async getBenchMatchReqs(limit: number) {
     return this.prisma.$queryRaw`
       WITH recent_reqs AS (
-        SELECT vrs.id, vrs.title, vrs.location, vrs.rate_text as "rateText",
-               vrs.employment_type as "employmentType", vrs.skills,
-               vrs.created_at as "createdAt",
-               vrs.vendor_company_id, vrs.vendor_contact_id
-        FROM vendor_req_signal vrs
-        WHERE vrs.created_at >= NOW() - interval '2 days'
+        SELECT vrs.id, vrs.title, vrs.location, vrs."rateText",
+               vrs."employmentType", vrs.skills,
+               vrs."createdAt",
+               vrs."vendorCompanyId", vrs."vendorContactId",
+               vrs."premiumSkillFamily"
+        FROM "VendorReqSignal" vrs
+        WHERE vrs."createdAt" >= NOW() - interval '2 days'
           AND vrs.skills IS NOT NULL AND array_length(vrs.skills, 1) > 0
-          AND COALESCE(vrs.actionability_score, 50) >= 40
-        ORDER BY COALESCE(vrs.actionability_score, 50) DESC, vrs.created_at DESC
+          AND COALESCE(vrs."actionabilityScore", 50) >= 40
+        ORDER BY COALESCE(vrs."actionabilityScore", 50) DESC, vrs."createdAt" DESC
         LIMIT 50
       ),
       matched AS (
         SELECT rr.*,
                vc.name as "vendorName",
                vct.email as "contactEmail",
-               c.id as "consultantId", c.full_name as "consultantName",
-               c.primary_skills as "consultantSkills",
-               array_length(
-                 ARRAY(SELECT unnest(rr.skills) INTERSECT SELECT unnest(c.primary_skills)),
-                 1
-               ) as skill_overlap
+               c.id as "consultantId",
+               c."firstName" || ' ' || c."lastName" as "consultantName",
+               (
+                 SELECT COUNT(*)
+                 FROM unnest(rr.skills) rs(s)
+                 JOIN jsonb_array_elements_text(c.skills) cs(s) ON LOWER(rs.s) = LOWER(cs.s)
+               )::int as skill_overlap
         FROM recent_reqs rr
-        LEFT JOIN vendor_company vc ON vc.id = rr.vendor_company_id
-        LEFT JOIN vendor_contact vct ON vct.id = rr.vendor_contact_id
+        LEFT JOIN "ExtractedVendorCompany" vc ON vc.id = rr."vendorCompanyId"
+        LEFT JOIN "ExtractedVendorContact" vct ON vct.id = rr."vendorContactId"
         CROSS JOIN LATERAL (
-          SELECT c.id, c.full_name, c.primary_skills
-          FROM consultant c
-          WHERE c.primary_skills && rr.skills
-            AND c.full_name IS NOT NULL AND c.full_name != ''
-          ORDER BY array_length(
-            ARRAY(SELECT unnest(rr.skills) INTERSECT SELECT unnest(c.primary_skills)),
-            1
-          ) DESC NULLS LAST
-          LIMIT 1
+          SELECT c.id, c."firstName", c."lastName", c.skills
+          FROM "Consultant" c
+          WHERE c.readiness IN ('SUBMISSION_READY', 'VERIFIED')
+            AND c."firstName" IS NOT NULL AND c."firstName" != ''
+          ORDER BY c."qualityScore" DESC NULLS LAST
+          LIMIT 5
         ) c
       )
       SELECT * FROM matched
@@ -206,19 +214,23 @@ export class CommandCenterService {
   }
 
   private async getDueFollowups() {
-    return this.prisma.$queryRaw`
-      SELECT sf.id, sf.submission_id as "submissionId",
-             sf.followup_number as "number",
-             sf.scheduled_at as "scheduledAt",
-             s."jobId", s."consultantId", s.status as "submissionStatus"
-      FROM submission_followup sf
-      JOIN "Submission" s ON s.id = sf.submission_id
-      WHERE sf.status = 'PENDING'
-        AND sf.scheduled_at <= NOW()
-        AND s.status IN ('SUBMITTED')
-      ORDER BY sf.scheduled_at ASC
-      LIMIT 30
-    ` as Promise<any[]>;
+    try {
+      return await this.prisma.$queryRaw`
+        SELECT sf.id, sf.submission_id as "submissionId",
+               sf.followup_number as "number",
+               sf.scheduled_at as "scheduledAt",
+               s."jobId", s."consultantId", s.status as "submissionStatus"
+        FROM submission_followup sf
+        JOIN "Submission" s ON s.id = sf.submission_id
+        WHERE sf.status = 'PENDING'
+          AND sf.scheduled_at <= NOW()
+          AND s.status IN ('SUBMITTED')
+        ORDER BY sf.scheduled_at ASC
+        LIMIT 30
+      ` as any[];
+    } catch {
+      return [];
+    }
   }
 
   private async getStuckSubmissions(tenantId: string) {
@@ -250,17 +262,69 @@ export class CommandCenterService {
 
   private async getVendorLeaderboard() {
     return this.prisma.$queryRaw`
-      SELECT vc.name as "vendorName", vc.domain,
-             vts.trust_score as "trustScore",
-             vts.req_count_30d as "reqs30d",
-             vts.has_rate_pct as "hasRatePct",
-             vts.actionability_tier as "tier"
-      FROM vendor_trust_score vts
-      JOIN vendor_company vc ON vc.id = vts.vendor_company_id
-      WHERE vts.trust_score >= 50
-      ORDER BY vts.trust_score DESC
+      SELECT v."companyName" as "vendorName", v.domain,
+             COALESCE(v."trustScore", 0) as "trustScore",
+             v.tier::text as "tier",
+             v."responseRate",
+             v."interviewGrantRate",
+             v."placementCount",
+             v."avgBillRateMin", v."avgBillRateMax"
+      FROM "Vendor" v
+      WHERE COALESCE(v."trustScore", 0) >= 40
+      ORDER BY v."trustScore" DESC NULLS LAST
       LIMIT 20
     ` as Promise<any[]>;
+  }
+
+  private async getLaneMetrics(tenantId: string) {
+    const autoSubmitByLane = await this.prisma.$queryRaw`
+      SELECT
+        COALESCE("sourcingLane"::text, 'UNASSIGNED') as lane,
+        COUNT(*)::int as total,
+        COUNT(*) FILTER (WHERE status = 'QUEUED')::int as queued,
+        COUNT(*) FILTER (WHERE status = 'SENT')::int as sent,
+        COUNT(*) FILTER (WHERE status = 'APPROVED')::int as approved,
+        ROUND(AVG("opportunityPriority")::numeric, 1) as "avgPriority",
+        ROUND(AVG("matchScore")::numeric, 1) as "avgMatchScore",
+        ROUND(AVG("premiumSkillBonus")::numeric, 1) as "avgPremiumBonus"
+      FROM "AutoSubmitQueueItem"
+      WHERE "tenantId" = ${tenantId}
+        AND "createdAt" >= CURRENT_DATE - interval '7 days'
+      GROUP BY "sourcingLane"
+      ORDER BY total DESC
+    ` as any[];
+
+    const vendorTierDist = await this.prisma.$queryRaw`
+      SELECT
+        tier::text as tier,
+        COUNT(*)::int as count,
+        ROUND(AVG("trustScore")::numeric, 1) as "avgTrust"
+      FROM "Vendor"
+      WHERE "trustScore" IS NOT NULL
+      GROUP BY tier
+      ORDER BY "avgTrust" DESC NULLS LAST
+    ` as any[];
+
+    const supplyByPod = await this.prisma.$queryRaw`
+      SELECT
+        readiness::text as readiness,
+        COUNT(*)::int as count
+      FROM "Consultant"
+      WHERE readiness IN ('SUBMISSION_READY', 'VERIFIED')
+      GROUP BY readiness
+    ` as any[];
+
+    return {
+      lanes: autoSubmitByLane,
+      vendorTiers: vendorTierDist,
+      availableSupply: supplyByPod,
+      strategy: {
+        PRIME_C2C: 'Prioritize: margin + speed. Trust >= 60, margin >= $10/hr. Fast follow-up.',
+        BROAD_C2C_W2: 'Volume play: strict dedupe, lower priority than Lane 1. Auto-deprioritize low-conversion vendors.',
+        FTE_HIGH_COMP: 'Premium vertical: comp-verified only, shortlist top candidates, human review for mega roles.',
+        OPT_JUNIOR_FTE: 'Early-career pipeline: separate scoring, compliance-aware, junior-friendly employers.',
+      },
+    };
   }
 
   private calculateDailyQuota(stats: any): number {
@@ -282,48 +346,91 @@ export class CommandCenterService {
   /* ═══════ Actionability Scoring for Req Signals ═══════ */
 
   async computeActionabilityScores() {
-    this.logger.log('Computing actionability scores in batches (chunk-safe for 7M+ rows)...');
+    this.logger.log('Computing actionability + premium skill scores...');
 
-    const BATCH_SIZE = 100000;
+    const BATCH_SIZE = 50000;
     let totalUpdated = 0;
     let batchNum = 0;
 
-    // Process in batches using ID ranges to avoid locking the entire table
     while (true) {
       batchNum++;
       const result = await this.prisma.$executeRaw`
-        UPDATE vendor_req_signal vrs SET
-          actionability_score = (
+        UPDATE "VendorReqSignal" vrs SET
+          "actionabilityScore" = (
             CASE WHEN title IS NOT NULL AND title != '' THEN 20 ELSE 0 END
-            + CASE WHEN vendor_contact_id IS NOT NULL THEN 20 ELSE 0 END
-            + CASE WHEN rate_text IS NOT NULL THEN 15 ELSE 0 END
+            + CASE WHEN "vendorContactId" IS NOT NULL THEN 20 ELSE 0 END
+            + CASE WHEN "rateText" IS NOT NULL THEN 15 ELSE 0 END
             + CASE WHEN location IS NOT NULL AND location != '' THEN 10 ELSE 0 END
             + CASE WHEN skills IS NOT NULL AND array_length(skills, 1) > 0 THEN 10 ELSE 0 END
-            + CASE WHEN employment_type IN ('C2C', 'W2', 'CONTRACT') THEN 10 ELSE 0 END
-            + CASE WHEN created_at >= NOW() - interval '3 days' THEN 10 ELSE 0 END
+            + CASE WHEN "employmentType" IN ('C2C', 'W2', 'CONTRACT') THEN 10 ELSE 0 END
+            + CASE WHEN "createdAt" >= NOW() - interval '3 days' THEN 10 ELSE 0 END
             + CASE WHEN EXISTS (
-                SELECT 1 FROM vendor_trust_score vts
-                WHERE vts.vendor_company_id = vrs.vendor_company_id
-                  AND vts.trust_score >= 60
+                SELECT 1 FROM "Vendor" v
+                WHERE v.domain = (SELECT evc.domain FROM "ExtractedVendorCompany" evc WHERE evc.id = vrs."vendorCompanyId")
+                  AND COALESCE(v."trustScore", 0) >= 60
               ) THEN 5 ELSE 0 END
             - CASE WHEN title ILIKE '%no third party%' OR title ILIKE '%no c2c%' OR title ILIKE '%w2 only%' THEN 30 ELSE 0 END
+            + CASE
+                WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
+                  ~* '(machine learning|deep learning|nlp|computer vision|pytorch|tensorflow|ai engineer|ml engineer|artificial intelligence|llm|large language model|generative ai|gen ai|langchain|rag|transformers)'
+                THEN 15
+                WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
+                  ~* '(mlops|ml ops|kubeflow|mlflow|sagemaker|vertex ai|model deployment|model serving|feature store|genai infra)'
+                THEN 13
+                WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
+                  ~* '(data engineer|spark|airflow|databricks|snowflake|dbt|kafka|data pipeline|etl|data lake|data warehouse)'
+                THEN 10
+                WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
+                  ~* '(devops|platform engineer|sre|site reliability|kubernetes|terraform|cicd|ci/cd|cloud architect|infrastructure as code)'
+                THEN 8
+                WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
+                  ~* '(cybersecurity|security engineer|penetration test|soc analyst|siem|zero trust|devsecops|cloud security)'
+                THEN 8
+                ELSE 0
+              END
           ),
-          engagement_model = CASE
+          "engagementModel" = CASE
             WHEN title ILIKE '%c2c%' OR title ILIKE '%corp to corp%' OR title ILIKE '%corp-to-corp%' THEN 'C2C'
             WHEN title ILIKE '%w2%' THEN 'W2'
             WHEN title ILIKE '%1099%' THEN '1099'
             WHEN title ILIKE '%full time%' OR title ILIKE '%fte%' OR title ILIKE '%permanent%' THEN 'FTE'
             ELSE 'UNKNOWN'
           END,
-          employment_nature = CASE
+          "employmentNature" = CASE
             WHEN title ILIKE '%contract to hire%' OR title ILIKE '%c2h%' OR title ILIKE '%contract-to-hire%' THEN 'C2H'
-            WHEN title ILIKE '%contract%' OR employment_type IN ('CONTRACT', 'C2C', 'W2', '1099') THEN 'CONTRACT'
+            WHEN title ILIKE '%contract%' OR "employmentType" IN ('CONTRACT', 'C2C', 'W2', '1099') THEN 'CONTRACT'
             WHEN title ILIKE '%perm%' OR title ILIKE '%full time%' OR title ILIKE '%fte%' THEN 'PERM'
             ELSE 'UNKNOWN'
+          END,
+          "premiumSkillFamily" = CASE
+            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
+              ~* '(machine learning|deep learning|nlp|pytorch|tensorflow|ai engineer|ml engineer|llm|generative ai|gen ai|langchain)' THEN 'AI_ML'
+            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
+              ~* '(mlops|ml ops|kubeflow|mlflow|sagemaker|vertex ai|model deployment|genai infra)' THEN 'MLOPS_GENAI'
+            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
+              ~* '(data engineer|spark|airflow|databricks|snowflake|dbt|kafka|data pipeline)' THEN 'DATA_ENGINEERING'
+            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
+              ~* '(devops|platform engineer|sre|kubernetes|terraform|cicd|cloud architect)' THEN 'CLOUD_DEVOPS'
+            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
+              ~* '(cybersecurity|security engineer|penetration test|soc analyst|siem|zero trust|devsecops)' THEN 'CYBERSECURITY'
+            ELSE NULL
+          END,
+          "premiumSkillBonus" = CASE
+            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
+              ~* '(machine learning|deep learning|nlp|pytorch|tensorflow|ai engineer|ml engineer|llm|generative ai|gen ai|langchain)' THEN 15
+            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
+              ~* '(mlops|ml ops|kubeflow|mlflow|sagemaker|vertex ai|model deployment|genai infra)' THEN 13
+            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
+              ~* '(data engineer|spark|airflow|databricks|snowflake|dbt|kafka|data pipeline)' THEN 10
+            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
+              ~* '(devops|platform engineer|sre|kubernetes|terraform|cicd|cloud architect)' THEN 8
+            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
+              ~* '(cybersecurity|security engineer|penetration test|soc analyst|siem|zero trust|devsecops)' THEN 8
+            ELSE 0
           END
         WHERE vrs.id IN (
-          SELECT id FROM vendor_req_signal
-          WHERE actionability_score IS NULL OR actionability_score = 0
+          SELECT id FROM "VendorReqSignal"
+          WHERE "actionabilityScore" IS NULL OR "actionabilityScore" = 0
           LIMIT ${BATCH_SIZE}
         )
       `;
@@ -336,25 +443,56 @@ export class CommandCenterService {
 
     this.logger.log(`Completed: scored ${totalUpdated} req signals total`);
 
+    // Also score VendorReq table (Prisma-managed vendor reqs with full fields)
+    const vendorReqUpdated = await this.prisma.$executeRaw`
+      UPDATE "VendorReq" SET
+        "actionabilityScore" = (
+          CASE WHEN title IS NOT NULL AND title != '' THEN 20 ELSE 0 END
+          + CASE WHEN "fromEmail" IS NOT NULL THEN 15 ELSE 0 END
+          + CASE WHEN "rateText" IS NOT NULL THEN 15 ELSE 0 END
+          + CASE WHEN location IS NOT NULL AND location != '' THEN 10 ELSE 0 END
+          + CASE WHEN skills IS NOT NULL AND skills::text != '[]' THEN 10 ELSE 0 END
+          + CASE WHEN "employmentType" IN ('C2C', 'W2', 'CONTRACT') THEN 10 ELSE 0 END
+          + CASE WHEN "createdAt" >= NOW() - interval '3 days' THEN 10 ELSE 0 END
+          - CASE WHEN title ILIKE '%no third party%' OR title ILIKE '%no c2c%' OR title ILIKE '%w2 only%' THEN 30 ELSE 0 END
+        )
+      WHERE "actionabilityScore" IS NULL
+    `;
+    this.logger.log(`Scored ${vendorReqUpdated} VendorReq rows`);
+
     const distribution = await this.prisma.$queryRaw`
       SELECT
-        COUNT(*) FILTER (WHERE actionability_score >= 80)::int as "highAction",
-        COUNT(*) FILTER (WHERE actionability_score >= 50 AND actionability_score < 80)::int as "mediumAction",
-        COUNT(*) FILTER (WHERE actionability_score >= 20 AND actionability_score < 50)::int as "lowAction",
-        COUNT(*) FILTER (WHERE actionability_score < 20)::int as "junk",
-        ROUND(AVG(actionability_score)::numeric, 1) as "avgScore"
-      FROM vendor_req_signal
-      WHERE actionability_score IS NOT NULL
+        COUNT(*) FILTER (WHERE "actionabilityScore" >= 80)::int as "highAction",
+        COUNT(*) FILTER (WHERE "actionabilityScore" >= 50 AND "actionabilityScore" < 80)::int as "mediumAction",
+        COUNT(*) FILTER (WHERE "actionabilityScore" >= 20 AND "actionabilityScore" < 50)::int as "lowAction",
+        COUNT(*) FILTER (WHERE "actionabilityScore" < 20)::int as "junk",
+        ROUND(AVG("actionabilityScore")::numeric, 1) as "avgScore"
+      FROM "VendorReqSignal"
+      WHERE "actionabilityScore" IS NOT NULL
     ` as any[];
 
-    const engagementBreakdown = await this.prisma.$queryRaw`
-      SELECT engagement_model as model, employment_nature as nature, COUNT(*)::int as count
-      FROM vendor_req_signal
-      WHERE engagement_model IS NOT NULL
-      GROUP BY engagement_model, employment_nature
+    const premiumBreakdown = await this.prisma.$queryRaw`
+      SELECT "premiumSkillFamily" as family, COUNT(*)::int as count,
+             ROUND(AVG("actionabilityScore")::numeric, 1) as "avgScore"
+      FROM "VendorReqSignal"
+      WHERE "premiumSkillFamily" IS NOT NULL
+      GROUP BY "premiumSkillFamily"
       ORDER BY count DESC
     ` as any[];
 
-    return { updated: totalUpdated, distribution: distribution[0], engagementBreakdown };
+    const engagementBreakdown = await this.prisma.$queryRaw`
+      SELECT "engagementModel" as model, "employmentNature" as nature, COUNT(*)::int as count
+      FROM "VendorReqSignal"
+      WHERE "engagementModel" IS NOT NULL
+      GROUP BY "engagementModel", "employmentNature"
+      ORDER BY count DESC
+    ` as any[];
+
+    return {
+      updated: totalUpdated + Number(vendorReqUpdated),
+      distribution: distribution[0],
+      premiumBreakdown,
+      engagementBreakdown,
+    };
   }
 }

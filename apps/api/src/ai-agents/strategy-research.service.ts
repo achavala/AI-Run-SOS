@@ -47,14 +47,14 @@ export class StrategyResearchService {
   private async getSystemMetrics() {
     const [result] = await this.prisma.$queryRaw`
       SELECT
-        (SELECT COUNT(*)::int FROM raw_email_message) as "totalEmails",
-        (SELECT COUNT(*)::int FROM vendor_req_signal) as "totalReqs",
-        (SELECT COUNT(*)::int FROM vendor_req_signal WHERE actionability_score >= 60) as "qualityReqs",
-        (SELECT COUNT(*)::int FROM consultant) as "totalConsultants",
-        (SELECT COUNT(*)::int FROM vendor_company WHERE name NOT LIKE '[SYSTEM]%') as "vendors",
-        (SELECT COUNT(*)::int FROM vendor_contact) as "vendorContacts",
-        (SELECT COUNT(*)::int FROM vendor_req_signal WHERE created_at >= NOW() - interval '7 days') as "reqsThisWeek",
-        (SELECT COUNT(*)::int FROM vendor_req_signal WHERE created_at >= NOW() - interval '1 day') as "reqsToday"
+        (SELECT COUNT(*)::int FROM "RawEmailMessage") as "totalEmails",
+        (SELECT COUNT(*)::int FROM "VendorReqSignal") as "totalReqs",
+        (SELECT COUNT(*)::int FROM "VendorReqSignal" WHERE "actionabilityScore" >= 60) as "qualityReqs",
+        (SELECT COUNT(*)::int FROM "Consultant") as "totalConsultants",
+        (SELECT COUNT(*)::int FROM "ExtractedVendorCompany" WHERE name NOT LIKE '[SYSTEM]%') as "vendors",
+        (SELECT COUNT(*)::int FROM "ExtractedVendorContact") as "vendorContacts",
+        (SELECT COUNT(*)::int FROM "VendorReqSignal" WHERE "createdAt" >= NOW() - interval '7 days') as "reqsThisWeek",
+        (SELECT COUNT(*)::int FROM "VendorReqSignal" WHERE "createdAt" >= NOW() - interval '1 day') as "reqsToday"
     ` as any[];
     return result;
   }
@@ -62,17 +62,17 @@ export class StrategyResearchService {
   private async getRecruiterProductivity() {
     return this.prisma.$queryRaw`
       SELECT
-        SPLIT_PART(mailbox_email, '@', 1) as "name",
-        COUNT(*) FILTER (WHERE category = 'VENDOR_REQ')::int as "reqs",
-        COUNT(*) FILTER (WHERE (subject ILIKE '%submit%') AND from_email = mailbox_email)::int as "subs",
+        SPLIT_PART("fromEmail", '@', 1) as "name",
+        COUNT(*) FILTER (WHERE "bodyText" ILIKE '%requirement%' OR subject ILIKE '%requirement%')::int as "reqs",
+        COUNT(*) FILTER (WHERE (subject ILIKE '%submit%') AND "fromEmail" = "fromEmail")::int as "subs",
         COUNT(*) FILTER (WHERE subject ILIKE '%interview%')::int as "interviews",
-        COUNT(*) FILTER (WHERE subject ILIKE 'Re:%' AND from_email = mailbox_email)::int as "replies",
+        COUNT(*) FILTER (WHERE subject ILIKE 'Re:%')::int as "replies",
         ROUND(
           COUNT(*) FILTER (WHERE subject ILIKE '%interview%')::numeric /
-          GREATEST(COUNT(*) FILTER (WHERE (subject ILIKE '%submit%') AND from_email = mailbox_email), 1) * 100, 1
+          GREATEST(COUNT(*) FILTER (WHERE (subject ILIKE '%submit%')), 1) * 100, 1
         ) as "interviewRate"
-      FROM raw_email_message
-      GROUP BY mailbox_email
+      FROM "RawEmailMessage"
+      GROUP BY "fromEmail"
       ORDER BY "subs" DESC
     ` as Promise<any[]>;
   }
@@ -81,18 +81,19 @@ export class StrategyResearchService {
     return this.prisma.$queryRaw`
       SELECT
         COUNT(*)::int as "totalVendors",
-        COUNT(*) FILTER (WHERE trust_score >= 70)::int as "highTrust",
-        COUNT(*) FILTER (WHERE trust_score >= 40 AND trust_score < 70)::int as "medTrust",
-        COUNT(*) FILTER (WHERE trust_score < 40)::int as "lowTrust",
-        ROUND(AVG(trust_score)::numeric, 1) as "avgTrust"
-      FROM vendor_trust_score
+        COUNT(*) FILTER (WHERE "trustScore" >= 70)::int as "highTrust",
+        COUNT(*) FILTER (WHERE "trustScore" >= 40 AND "trustScore" < 70)::int as "medTrust",
+        COUNT(*) FILTER (WHERE "trustScore" < 40)::int as "lowTrust",
+        ROUND(AVG("trustScore")::numeric, 1) as "avgTrust"
+      FROM "Vendor"
+      WHERE "trustScore" IS NOT NULL
     ` as Promise<any[]>;
   }
 
   private async getBenchComposition() {
     return this.prisma.$queryRaw`
       SELECT skill as "skill", COUNT(*)::int as "count"
-      FROM consultant, unnest(primary_skills) as skill
+      FROM "Consultant", jsonb_array_elements_text(skills) as skill
       GROUP BY skill
       HAVING COUNT(*) >= 3
       ORDER BY "count" DESC

@@ -24,12 +24,16 @@ import { VendorTrustModule } from './vendor-trust/vendor-trust.module';
 import { CommandCenterModule } from './command-center/command-center.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { AiAgentsModule } from './ai-agents/ai-agents.module';
+import { EmailModule } from './email/email.module';
+import { AutoSubmitModule } from './auto-submit/auto-submit.module';
+import { ResumeFormatterModule } from './resume-formatter/resume-formatter.module';
 import { AuditInterceptor } from './common/audit.interceptor';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    EmailModule,
     AuthModule,
     VendorsModule,
     ConsultantsModule,
@@ -51,6 +55,8 @@ import { AuditInterceptor } from './common/audit.interceptor';
     CommandCenterModule,
     AnalyticsModule,
     AiAgentsModule,
+    AutoSubmitModule,
+    ResumeFormatterModule,
   ],
   providers: [
     {

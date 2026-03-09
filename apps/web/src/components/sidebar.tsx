@@ -25,6 +25,7 @@ import {
   QueueListIcon,
   FireIcon,
   SignalIcon,
+  RocketLaunchIcon,
 } from '@heroicons/react/24/outline';
 import { useAuthStore, type UserRole } from '@/lib/auth';
 
@@ -38,6 +39,7 @@ const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
   MANAGEMENT: [
     { name: 'Command Center', href: '/dashboard/command-center', icon: HomeIcon },
     { name: 'Closure Engine', href: '/dashboard/closure-engine', icon: FireIcon },
+    { name: 'Auto-Submit', href: '/dashboard/auto-submit', icon: RocketLaunchIcon },
     { name: 'Work Queue', href: '/dashboard/work-queue', icon: QueueListIcon },
     { name: 'AI Agents', href: '/dashboard/ai-agents', icon: SparklesIcon },
     { name: 'Recruiter Analytics', href: '/dashboard/recruiter-analytics', icon: PresentationChartBarIcon },
@@ -55,6 +57,7 @@ const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
   SUPERADMIN: [
     { name: 'Command Center', href: '/dashboard/command-center', icon: HomeIcon },
     { name: 'Closure Engine', href: '/dashboard/closure-engine', icon: FireIcon },
+    { name: 'Auto-Submit', href: '/dashboard/auto-submit', icon: RocketLaunchIcon },
     { name: 'Work Queue', href: '/dashboard/work-queue', icon: QueueListIcon },
     { name: 'AI Agents', href: '/dashboard/ai-agents', icon: SparklesIcon },
     { name: 'Recruiter Analytics', href: '/dashboard/recruiter-analytics', icon: PresentationChartBarIcon },
@@ -72,6 +75,7 @@ const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
   RECRUITMENT: [
     { name: 'Dashboard', href: '/dashboard/recruitment', icon: HomeIcon },
     { name: 'Closure Engine', href: '/dashboard/closure-engine', icon: FireIcon },
+    { name: 'Auto-Submit', href: '/dashboard/auto-submit', icon: RocketLaunchIcon },
     { name: 'Work Queue', href: '/dashboard/work-queue', icon: QueueListIcon },
     { name: 'Live Feed', href: '/dashboard/live-feed', icon: SignalIcon },
     { name: 'Jobs', href: '/dashboard/jobs', icon: BriefcaseIcon },

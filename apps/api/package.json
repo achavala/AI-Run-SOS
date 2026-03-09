@@ -17,6 +17,7 @@
     "@nestjs/jwt": "^10",
     "@nestjs/passport": "^10",
     "@nestjs/platform-express": "^10",
+    "@nestjs/schedule": "^6.1.1",
     "@prisma/client": "^6",
     "@swc/cli": "^0.8.0",
     "@swc/core": "^1.15.11",

@@ -88,16 +88,16 @@ export class AiAgentsService {
   private async getTopTechDemand() {
     return this.prisma.$queryRaw`
       WITH sample AS (
-        SELECT skills, rate_text, employment_type, created_at
-        FROM vendor_req_signal
-        ORDER BY created_at DESC
+        SELECT skills, "rateText", "employmentType", "createdAt"
+        FROM "VendorReqSignal"
+        ORDER BY "createdAt" DESC
         LIMIT 50000
       )
       SELECT skill as "technology", COUNT(*)::int as "demand",
-             COUNT(*) FILTER (WHERE s.created_at >= NOW() - interval '3 days')::int as "demandLast7d",
-             COUNT(*) FILTER (WHERE s.rate_text IS NOT NULL)::int as "withRate",
+             COUNT(*) FILTER (WHERE s."createdAt" >= NOW() - interval '3 days')::int as "demandLast7d",
+             COUNT(*) FILTER (WHERE s."rateText" IS NOT NULL)::int as "withRate",
              ROUND(
-               COUNT(*) FILTER (WHERE s.employment_type IN ('C2C', 'W2', 'CONTRACT'))::numeric /
+               COUNT(*) FILTER (WHERE s."employmentType" IN ('C2C', 'W2', 'CONTRACT'))::numeric /
                GREATEST(COUNT(*), 1) * 100, 1
              ) as "contractPct"
       FROM sample s, unnest(s.skills) as skill
@@ -111,21 +111,21 @@ export class AiAgentsService {
   private async getBillRateAnalysis() {
     return this.prisma.$queryRaw`
       WITH sample AS (
-        SELECT rate_text FROM vendor_req_signal
-        WHERE rate_text IS NOT NULL
-        ORDER BY created_at DESC LIMIT 10000
+        SELECT "rateText" FROM "VendorReqSignal"
+        WHERE "rateText" IS NOT NULL
+        ORDER BY "createdAt" DESC LIMIT 10000
       )
       SELECT
         CASE
-          WHEN rate_text ~* '\$(\d+)' THEN
+          WHEN "rateText" ~* '\$(\d+)' THEN
             CASE
-              WHEN (regexp_match(rate_text, '\$(\d+)'))[1]::int < 30 THEN '$20-29/hr'
-              WHEN (regexp_match(rate_text, '\$(\d+)'))[1]::int < 40 THEN '$30-39/hr'
-              WHEN (regexp_match(rate_text, '\$(\d+)'))[1]::int < 50 THEN '$40-49/hr'
-              WHEN (regexp_match(rate_text, '\$(\d+)'))[1]::int < 60 THEN '$50-59/hr'
-              WHEN (regexp_match(rate_text, '\$(\d+)'))[1]::int < 70 THEN '$60-69/hr'
-              WHEN (regexp_match(rate_text, '\$(\d+)'))[1]::int < 80 THEN '$70-79/hr'
-              WHEN (regexp_match(rate_text, '\$(\d+)'))[1]::int < 100 THEN '$80-99/hr'
+              WHEN (regexp_match("rateText", '\$(\d+)'))[1]::int < 30 THEN '$20-29/hr'
+              WHEN (regexp_match("rateText", '\$(\d+)'))[1]::int < 40 THEN '$30-39/hr'
+              WHEN (regexp_match("rateText", '\$(\d+)'))[1]::int < 50 THEN '$40-49/hr'
+              WHEN (regexp_match("rateText", '\$(\d+)'))[1]::int < 60 THEN '$50-59/hr'
+              WHEN (regexp_match("rateText", '\$(\d+)'))[1]::int < 70 THEN '$60-69/hr'
+              WHEN (regexp_match("rateText", '\$(\d+)'))[1]::int < 80 THEN '$70-79/hr'
+              WHEN (regexp_match("rateText", '\$(\d+)'))[1]::int < 100 THEN '$80-99/hr'
               ELSE '$100+/hr'
             END
           ELSE 'Rate not parsed'
@@ -140,19 +140,19 @@ export class AiAgentsService {
   private async getTopVendorsByReqVolume() {
     return this.prisma.$queryRaw`
       WITH sample AS (
-        SELECT id, vendor_company_id, created_at FROM vendor_req_signal ORDER BY created_at DESC LIMIT 50000
+        SELECT id, "vendorCompanyId", "createdAt" FROM "VendorReqSignal" ORDER BY "createdAt" DESC LIMIT 50000
       )
       SELECT vc.name as "vendorName", vc.domain,
              COUNT(vrs.id)::int as "totalReqs",
-             COALESCE(vts.trust_score, 0) as "trustScore",
-             vts.actionability_tier as "tier",
+             COALESCE(v."trustScore", 0) as "trustScore",
+             v.tier as "tier",
              COUNT(DISTINCT vct.id)::int as "contactCount"
-      FROM vendor_company vc
-      JOIN sample vrs ON vrs.vendor_company_id = vc.id
-      LEFT JOIN vendor_trust_score vts ON vts.vendor_company_id = vc.id
-      LEFT JOIN vendor_contact vct ON vct.vendor_company_id = vc.id
+      FROM "ExtractedVendorCompany" vc
+      JOIN sample vrs ON vrs."vendorCompanyId" = vc.id
+      LEFT JOIN "Vendor" v ON v.domain = vc.domain
+      LEFT JOIN "ExtractedVendorContact" vct ON vct."vendorCompanyId" = vc.id
       WHERE vc.name NOT LIKE '[SYSTEM]%'
-      GROUP BY vc.id, vc.name, vc.domain, vts.trust_score, vts.actionability_tier
+      GROUP BY vc.id, vc.name, vc.domain, v."trustScore", v.tier
       ORDER BY "totalReqs" DESC
       LIMIT 30
     ` as Promise<any[]>;
@@ -161,10 +161,10 @@ export class AiAgentsService {
   private async getEmploymentTypeDistribution() {
     return this.prisma.$queryRaw`
       WITH sample AS (
-        SELECT engagement_model, employment_type FROM vendor_req_signal ORDER BY created_at DESC LIMIT 50000
+        SELECT "engagementModel", "employmentType" FROM "VendorReqSignal" ORDER BY "createdAt" DESC LIMIT 50000
       )
       SELECT
-        COALESCE(engagement_model, employment_type, 'UNKNOWN') as "type",
+        COALESCE("engagementModel", "employmentType", 'UNKNOWN') as "type",
         COUNT(*)::int as "count",
         ROUND(COUNT(*)::numeric / GREATEST(50000, 1) * 100, 1) as "pct"
       FROM sample
@@ -176,9 +176,9 @@ export class AiAgentsService {
   private async getLocationHotspots() {
     return this.prisma.$queryRaw`
       WITH sample AS (
-        SELECT location FROM vendor_req_signal
+        SELECT location FROM "VendorReqSignal"
         WHERE location IS NOT NULL AND location != '' AND length(location) > 2
-        ORDER BY created_at DESC LIMIT 50000
+        ORDER BY "createdAt" DESC LIMIT 50000
       )
       SELECT location as "location", COUNT(*)::int as "count"
       FROM sample
@@ -192,14 +192,14 @@ export class AiAgentsService {
   private async getWeeklyReqTrend() {
     return this.prisma.$queryRaw`
       WITH sample AS (
-        SELECT created_at, employment_type, actionability_score
-        FROM vendor_req_signal ORDER BY created_at DESC LIMIT 100000
+        SELECT "createdAt", "employmentType", "actionabilityScore"
+        FROM "VendorReqSignal" ORDER BY "createdAt" DESC LIMIT 100000
       )
       SELECT
-        date_trunc('week', created_at)::date as "week",
+        date_trunc('week', "createdAt")::date as "week",
         COUNT(*)::int as "totalReqs",
-        COUNT(*) FILTER (WHERE employment_type IN ('C2C', 'W2'))::int as "c2cW2Reqs",
-        COUNT(*) FILTER (WHERE actionability_score >= 60)::int as "qualityReqs"
+        COUNT(*) FILTER (WHERE "employmentType" IN ('C2C', 'W2'))::int as "c2cW2Reqs",
+        COUNT(*) FILTER (WHERE "actionabilityScore" >= 60)::int as "qualityReqs"
       FROM sample
       GROUP BY "week"
       ORDER BY "week" DESC
@@ -209,16 +209,16 @@ export class AiAgentsService {
   private async getVendorResponsePatterns() {
     return this.prisma.$queryRaw`
       WITH sample AS (
-        SELECT id, vendor_company_id FROM vendor_req_signal ORDER BY created_at DESC LIMIT 50000
+        SELECT id, "vendorCompanyId" FROM "VendorReqSignal" ORDER BY "createdAt" DESC LIMIT 50000
       )
       SELECT vc.name as "vendorName", vc.domain,
              COUNT(vrs.id)::int as "reqsSent",
-             COALESCE(vts.trust_score, 0) as "trustScore"
-      FROM vendor_company vc
-      JOIN sample vrs ON vrs.vendor_company_id = vc.id
-      LEFT JOIN vendor_trust_score vts ON vts.vendor_company_id = vc.id
+             COALESCE(v."trustScore", 0) as "trustScore"
+      FROM "ExtractedVendorCompany" vc
+      JOIN sample vrs ON vrs."vendorCompanyId" = vc.id
+      LEFT JOIN "Vendor" v ON v.domain = vc.domain
       WHERE vc.name NOT LIKE '[SYSTEM]%'
-      GROUP BY vc.id, vc.name, vc.domain, vts.trust_score
+      GROUP BY vc.id, vc.name, vc.domain, v."trustScore"
       HAVING COUNT(vrs.id) >= 5
       ORDER BY "reqsSent" DESC
       LIMIT 20
@@ -279,19 +279,19 @@ export class AiAgentsService {
     return this.prisma.$queryRaw`
       SELECT
         COUNT(*)::int as "totalConsultants",
-        COUNT(*) FILTER (WHERE primary_skills IS NOT NULL AND array_length(primary_skills, 1) > 0)::int as "withSkills",
+        COUNT(*) FILTER (WHERE skills IS NOT NULL AND jsonb_array_length(skills) > 0)::int as "withSkills",
         COUNT(*) FILTER (WHERE email IS NOT NULL AND email != '')::int as "withEmail",
         COUNT(*) FILTER (WHERE phone IS NOT NULL AND phone != '')::int as "withPhone",
-        COUNT(*) FILTER (WHERE last_seen >= NOW() - interval '30 days')::int as "activeLast30d",
-        COUNT(*) FILTER (WHERE last_seen >= NOW() - interval '7 days')::int as "activeLast7d"
-      FROM consultant
+        COUNT(*) FILTER (WHERE "updatedAt" >= NOW() - interval '30 days')::int as "activeLast30d",
+        COUNT(*) FILTER (WHERE "updatedAt" >= NOW() - interval '7 days')::int as "activeLast7d"
+      FROM "Consultant"
     ` as Promise<any[]>;
   }
 
   private async getSkillSupplyDemandGap() {
     return this.prisma.$queryRaw`
       WITH sample AS (
-        SELECT skills FROM vendor_req_signal ORDER BY created_at DESC LIMIT 50000
+        SELECT skills FROM "VendorReqSignal" ORDER BY "createdAt" DESC LIMIT 50000
       ),
       demand AS (
         SELECT skill, COUNT(*)::int as demand_count
@@ -300,7 +300,7 @@ export class AiAgentsService {
       ),
       supply AS (
         SELECT skill, COUNT(*)::int as supply_count
-        FROM consultant, unnest(primary_skills) as skill
+        FROM "Consultant", jsonb_array_elements_text(skills) as skill
         GROUP BY skill
       )
       SELECT
@@ -325,13 +325,13 @@ export class AiAgentsService {
     return this.prisma.$queryRaw`
       SELECT
         CASE
-          WHEN last_seen >= NOW() - interval '7 days' THEN 'ACTIVE_7D'
-          WHEN last_seen >= NOW() - interval '30 days' THEN 'ACTIVE_30D'
-          WHEN last_seen >= NOW() - interval '90 days' THEN 'DORMANT_90D'
+          WHEN "updatedAt" >= NOW() - interval '7 days' THEN 'ACTIVE_7D'
+          WHEN "updatedAt" >= NOW() - interval '30 days' THEN 'ACTIVE_30D'
+          WHEN "updatedAt" >= NOW() - interval '90 days' THEN 'DORMANT_90D'
           ELSE 'INACTIVE'
         END as "activityLevel",
         COUNT(*)::int as "count"
-      FROM consultant
+      FROM "Consultant"
       GROUP BY "activityLevel"
       ORDER BY "count" DESC
     ` as Promise<any[]>;
@@ -340,10 +340,10 @@ export class AiAgentsService {
   private async getTopConsultantSkillCombos() {
     return this.prisma.$queryRaw`
       SELECT
-        array_to_string(ARRAY(SELECT unnest(primary_skills) ORDER BY 1 LIMIT 3), ' + ') as "skillCombo",
+        (SELECT string_agg(el, ' + ' ORDER BY el) FROM (SELECT jsonb_array_elements_text(skills) el LIMIT 3) sub) as "skillCombo",
         COUNT(*)::int as "count"
-      FROM consultant
-      WHERE primary_skills IS NOT NULL AND array_length(primary_skills, 1) >= 2
+      FROM "Consultant"
+      WHERE skills IS NOT NULL AND jsonb_array_length(skills) >= 2
       GROUP BY "skillCombo"
       HAVING COUNT(*) >= 3
       ORDER BY "count" DESC
@@ -410,7 +410,7 @@ export class AiAgentsService {
   private async getHardToFillRoles() {
     return this.prisma.$queryRaw`
       WITH sample AS (
-        SELECT skills FROM vendor_req_signal ORDER BY created_at DESC LIMIT 50000
+        SELECT skills FROM "VendorReqSignal" ORDER BY "createdAt" DESC LIMIT 50000
       ),
       demand AS (
         SELECT skill, COUNT(*)::int as req_count
@@ -419,7 +419,7 @@ export class AiAgentsService {
       ),
       supply AS (
         SELECT skill, COUNT(*)::int as bench_count
-        FROM consultant, unnest(primary_skills) as skill
+        FROM "Consultant", jsonb_array_elements_text(skills) as skill
         GROUP BY skill
       )
       SELECT d.skill as "role",
@@ -443,13 +443,13 @@ export class AiAgentsService {
   private async getGeoDistribution() {
     return this.prisma.$queryRaw`
       WITH sample AS (
-        SELECT location, employment_type, rate_text FROM vendor_req_signal
+        SELECT location, "employmentType", "rateText" FROM "VendorReqSignal"
         WHERE location IS NOT NULL AND location != '' AND length(location) > 2
-        ORDER BY created_at DESC LIMIT 50000
+        ORDER BY "createdAt" DESC LIMIT 50000
       )
       SELECT location as "location", COUNT(*)::int as "count",
-             COUNT(*) FILTER (WHERE employment_type IN ('C2C', 'W2'))::int as "c2cW2",
-             COUNT(*) FILTER (WHERE rate_text IS NOT NULL)::int as "withRate"
+             COUNT(*) FILTER (WHERE "employmentType" IN ('C2C', 'W2'))::int as "c2cW2",
+             COUNT(*) FILTER (WHERE "rateText" IS NOT NULL)::int as "withRate"
       FROM sample
       GROUP BY location
       HAVING COUNT(*) >= 3
@@ -461,7 +461,7 @@ export class AiAgentsService {
   private async getRemoteVsOnsite() {
     return this.prisma.$queryRaw`
       WITH sample AS (
-        SELECT title, location FROM vendor_req_signal ORDER BY created_at DESC LIMIT 50000
+        SELECT title, location FROM "VendorReqSignal" ORDER BY "createdAt" DESC LIMIT 50000
       )
       SELECT
         CASE
@@ -480,21 +480,21 @@ export class AiAgentsService {
   private async getRateByTechnology() {
     return this.prisma.$queryRaw`
       WITH sample AS (
-        SELECT skills, rate_text FROM vendor_req_signal
-        WHERE rate_text IS NOT NULL
-        ORDER BY created_at DESC LIMIT 50000
+        SELECT skills, "rateText" FROM "VendorReqSignal"
+        WHERE "rateText" IS NOT NULL
+        ORDER BY "createdAt" DESC LIMIT 50000
       )
       SELECT
         skill as "technology",
         COUNT(*)::int as "totalReqs",
         COUNT(*)::int as "withRate",
         ROUND(AVG(
-          CASE WHEN rate_text ~ '\$(\d+)' THEN (regexp_match(rate_text, '\$(\d+)'))[1]::int ELSE NULL END
+          CASE WHEN "rateText" ~ '\$(\d+)' THEN (regexp_match("rateText", '\$(\d+)'))[1]::int ELSE NULL END
         )::numeric, 0) as "avgRate"
       FROM sample, unnest(skills) as skill
       GROUP BY skill
       HAVING COUNT(*) >= 3 AND AVG(
-        CASE WHEN rate_text ~ '\$(\d+)' THEN (regexp_match(rate_text, '\$(\d+)'))[1]::int ELSE NULL END
+        CASE WHEN "rateText" ~ '\$(\d+)' THEN (regexp_match("rateText", '\$(\d+)'))[1]::int ELSE NULL END
       ) IS NOT NULL
       ORDER BY "avgRate" DESC NULLS LAST
       LIMIT 25
@@ -506,14 +506,14 @@ export class AiAgentsService {
       SELECT f."freshness", f."count"
       FROM (
         WITH sample AS (
-          SELECT created_at FROM vendor_req_signal ORDER BY created_at DESC LIMIT 100000
+          SELECT "createdAt" FROM "VendorReqSignal" ORDER BY "createdAt" DESC LIMIT 100000
         )
         SELECT
           CASE
-            WHEN created_at >= NOW() - interval '1 day' THEN 'FRESH_24H'
-            WHEN created_at >= NOW() - interval '3 days' THEN 'RECENT_3D'
-            WHEN created_at >= NOW() - interval '7 days' THEN 'THIS_WEEK'
-            WHEN created_at >= NOW() - interval '30 days' THEN 'THIS_MONTH'
+            WHEN "createdAt" >= NOW() - interval '1 day' THEN 'FRESH_24H'
+            WHEN "createdAt" >= NOW() - interval '3 days' THEN 'RECENT_3D'
+            WHEN "createdAt" >= NOW() - interval '7 days' THEN 'THIS_WEEK'
+            WHEN "createdAt" >= NOW() - interval '30 days' THEN 'THIS_MONTH'
             ELSE 'OLDER'
           END as "freshness",
           COUNT(*)::int as "count"
@@ -589,15 +589,15 @@ export class AiAgentsService {
   private async getSystemHealth() {
     const [result] = await this.prisma.$queryRaw`
       SELECT
-        (SELECT reltuples::int FROM pg_class WHERE relname = 'raw_email_message') as "totalEmails",
-        (SELECT reltuples::int FROM pg_class WHERE relname = 'vendor_req_signal') as "totalReqs",
-        (SELECT (reltuples / 5)::int FROM pg_class WHERE relname = 'vendor_req_signal') as "qualityReqs",
-        (SELECT reltuples::int FROM pg_class WHERE relname = 'consultant') as "totalConsultants",
-        (SELECT COUNT(*)::int FROM vendor_company WHERE name NOT LIKE '[SYSTEM]%') as "activeVendors",
-        (SELECT COUNT(*)::int FROM vendor_trust_score WHERE trust_score >= 60) as "trustedVendors",
-        (SELECT reltuples::int FROM pg_class WHERE relname = 'vendor_req_signal') as "reqsToday",
-        (SELECT reltuples::int FROM pg_class WHERE relname = 'vendor_req_signal') as "reqsThisWeek",
-        (SELECT MAX(sent_at) FROM raw_email_message WHERE sent_at >= NOW() - interval '7 days') as "lastEmailSync"
+        (SELECT reltuples::int FROM pg_class WHERE relname = 'RawEmailMessage') as "totalEmails",
+        (SELECT reltuples::int FROM pg_class WHERE relname = 'VendorReqSignal') as "totalReqs",
+        (SELECT (reltuples / 5)::int FROM pg_class WHERE relname = 'VendorReqSignal') as "qualityReqs",
+        (SELECT reltuples::int FROM pg_class WHERE relname = 'Consultant') as "totalConsultants",
+        (SELECT COUNT(*)::int FROM "ExtractedVendorCompany" WHERE name NOT LIKE '[SYSTEM]%') as "activeVendors",
+        (SELECT COUNT(*)::int FROM "Vendor" WHERE "trustScore" >= 60) as "trustedVendors",
+        (SELECT reltuples::int FROM pg_class WHERE relname = 'VendorReqSignal') as "reqsToday",
+        (SELECT reltuples::int FROM pg_class WHERE relname = 'VendorReqSignal') as "reqsThisWeek",
+        (SELECT MAX("sentAt") FROM "RawEmailMessage" WHERE "sentAt" >= NOW() - interval '7 days') as "lastEmailSync"
     ` as any[];
     return result;
   }
@@ -618,34 +618,31 @@ export class AiAgentsService {
   private async getRecruiterEfficiency() {
     return this.cached('_recruiterEfficiency', () => this.prisma.$queryRaw`
       WITH sample AS (
-        SELECT mailbox_email, from_email, subject, category
-        FROM raw_email_message
-        ORDER BY sent_at DESC
+        SELECT "fromEmail", subject
+        FROM "RawEmailMessage"
+        ORDER BY "sentAt" DESC
         LIMIT 30000
       )
       SELECT
-        mailbox_email as "email",
-        SPLIT_PART(mailbox_email, '@', 1) as "name",
-        COUNT(*) FILTER (WHERE category = 'VENDOR_REQ')::int as "reqsReceived",
+        "fromEmail" as "email",
+        SPLIT_PART("fromEmail", '@', 1) as "name",
+        COUNT(*)::int as "reqsReceived",
         COUNT(*) FILTER (WHERE
-          from_email = mailbox_email
-          AND (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
+          (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
         )::int as "submissionsSent",
         COUNT(*) FILTER (WHERE subject ILIKE '%interview%')::int as "interviews",
-        COUNT(*) FILTER (WHERE subject ILIKE 'Re:%' AND from_email = mailbox_email)::int as "repliesSent",
+        COUNT(*) FILTER (WHERE subject ILIKE 'Re:%')::int as "repliesSent",
         CASE WHEN COUNT(*) FILTER (WHERE
-          from_email = mailbox_email
-          AND (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
+          (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
         ) > 0
           THEN ROUND(
             COUNT(*) FILTER (WHERE subject ILIKE '%interview%')::numeric /
             GREATEST(COUNT(*) FILTER (WHERE
-              from_email = mailbox_email
-              AND (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
+              (subject ILIKE 'Submission -%' OR subject ILIKE 'Submission –%' OR subject ILIKE '%submit%for%')
             )::numeric, 1) * 100, 1
           ) ELSE 0 END as "conversionRate"
       FROM sample
-      GROUP BY mailbox_email
+      GROUP BY "fromEmail"
       ORDER BY "submissionsSent" DESC
     ` as Promise<any[]>);
   }
@@ -675,8 +672,8 @@ export class AiAgentsService {
     return this.prisma.$queryRaw`
       SELECT skill as "skill",
              COUNT(*)::int as "benchCount"
-      FROM consultant, unnest(primary_skills) as skill
-      WHERE full_name IS NOT NULL AND full_name != ''
+      FROM "Consultant", jsonb_array_elements_text(skills) as skill
+      WHERE "firstName" IS NOT NULL AND "firstName" != ''
       GROUP BY skill
       HAVING COUNT(*) >= 3
       ORDER BY "benchCount" DESC

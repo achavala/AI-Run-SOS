@@ -100,23 +100,23 @@ export async function extractReqSignals(pool: Pool, incrementalOnly = false): Pr
 
   const client = await pool.connect();
   try {
-    const contactRows = await client.query("SELECT id, email FROM vendor_contact");
+    const contactRows = await client.query(`SELECT id, email FROM "ExtractedVendorContact"`);
     const contactMap = new Map<string, string>();
     for (const c of contactRows.rows) contactMap.set(c.email.toLowerCase(), c.id);
 
-    const companyRows = await client.query("SELECT id, domain FROM vendor_company");
+    const companyRows = await client.query(`SELECT id, domain FROM "ExtractedVendorCompany"`);
     const companyMap = new Map<string, string>();
     for (const c of companyRows.rows) companyMap.set(c.domain.toLowerCase(), c.id);
 
     const whereClause = incrementalOnly
-      ? "WHERE from_email IS NOT NULL AND created_at >= NOW() - interval '2 hours'"
-      : "WHERE from_email IS NOT NULL";
+      ? `WHERE "fromEmail" IS NOT NULL AND "createdAt" >= NOW() - interval '2 hours'`
+      : `WHERE "fromEmail" IS NOT NULL`;
 
     const result = await client.query(`
-      SELECT id, from_email, subject, body_preview, sent_at
-      FROM raw_email_message
+      SELECT id, "fromEmail", subject, "bodyText", "sentAt"
+      FROM "RawEmailMessage"
       ${whereClause}
-      ORDER BY sent_at DESC
+      ORDER BY "sentAt" DESC
     `);
 
     let detected = 0;
@@ -124,13 +124,13 @@ export async function extractReqSignals(pool: Pool, incrementalOnly = false): Pr
 
     for (const row of result.rows) {
       const subject = row.subject || "";
-      const body = row.body_preview || "";
+      const body = row.bodyText || "";
       const allText = `${subject} ${body}`;
 
       if (!isReqEmail(subject, body)) continue;
       detected++;
 
-      const senderEmail = row.from_email.toLowerCase().trim();
+      const senderEmail = row.fromEmail.toLowerCase().trim();
       const domain = senderEmail.split("@")[1];
 
       const companyId = domain ? companyMap.get(domain) || null : null;
@@ -143,8 +143,8 @@ export async function extractReqSignals(pool: Pool, incrementalOnly = false): Pr
       const skills = extractSkills(allText);
 
       await client.query(`
-        INSERT INTO vendor_req_signal
-          (vendor_company_id, vendor_contact_id, raw_email_id, title, location, rate_text, employment_type, skills)
+        INSERT INTO "VendorReqSignal"
+          ("vendorCompanyId", "vendorContactId", "rawEmailId", title, location, "rateText", "employmentType", skills)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       `, [companyId, contactId, row.id, title, location, rateText, employmentType, skills]);
 
@@ -154,17 +154,16 @@ export async function extractReqSignals(pool: Pool, incrementalOnly = false): Pr
     console.log(`  Req-like emails detected: ${detected}`);
     console.log(`  Req signals stored: ${inserted}`);
 
-    // Quick breakdown
     const typeBreakdown = await client.query(`
-      SELECT employment_type, COUNT(*) as cnt
-      FROM vendor_req_signal
-      WHERE employment_type IS NOT NULL
-      GROUP BY employment_type
+      SELECT "employmentType", COUNT(*) as cnt
+      FROM "VendorReqSignal"
+      WHERE "employmentType" IS NOT NULL
+      GROUP BY "employmentType"
       ORDER BY cnt DESC
     `);
     console.log("\n  Employment type breakdown:");
     for (const r of typeBreakdown.rows) {
-      console.log(`    ${r.employment_type}: ${r.cnt}`);
+      console.log(`    ${r.employmentType}: ${r.cnt}`);
     }
   } finally {
     client.release();

@@ -50,11 +50,13 @@ async function syncFolder(
 
       let pageInserts = 0;
       for (const msg of messages) {
+        const toAddrs: string[] = msg.toRecipients?.map((r: any) => r.emailAddress?.address).filter(Boolean) || [];
+        const toArrayLiteral = `{${toAddrs.join(",")}}`;
+
         const result = await client.query(
-          `INSERT INTO raw_email_message
-           (mailbox_email, graph_id, subject, from_email, from_name, to_emails, sent_at, body_preview, folder)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-           ON CONFLICT (mailbox_email, graph_id) DO NOTHING
+          `INSERT INTO "RawEmailMessage" ("pstBatch", "messageId", subject, "fromEmail", "fromName", "toEmails", "ccEmails", "sentAt", "bodyText", "sourcePath", processed)
+           SELECT $1,$2,$3,$4,$5,$6,$7::text[],$8,$9,$10, false
+           WHERE NOT EXISTS (SELECT 1 FROM "RawEmailMessage" WHERE "pstBatch" = $1 AND "messageId" = $2)
            RETURNING id`,
           [
             email,
@@ -62,7 +64,8 @@ async function syncFolder(
             msg.subject,
             msg.from?.emailAddress?.address,
             msg.from?.emailAddress?.name,
-            msg.toRecipients?.map((r: any) => r.emailAddress?.address) || [],
+            toArrayLiteral,
+            "{}",
             msg.receivedDateTime,
             msg.bodyPreview,
             folderName,
@@ -147,10 +150,16 @@ export async function syncMailbox(email: string): Promise<number> {
       }
     }
 
-    await client.query(
-      `UPDATE mailbox SET last_synced_at = NOW() WHERE email = $1`,
-      [email]
-    );
+    try {
+      await client.query(
+        `INSERT INTO "EmailSyncState" ("tenantId", mailbox, folder, "deltaToken", "lastSyncAt", "messagesTotal", "messagesNew")
+         VALUES ('default', $1, 'all', '', NOW(), 0, $2)
+         ON CONFLICT ("tenantId", mailbox, folder) DO UPDATE SET "lastSyncAt" = NOW(), "messagesNew" = $2`,
+        [email, total]
+      );
+    } catch (err) {
+      console.error(`  Failed to update EmailSyncState for ${email}:`, err);
+    }
   } finally {
     client.release();
   }

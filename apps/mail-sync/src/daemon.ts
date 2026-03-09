@@ -39,10 +39,20 @@ async function syncCycle() {
   console.log(`\n[${ts()}] ════ Delta Sync Cycle Started ════`);
 
   try {
-    const res = await pool.query("SELECT email FROM mailbox ORDER BY email");
-    const mailboxes: string[] = res.rows
-      .map((r) => r.email)
-      .filter((e: string) => !EXCLUDED.has(e));
+    let mailboxes: string[] = [];
+
+    try {
+      const res = await pool.query(`SELECT DISTINCT mailbox FROM "EmailSyncState" ORDER BY mailbox`);
+      mailboxes = res.rows.map((r: any) => r.mailbox).filter((e: string) => !EXCLUDED.has(e));
+    } catch {
+      // Fallback: get unique pstBatch values as mailbox identifiers
+      const res = await pool.query(`SELECT DISTINCT "pstBatch" as mailbox FROM "RawEmailMessage" WHERE "pstBatch" IS NOT NULL AND "pstBatch" != '' ORDER BY "pstBatch"`);
+      mailboxes = res.rows.map((r: any) => r.mailbox).filter((e: string) => !EXCLUDED.has(e));
+    }
+
+    if (mailboxes.length === 0 && process.env.GRAPH_MAILBOX) {
+      mailboxes = process.env.GRAPH_MAILBOX.split(",").map(e => e.trim()).filter(e => !EXCLUDED.has(e));
+    }
 
     let totalNew = 0;
 
