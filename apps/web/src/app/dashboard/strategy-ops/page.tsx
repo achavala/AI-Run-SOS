@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { KpiCard } from '@/components/kpi-card';
@@ -18,6 +18,11 @@ import {
   AcademicCapIcon,
   BoltIcon,
   SignalIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  MapPinIcon,
+  EnvelopeIcon,
+  ClockIcon,
 } from '@heroicons/react/24/outline';
 
 function ScoreBadge({ score, label }: { score: number | null; label?: string }) {
@@ -74,6 +79,11 @@ export default function StrategyOpsPage() {
   const [computingQuality, setComputingQuality] = useState(false);
   const [qualityResult, setQualityResult] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'lanes' | 'tech' | 'supply'>('overview');
+  const [expandedFamily, setExpandedFamily] = useState<string | null>(null);
+  const [familyReqs, setFamilyReqs] = useState<any[]>([]);
+  const [familyReqsLoading, setFamilyReqsLoading] = useState(false);
+  const [familyReqsPage, setFamilyReqsPage] = useState(1);
+  const [familyReqsPagination, setFamilyReqsPagination] = useState<any>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -96,6 +106,36 @@ export default function StrategyOpsPage() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  const loadFamilyReqs = useCallback(async (family: string | null, page = 1) => {
+    if (!family) {
+      setExpandedFamily(null);
+      setFamilyReqs([]);
+      setFamilyReqsPagination(null);
+      return;
+    }
+    setFamilyReqsLoading(true);
+    try {
+      const r = await api.get<any>(`/strategy-ops/reqs-by-family?family=${encodeURIComponent(family)}&page=${page}&pageSize=15`);
+      setFamilyReqs(r.data || []);
+      setFamilyReqsPagination(r.pagination || null);
+      setFamilyReqsPage(page);
+      setExpandedFamily(family);
+    } catch (err) {
+      console.error('Failed to load reqs for family:', err);
+    } finally {
+      setFamilyReqsLoading(false);
+    }
+  }, []);
+
+  const handleTierClick = (family: string | null) => {
+    if (expandedFamily === family) {
+      setExpandedFamily(null);
+      setFamilyReqs([]);
+    } else {
+      loadFamilyReqs(family || 'OTHER');
+    }
+  };
 
   const handleComputeQuality = async () => {
     setComputingQuality(true);
@@ -350,6 +390,7 @@ export default function StrategyOpsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50/50 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                    <th className="w-8 px-2 py-3" />
                     <th className="px-4 py-3">Rank</th>
                     <th className="px-4 py-3">Technology Family</th>
                     <th className="px-4 py-3">C2C Rate Range</th>
@@ -361,42 +402,174 @@ export default function StrategyOpsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {techTiers.map((t: any) => (
-                    <tr key={t.id} className="hover:bg-gray-50/50">
-                      <td className="px-4 py-3">
-                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">{t.rank}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-gray-900">{t.technologyFamily}</p>
-                        {t.premiumSkillFamily && <p className="text-xs text-gray-400">{t.premiumSkillFamily}</p>}
-                      </td>
-                      <td className="px-4 py-3 text-gray-700">
-                        {t.c2cBillRateMin && t.c2cBillRateMax
-                          ? `$${t.c2cBillRateMin}-$${t.c2cBillRateMax}/hr`
-                          : '—'}
-                      </td>
-                      <td className="px-4 py-3">
-                        {t.competitionLevel ? (
-                          <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
-                            t.competitionLevel === 'LOW' ? 'bg-green-100 text-green-800' :
-                            t.competitionLevel === 'MEDIUM' ? 'bg-yellow-100 text-yellow-800' :
-                            'bg-red-100 text-red-800'
-                          }`}>{t.competitionLevel}</span>
-                        ) : '—'}
-                      </td>
-                      <td className="px-4 py-3">
-                        {t.portfolioAllocationPct != null ? (
-                          <div className="w-20">
-                            <p className="text-xs font-medium text-gray-700">{t.portfolioAllocationPct}%</p>
-                            <ProgressBar value={t.portfolioAllocationPct} max={30} color="bg-indigo-500" />
-                          </div>
-                        ) : '—'}
-                      </td>
-                      <td className="px-4 py-3 font-medium text-gray-900">{t.liveMetrics?.totalReqs ?? 0}</td>
-                      <td className="px-4 py-3 text-gray-700">{t.liveMetrics?.weekReqs ?? 0}</td>
-                      <td className="px-4 py-3"><ScoreBadge score={t.liveMetrics?.avgActionability} /></td>
-                    </tr>
-                  ))}
+                  {techTiers.map((t: any) => {
+                    const isExpanded = expandedFamily === (t.premiumSkillFamily || 'OTHER');
+                    const hasReqs = (t.liveMetrics?.totalReqs ?? 0) > 0;
+                    return (
+                      <React.Fragment key={t.id}>
+                        <tr
+                          className={`transition-colors ${hasReqs ? 'cursor-pointer hover:bg-indigo-50/50' : 'hover:bg-gray-50/50'} ${isExpanded ? 'bg-indigo-50/30' : ''}`}
+                          onClick={() => hasReqs && handleTierClick(t.premiumSkillFamily)}
+                        >
+                          <td className="px-2 py-3 text-center">
+                            {hasReqs && (
+                              isExpanded
+                                ? <ChevronDownIcon className="mx-auto h-4 w-4 text-indigo-500" />
+                                : <ChevronRightIcon className="mx-auto h-4 w-4 text-gray-400" />
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">{t.rank}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <p className="font-medium text-gray-900">{t.technologyFamily}</p>
+                            {t.premiumSkillFamily && <p className="text-xs text-gray-400">{t.premiumSkillFamily}</p>}
+                          </td>
+                          <td className="px-4 py-3 text-gray-700">
+                            {t.c2cBillRateMin && t.c2cBillRateMax
+                              ? `$${t.c2cBillRateMin}-$${t.c2cBillRateMax}/hr`
+                              : '—'}
+                          </td>
+                          <td className="px-4 py-3">
+                            {t.competitionLevel ? (
+                              <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                                t.competitionLevel === 'LOW' ? 'bg-green-100 text-green-800' :
+                                t.competitionLevel === 'MEDIUM' ? 'bg-yellow-100 text-yellow-800' :
+                                'bg-red-100 text-red-800'
+                              }`}>{t.competitionLevel}</span>
+                            ) : '—'}
+                          </td>
+                          <td className="px-4 py-3">
+                            {t.portfolioAllocationPct != null ? (
+                              <div className="w-20">
+                                <p className="text-xs font-medium text-gray-700">{t.portfolioAllocationPct}%</p>
+                                <ProgressBar value={t.portfolioAllocationPct} max={30} color="bg-indigo-500" />
+                              </div>
+                            ) : '—'}
+                          </td>
+                          <td className="px-4 py-3">
+                            {hasReqs ? (
+                              <span className="font-medium text-indigo-600 underline decoration-indigo-300 underline-offset-2">{t.liveMetrics.totalReqs}</span>
+                            ) : (
+                              <span className="text-gray-400">0</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-gray-700">{t.liveMetrics?.weekReqs ?? 0}</td>
+                          <td className="px-4 py-3"><ScoreBadge score={t.liveMetrics?.avgActionability} /></td>
+                        </tr>
+
+                        {/* EXPANDED: Req signals for this family */}
+                        {isExpanded && (
+                          <tr>
+                            <td colSpan={9} className="bg-gray-50/70 px-4 py-0">
+                              <div className="py-4">
+                                {familyReqsLoading ? (
+                                  <div className="flex items-center justify-center py-6">
+                                    <ArrowPathIcon className="h-5 w-5 animate-spin text-indigo-400" />
+                                    <span className="ml-2 text-sm text-gray-500">Loading requirements...</span>
+                                  </div>
+                                ) : familyReqs.length === 0 ? (
+                                  <p className="py-4 text-center text-sm text-gray-400">No requirement signals found for this family.</p>
+                                ) : (
+                                  <>
+                                    <div className="mb-3 flex items-center justify-between">
+                                      <p className="text-xs font-medium text-gray-500">
+                                        Showing {familyReqs.length} of {familyReqsPagination?.total?.toLocaleString()} requirements
+                                        {familyReqsPagination?.totalPages > 1 && ` (page ${familyReqsPage} of ${familyReqsPagination.totalPages})`}
+                                      </p>
+                                      {familyReqsPagination?.totalPages > 1 && (
+                                        <div className="flex gap-1">
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); loadFamilyReqs(expandedFamily, familyReqsPage - 1); }}
+                                            disabled={familyReqsPage <= 1}
+                                            className="rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+                                          >
+                                            Prev
+                                          </button>
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); loadFamilyReqs(expandedFamily, familyReqsPage + 1); }}
+                                            disabled={familyReqsPage >= familyReqsPagination.totalPages}
+                                            className="rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+                                          >
+                                            Next
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="space-y-2">
+                                      {familyReqs.map((req: any) => (
+                                        <div key={req.id} className="rounded-lg border border-gray-200 bg-white p-3 transition-shadow hover:shadow-sm">
+                                          <div className="flex items-start justify-between gap-3">
+                                            <div className="min-w-0 flex-1">
+                                              <p className="truncate font-medium text-gray-900">{req.title}</p>
+                                              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                                                {req.vendorName && (
+                                                  <span className="flex items-center gap-1">
+                                                    <BuildingOfficeIcon className="h-3 w-3" />
+                                                    {req.vendorName}
+                                                  </span>
+                                                )}
+                                                {req.location && (
+                                                  <span className="flex items-center gap-1">
+                                                    <MapPinIcon className="h-3 w-3" />
+                                                    {req.location}
+                                                  </span>
+                                                )}
+                                                {req.rateText && (
+                                                  <span className="flex items-center gap-1">
+                                                    <CurrencyDollarIcon className="h-3 w-3" />
+                                                    {req.rateText}
+                                                  </span>
+                                                )}
+                                                {req.contactEmail && (
+                                                  <span className="flex items-center gap-1">
+                                                    <EnvelopeIcon className="h-3 w-3" />
+                                                    {req.contactEmail}
+                                                  </span>
+                                                )}
+                                                {req.createdAt && (
+                                                  <span className="flex items-center gap-1">
+                                                    <ClockIcon className="h-3 w-3" />
+                                                    {new Date(req.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                                  </span>
+                                                )}
+                                              </div>
+                                              {req.skills && req.skills.length > 0 && (
+                                                <div className="mt-1.5 flex flex-wrap gap-1">
+                                                  {(req.skills as string[]).slice(0, 8).map((sk: string, i: number) => (
+                                                    <span key={i} className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">{sk}</span>
+                                                  ))}
+                                                  {req.skills.length > 8 && <span className="text-xs text-gray-400">+{req.skills.length - 8} more</span>}
+                                                </div>
+                                              )}
+                                            </div>
+                                            <div className="flex shrink-0 flex-col items-end gap-1">
+                                              <ScoreBadge score={req.actionabilityScore} label={`${req.actionabilityScore || 0} act`} />
+                                              {req.engagementModel && req.engagementModel !== 'UNKNOWN' && (
+                                                <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                                                  req.engagementModel === 'C2C' ? 'bg-emerald-100 text-emerald-700' :
+                                                  req.engagementModel === 'W2' ? 'bg-blue-100 text-blue-700' :
+                                                  req.engagementModel === 'FTE' ? 'bg-purple-100 text-purple-700' :
+                                                  'bg-gray-100 text-gray-600'
+                                                }`}>{req.engagementModel}</span>
+                                              )}
+                                              {req.premiumSkillBonus > 0 && (
+                                                <span className="inline-flex rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">+{req.premiumSkillBonus} bonus</span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

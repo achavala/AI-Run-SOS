@@ -21,6 +21,19 @@ export class StrategyOpsController {
     return this.strategyOps.getTechTiers();
   }
 
+  @Get('reqs-by-family')
+  getReqsByFamily(
+    @Query('family') family: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.strategyOps.getReqsByFamily(
+      family,
+      page ? parseInt(page, 10) : 1,
+      pageSize ? parseInt(pageSize, 10) : 25,
+    );
+  }
+
   @Get('tech-tier-analytics')
   getTechTierAnalytics() {
     return this.strategyOps.getTechTierAnalytics();

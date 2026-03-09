@@ -482,6 +482,59 @@ export class StrategyOpsService {
    *  8. TECH TIER CRUD
    * ═══════════════════════════════════════════════════════════════ */
 
+  /* ═══════════════════════════════════════════════════════════════
+   *  9. REQ SIGNALS BY PREMIUM SKILL FAMILY
+   *  Drill-down: return actual req signals for a given tech tier.
+   * ═══════════════════════════════════════════════════════════════ */
+
+  async getReqsByFamily(family: string, page = 1, pageSize = 25) {
+    const offset = (page - 1) * pageSize;
+
+    const whereClause = family === 'OTHER' || family === 'null' || !family
+      ? `WHERE vrs."premiumSkillFamily" IS NULL AND vrs.title IS NOT NULL AND vrs.title != ''`
+      : `WHERE vrs."premiumSkillFamily" = '${family}' AND vrs.title IS NOT NULL AND vrs.title != ''`;
+
+    const [rows, countResult] = await Promise.all([
+      this.prisma.$queryRawUnsafe(`
+        SELECT
+          vrs.id::text,
+          vrs.title,
+          vrs.location,
+          vrs."rateText",
+          vrs."employmentType",
+          vrs.skills,
+          vrs."actionabilityScore",
+          vrs."premiumSkillFamily",
+          vrs."premiumSkillBonus",
+          vrs."engagementModel",
+          vrs."clientHint",
+          vrs."createdAt",
+          vc.name as "vendorName",
+          vc.domain as "vendorDomain",
+          vct.email as "contactEmail",
+          vct.name as "contactName"
+        FROM "VendorReqSignal" vrs
+        LEFT JOIN "ExtractedVendorCompany" vc ON vc.id = vrs."vendorCompanyId"
+        LEFT JOIN "ExtractedVendorContact" vct ON vct.id = vrs."vendorContactId"
+        ${whereClause}
+        ORDER BY vrs."actionabilityScore" DESC NULLS LAST, vrs."createdAt" DESC
+        LIMIT ${pageSize} OFFSET ${offset}
+      `) as Promise<any[]>,
+      this.prisma.$queryRawUnsafe(`
+        SELECT COUNT(*)::int as total
+        FROM "VendorReqSignal" vrs
+        ${whereClause}
+      `) as Promise<any[]>,
+    ]);
+
+    const total = countResult[0]?.total || 0;
+
+    return {
+      data: rows,
+      pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
+    };
+  }
+
   async getTechTiers() {
     return this.prisma.techTierConfig.findMany({ orderBy: { rank: 'asc' } });
   }
