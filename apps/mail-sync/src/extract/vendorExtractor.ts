@@ -62,25 +62,27 @@ export async function extractVendors(pool: Pool, incrementalOnly = false): Promi
       if (OWN_DOMAINS.has(domain)) { skippedOwn++; continue; }
 
       const companyResult = await client.query(`
-        INSERT INTO "ExtractedVendorCompany" (id, domain, name, "emailCount", "firstSeenAt", "lastSeenAt")
-        VALUES ($6, $1, $2, $3, $4, $5)
+        INSERT INTO "ExtractedVendorCompany" (id, domain, name, "emailCount", "firstSeenAt", "lastSeenAt", "createdAt", "updatedAt")
+        VALUES ($6, $1, $2, $3, $4, $5, NOW(), NOW())
         ON CONFLICT (domain) DO UPDATE SET
           "emailCount" = "ExtractedVendorCompany"."emailCount" + $3,
           "firstSeenAt" = LEAST("ExtractedVendorCompany"."firstSeenAt", $4),
-          "lastSeenAt" = GREATEST("ExtractedVendorCompany"."lastSeenAt", $5)
+          "lastSeenAt" = GREATEST("ExtractedVendorCompany"."lastSeenAt", $5),
+          "updatedAt" = NOW()
         RETURNING id
       `, [domain, guessCompanyName(domain), parseInt(row.cnt), row.first_seen, row.last_seen, cuid()]);
 
       const companyId = companyResult.rows[0].id;
 
       const contactResult = await client.query(`
-        INSERT INTO "ExtractedVendorContact" (id, "vendorCompanyId", name, email, "emailCount", "firstSeenAt", "lastSeenAt")
-        VALUES ($7, $1, $2, $3, $4, $5, $6)
+        INSERT INTO "ExtractedVendorContact" (id, "vendorCompanyId", name, email, "emailCount", "firstSeenAt", "lastSeenAt", "createdAt", "updatedAt")
+        VALUES ($7, $1, $2, $3, $4, $5, $6, NOW(), NOW())
         ON CONFLICT (email) DO UPDATE SET
           name = COALESCE(NULLIF($2, ''), "ExtractedVendorContact".name),
           "emailCount" = "ExtractedVendorContact"."emailCount" + $4,
           "firstSeenAt" = LEAST("ExtractedVendorContact"."firstSeenAt", $5),
-          "lastSeenAt" = GREATEST("ExtractedVendorContact"."lastSeenAt", $6)
+          "lastSeenAt" = GREATEST("ExtractedVendorContact"."lastSeenAt", $6),
+          "updatedAt" = NOW()
         RETURNING id
       `, [companyId, row.fromName || null, email, parseInt(row.cnt), row.first_seen, row.last_seen, cuid()]);
 

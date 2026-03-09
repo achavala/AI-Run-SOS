@@ -46,7 +46,7 @@ async function syncCycle() {
     try {
       const res = await pool.query(`SELECT DISTINCT mailbox FROM "EmailSyncState" ORDER BY mailbox`);
       for (const r of res.rows) {
-        if (r.mailbox && r.mailbox.includes("@")) mailboxSet.add(r.mailbox);
+        if (r.mailbox && r.mailbox.includes("@") && !r.mailbox.includes(",")) mailboxSet.add(r.mailbox);
       }
     } catch {}
 
