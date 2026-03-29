@@ -750,6 +750,242 @@ export class AiAgentsService {
     });
   }
 
+  async getDrilldownData(metric: string, tenantId: string, limit: number) {
+    const take = Math.min(limit || 50, 200);
+
+    switch (metric) {
+      case 'qualityReqs':
+        return {
+          title: 'Quality Requirements',
+          description: 'Active job requirements with high actionability scores from trusted vendors',
+          columns: ['Title', 'Location', 'Rate', 'Vendor', 'Employment', 'Posted'],
+          rows: await this.prisma.$queryRaw`
+            SELECT vrs.title, vrs.location, vrs."rateText" as rate, vc.name as vendor,
+                   vrs."employmentType" as employment, vrs."createdAt" as posted,
+                   COALESCE(vrs."actionabilityScore", 0) as score
+            FROM "VendorReqSignal" vrs
+            LEFT JOIN "ExtractedVendorCompany" vc ON vc.id = vrs."vendorCompanyId"
+            WHERE vrs.title IS NOT NULL AND length(vrs.title) > 10
+            ORDER BY vrs."createdAt" DESC
+            LIMIT ${take}
+          `,
+        };
+
+      case 'benchSize':
+        return {
+          title: 'Bench Consultants',
+          description: 'All consultants available on the bench with their skills and readiness',
+          columns: ['Name', 'Email', 'Skills', 'Readiness', 'Rate', 'Quality'],
+          rows: await this.prisma.consultant.findMany({
+            select: {
+              firstName: true, lastName: true, email: true, skills: true,
+              readiness: true, desiredRate: true, qualityScore: true,
+            },
+            orderBy: { qualityScore: 'desc' },
+            take,
+          }),
+        };
+
+      case 'trustedVendors':
+        return {
+          title: 'Trusted Vendors (Trust Score >= 60)',
+          description: 'Vendors with established trust scores based on response patterns',
+          columns: ['Company', 'Domain', 'Trust Score', 'Contact', 'Email'],
+          rows: await this.prisma.vendor.findMany({
+            where: { trustScore: { gte: 60 } },
+            select: {
+              companyName: true, domain: true, trustScore: true,
+              contactName: true, contactEmail: true,
+            },
+            orderBy: { trustScore: 'desc' },
+            take,
+          }),
+        };
+
+      case 'subsNeeded':
+      case 'submissions':
+        return {
+          title: 'Active Submissions',
+          description: 'All submissions in the pipeline with current status',
+          columns: ['Consultant', 'Job Title', 'Vendor', 'Status', 'Created', 'Sent'],
+          rows: await this.prisma.submission.findMany({
+            where: { tenantId },
+            select: {
+              id: true, status: true, createdAt: true, sentAt: true,
+              consultant: { select: { firstName: true, lastName: true } },
+              job: { select: { title: true, vendor: { select: { companyName: true } } } },
+            },
+            orderBy: { createdAt: 'desc' },
+            take,
+          }),
+        };
+
+      case 'pipeline':
+        return {
+          title: 'Submission Pipeline',
+          description: 'Submissions currently in Submitted, Interviewing, or Offered status',
+          columns: ['Consultant', 'Job Title', 'Vendor', 'Status', 'Sent At'],
+          rows: await this.prisma.submission.findMany({
+            where: { tenantId, status: { in: ['SUBMITTED', 'INTERVIEWING', 'OFFERED'] } },
+            select: {
+              id: true, status: true, sentAt: true,
+              consultant: { select: { firstName: true, lastName: true } },
+              job: { select: { title: true, vendor: { select: { companyName: true } } } },
+            },
+            orderBy: { sentAt: 'desc' },
+            take,
+          }),
+        };
+
+      case 'closeProbability':
+        return {
+          title: 'Closure Probability Details',
+          description: 'Submissions in Offered/Interviewing status that contribute to close probability',
+          columns: ['Consultant', 'Job Title', 'Vendor', 'Status', 'Created'],
+          rows: await this.prisma.submission.findMany({
+            where: { tenantId, status: { in: ['OFFERED', 'INTERVIEWING'] } },
+            select: {
+              id: true, status: true, createdAt: true,
+              consultant: { select: { firstName: true, lastName: true } },
+              job: { select: { title: true, vendor: { select: { companyName: true } } } },
+            },
+            orderBy: { status: 'asc' },
+            take,
+          }),
+        };
+
+      case 'replyFollowups':
+        return {
+          title: 'Pending Follow-ups',
+          description: 'Submissions needing follow-up replies',
+          columns: ['Consultant', 'Job Title', 'Vendor', 'Status', 'Sent At', 'Days Since'],
+          rows: await this.prisma.submission.findMany({
+            where: {
+              tenantId,
+              status: 'SUBMITTED',
+              sentAt: { not: null, lte: new Date(Date.now() - 4 * 3600_000) },
+            },
+            select: {
+              id: true, status: true, sentAt: true,
+              consultant: { select: { firstName: true, lastName: true } },
+              job: { select: { title: true, vendor: { select: { companyName: true } } } },
+            },
+            orderBy: { sentAt: 'asc' },
+            take,
+          }),
+        };
+
+      case 'newVendorOutreach':
+        return {
+          title: 'New Vendor Outreach Candidates',
+          description: 'Recently discovered vendors without established trust scores',
+          columns: ['Company', 'Domain', 'Contact Count', 'Req Count'],
+          rows: await this.prisma.$queryRaw`
+            SELECT vc.name as "companyName", vc.domain,
+              (SELECT COUNT(*)::int FROM "ExtractedVendorContact" vct WHERE vct."vendorCompanyId" = vc.id) as "contactCount",
+              (SELECT COUNT(*)::int FROM "VendorReqSignal" vrs WHERE vrs."vendorCompanyId" = vc.id) as "reqCount"
+            FROM "ExtractedVendorCompany" vc
+            LEFT JOIN "Vendor" v ON v.domain = vc.domain
+            WHERE (v."trustScore" IS NULL OR v."trustScore" < 30)
+              AND vc.name NOT LIKE '[SYSTEM]%'
+            ORDER BY (SELECT COUNT(*) FROM "VendorReqSignal" vrs WHERE vrs."vendorCompanyId" = vc.id) DESC
+            LIMIT ${take}
+          `,
+        };
+
+      case 'benchCallsScheduled':
+        return {
+          title: 'Consultants for Bench Calls',
+          description: 'Consultants needing status check or onboarding calls',
+          columns: ['Name', 'Email', 'Phone', 'Skills', 'Readiness', 'Last Update'],
+          rows: await this.prisma.consultant.findMany({
+            where: { readiness: { in: ['NEW', 'DOCS_PENDING', 'VERIFIED'] } },
+            select: {
+              firstName: true, lastName: true, email: true, phone: true,
+              skills: true, readiness: true, updatedAt: true,
+            },
+            orderBy: { updatedAt: 'asc' },
+            take,
+          }),
+        };
+
+      case 'interviews':
+        return {
+          title: 'Interviews',
+          description: 'Scheduled and completed interviews',
+          columns: ['Consultant', 'Job Title', 'Status', 'Scheduled At', 'Type'],
+          rows: await this.prisma.interview.findMany({
+            where: { tenantId },
+            select: {
+              id: true, status: true, scheduledAt: true, interviewType: true,
+              submission: {
+                select: {
+                  consultant: { select: { firstName: true, lastName: true } },
+                  job: { select: { title: true } },
+                },
+              },
+            },
+            orderBy: { scheduledAt: 'desc' },
+            take,
+          }),
+        };
+
+      case 'offers':
+        return {
+          title: 'Offers',
+          description: 'Extended, accepted, and pending offers',
+          columns: ['Consultant', 'Job Title', 'Vendor', 'Status', 'Bill Rate', 'Pay Rate'],
+          rows: await this.prisma.offer.findMany({
+            where: { tenantId },
+            select: {
+              id: true, status: true, billRate: true, payRate: true,
+              consultant: { select: { firstName: true, lastName: true } },
+              job: { select: { title: true } },
+              vendor: { select: { companyName: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+            take,
+          }),
+        };
+
+      case 'closures':
+        return {
+          title: 'Closures (Placements)',
+          description: 'Accepted offers and active placements',
+          columns: ['Consultant', 'Job Title', 'Start Date', 'Bill Rate', 'Status'],
+          rows: await this.prisma.placement.findMany({
+            where: { tenantId },
+            select: {
+              id: true, startDate: true, endDate: true, billRate: true, status: true,
+              consultant: { select: { firstName: true, lastName: true } },
+              job: { select: { title: true } },
+            },
+            orderBy: { startDate: 'desc' },
+            take,
+          }),
+        };
+
+      case 'newConsultantsOnboarded':
+        return {
+          title: 'Recently Onboarded Consultants',
+          description: 'Consultants added in the last 30 days',
+          columns: ['Name', 'Email', 'Skills', 'Readiness', 'Joined'],
+          rows: await this.prisma.consultant.findMany({
+            where: { createdAt: { gte: new Date(Date.now() - 30 * 86400_000) } },
+            select: {
+              firstName: true, lastName: true, email: true, skills: true,
+              readiness: true, createdAt: true,
+            },
+            orderBy: { createdAt: 'desc' },
+            take,
+          }),
+        };
+
+      default:
+        return { title: metric, description: 'No drill-down data available for this metric', columns: [], rows: [] };
+    }
+  }
+
   private generateCoachingPlan(recruiters: any[]): any {
     const plans: any[] = [];
 

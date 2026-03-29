@@ -253,6 +253,7 @@ model Consultant {
   desiredRate           Float?
   currentRate           Float?
   readiness             ConsultantReadiness @default(NEW)
+  benchStatus           BenchConsultantStatus @default(NEW)
   verificationStatus    VerificationStatus  @default(UNVERIFIED)
   verificationChecklist Json                @default("[]")
   consentPolicy         Json                @default("{}")
@@ -261,6 +262,7 @@ model Consultant {
 
   // ─── Candidate Quality Score ───────────────────────
   qualityScore          Float?
+  readinessScore        Float?
   resumeFreshnessAt     DateTime?
   rateRealism           Float?
   interviewCount        Int                 @default(0)
@@ -285,6 +287,9 @@ model Consultant {
   timesheets       Timesheet[]
   immigrationCases ImmigrationCase[]
   autoSubmitQueue  AutoSubmitQueueItem[]
+  aiRuns           ConsultantAiRun[]
+  documents        ConsultantDocument[]
+  activities       ConsultantActivity[]
 
   @@index([tenantId])
   @@index([tenantId, email])
@@ -1851,4 +1856,121 @@ model EmailAudit {
   @@index([tenantId])
   @@index([tenantId, toEmail])
   @@index([relatedEntityType, relatedEntityId])
+}
+
+// ─── Bench Consultant Status ────────────────────────────────────
+
+enum BenchConsultantStatus {
+  NEW
+  IN_PREPARATION
+  READY_TO_MARKET
+  NEEDS_INFO
+  MARKETED
+}
+
+// ─── AI Agent Step ──────────────────────────────────────────────
+
+enum AiAgentStep {
+  RESUME_PARSING
+  RESUME_PREP
+  TECH_PREP
+  COACHING
+  LINKEDIN_PREP
+  SALES_STRATEGY
+  JOB_SEARCH
+  GM_STRATEGIST
+}
+
+// ─── AI Run Status ──────────────────────────────────────────────
+
+enum AiRunStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  NEEDS_REVIEW
+}
+
+// ─── Consultant AI Pipeline Run ─────────────────────────────────
+
+model ConsultantAiRun {
+  id              String             @id @default(cuid())
+  tenantId        String
+  consultantId    String
+  status          AiRunStatus        @default(QUEUED)
+  currentStep     AiAgentStep?
+  stepsCompleted  Int                @default(0)
+  totalSteps      Int                @default(8)
+  readinessScore  Float?
+  errorMessage    String?            @db.Text
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  consultant Consultant @relation(fields: [consultantId], references: [id])
+  outputs    ConsultantAiOutput[]
+
+  @@index([tenantId, consultantId])
+  @@index([tenantId, status])
+}
+
+// ─── Consultant AI Output (per-step result) ─────────────────────
+
+model ConsultantAiOutput {
+  id           String       @id @default(cuid())
+  runId        String
+  step         AiAgentStep
+  status       AiRunStatus  @default(QUEUED)
+  input        Json         @default("{}")
+  output       Json         @default("{}")
+  htmlContent  String?      @db.Text
+  tokensUsed   Int?
+  durationMs   Int?
+  errorMessage String?      @db.Text
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  run ConsultantAiRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, step])
+  @@index([runId])
+}
+
+// ─── Consultant Document (uploaded files) ───────────────────────
+
+model ConsultantDocument {
+  id           String   @id @default(cuid())
+  tenantId     String
+  consultantId String
+  docType      String   // ORIGINAL_RESUME, AI_ENHANCED_RESUME, ATS_RESUME, COVER_LETTER, OTHER
+  fileName     String
+  fileUrl      String   @db.Text
+  mimeType     String?
+  fileSizeBytes Int?
+  createdAt    DateTime @default(now())
+
+  consultant Consultant @relation(fields: [consultantId], references: [id])
+
+  @@index([tenantId, consultantId])
+  @@index([tenantId, consultantId, docType])
+}
+
+// ─── Consultant Activity Timeline ───────────────────────────────
+
+model ConsultantActivity {
+  id           String   @id @default(cuid())
+  tenantId     String
+  consultantId String
+  activityType String   // AI_RUN_STARTED, AI_STEP_COMPLETED, STATUS_CHANGED, RESUME_UPLOADED, NOTE_ADDED, etc.
+  title        String
+  description  String?  @db.Text
+  metadata     Json     @default("{}")
+  createdBy    String?  // userId or 'system' or 'ai-agent'
+  createdAt    DateTime @default(now())
+
+  consultant Consultant @relation(fields: [consultantId], references: [id])
+
+  @@index([tenantId, consultantId])
+  @@index([tenantId, createdAt])
 }

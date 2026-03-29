@@ -30,6 +30,7 @@ import { AutoSubmitModule } from './auto-submit/auto-submit.module';
 import { ResumeFormatterModule } from './resume-formatter/resume-formatter.module';
 import { StrategyOpsModule } from './strategy-ops/strategy-ops.module';
 import { BenchSalesModule } from './bench-sales/bench-sales.module';
+import { BenchIntakeModule } from './bench-intake/bench-intake.module';
 import { JobMatchModule } from './job-match/job-match.module';
 import { AuditInterceptor } from './common/audit.interceptor';
 import { ErrorReporterService } from './common/error-reporter.service';
@@ -65,6 +66,7 @@ import { ErrorReporterService } from './common/error-reporter.service';
     ResumeFormatterModule,
     StrategyOpsModule,
     BenchSalesModule,
+    BenchIntakeModule,
     JobMatchModule,
   ],
   providers: [

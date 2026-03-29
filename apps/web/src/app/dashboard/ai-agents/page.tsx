@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import {
@@ -21,6 +21,7 @@ import {
   CurrencyDollarIcon,
   MapPinIcon,
   ClockIcon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline';
 
 function fmt(n: number | null | undefined): string {
@@ -56,7 +57,187 @@ function DifficultyBadge({ d }: { d: string }) {
   return <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${colors[d] || 'bg-gray-100 text-gray-600'}`}>{d}</span>;
 }
 
+/* ═══ Drill-Down Modal ═══ */
+
+function DrillDownModal({ metric, onClose }: { metric: string; onClose: () => void }) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setLoading(true);
+    setError('');
+    api.get(`/ai-agents/drilldown?metric=${encodeURIComponent(metric)}&limit=100`)
+      .then((res: any) => setData(res))
+      .catch((e: any) => setError(e.message || 'Failed to load'))
+      .finally(() => setLoading(false));
+  }, [metric]);
+
+  const renderCellValue = (val: any): string => {
+    if (val == null) return '—';
+    if (val instanceof Date || (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(val))) {
+      return new Date(val).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+    if (Array.isArray(val)) return val.slice(0, 5).join(', ') || '—';
+    if (typeof val === 'object') {
+      if (val.firstName) return `${val.firstName} ${val.lastName || ''}`.trim();
+      if (val.companyName) return val.companyName;
+      if (val.title) return val.title;
+      if (val.consultant) return renderCellValue(val.consultant);
+      if (val.job) return renderCellValue(val.job);
+      if (val.vendor) return renderCellValue(val.vendor);
+      return JSON.stringify(val).slice(0, 60);
+    }
+    return String(val);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm pt-16 px-4" onClick={onClose}>
+      <div className="w-full max-w-5xl max-h-[80vh] bg-white rounded-2xl shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b bg-gradient-to-r from-indigo-50 to-purple-50">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">{data?.title || metric}</h2>
+            <p className="text-xs text-gray-500">{data?.description || ''}</p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-gray-200 transition-colors">
+            <XMarkIcon className="h-5 w-5 text-gray-600" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="overflow-auto max-h-[65vh] px-6 py-4">
+          {loading && (
+            <div className="flex items-center justify-center py-20">
+              <ArrowPathIcon className="h-6 w-6 animate-spin text-indigo-500" />
+              <span className="ml-2 text-sm text-gray-500">Loading records...</span>
+            </div>
+          )}
+
+          {!loading && error && (
+            <div className="text-center py-12">
+              <ExclamationTriangleIcon className="h-8 w-8 text-amber-500 mx-auto" />
+              <p className="text-sm text-gray-600 mt-2">{error}</p>
+            </div>
+          )}
+
+          {!loading && !error && data?.rows && (
+            <>
+              <p className="text-xs text-gray-400 mb-3">{data.rows.length} records</p>
+              {data.rows.length === 0 ? (
+                <p className="text-sm text-gray-500 text-center py-12">No records found for this metric</p>
+              ) : (
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b bg-gray-50">
+                      <th className="px-3 py-2 text-left text-xs text-gray-500 font-medium">#</th>
+                      {Object.keys(data.rows[0]).filter(k => k !== 'id').map(key => (
+                        <th key={key} className="px-3 py-2 text-left text-xs text-gray-500 font-medium capitalize">
+                          {key.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').trim()}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.rows.map((row: any, idx: number) => (
+                      <tr key={row.id || idx} className="border-b border-gray-50 hover:bg-indigo-50/50 transition-colors">
+                        <td className="px-3 py-2 text-xs text-gray-400">{idx + 1}</td>
+                        {Object.entries(row).filter(([k]) => k !== 'id').map(([key, val]) => (
+                          <td key={key} className="px-3 py-2 text-xs text-gray-700 max-w-[200px] truncate">
+                            {key === 'status' ? (
+                              <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                                val === 'SUBMITTED' ? 'bg-blue-100 text-blue-800' :
+                                val === 'INTERVIEWING' ? 'bg-yellow-100 text-yellow-800' :
+                                val === 'OFFERED' ? 'bg-green-100 text-green-800' :
+                                val === 'ACCEPTED' ? 'bg-emerald-100 text-emerald-800' :
+                                val === 'REJECTED' ? 'bg-red-100 text-red-800' :
+                                val === 'SCHEDULED' ? 'bg-purple-100 text-purple-800' :
+                                val === 'SUBMISSION_READY' ? 'bg-green-100 text-green-800' :
+                                val === 'VERIFIED' ? 'bg-blue-100 text-blue-800' :
+                                'bg-gray-100 text-gray-600'
+                              }`}>{String(val)}</span>
+                            ) : key === 'trustScore' || key === 'score' || key === 'qualityScore' ? (
+                              <span className={`font-medium ${Number(val) >= 60 ? 'text-green-600' : Number(val) >= 30 ? 'text-yellow-600' : 'text-gray-500'}`}>
+                                {val != null ? Number(val).toFixed(0) : '—'}
+                              </span>
+                            ) : (
+                              renderCellValue(val)
+                            )}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ Clickable Metric Card ═══ */
+
+function MetricCard({ label, value, icon: Icon, color, metric }: {
+  label: string; value: any; icon: any; color: string; metric: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <div
+        onClick={() => setOpen(true)}
+        className="rounded-xl border bg-white p-4 text-center cursor-pointer hover:shadow-md hover:border-indigo-300 transition-all group"
+      >
+        <Icon className={`h-6 w-6 mx-auto ${color} group-hover:scale-110 transition-transform`} />
+        <p className="text-2xl font-bold text-gray-900 mt-2 group-hover:text-indigo-700 transition-colors">
+          {typeof value === 'number' ? fmt(value) : value}
+        </p>
+        <p className="text-xs text-gray-500">{label}</p>
+        <p className="text-[9px] text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity mt-1">Click to view details</p>
+      </div>
+      {open && <DrillDownModal metric={metric} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+/* ═══ Clickable Target Tile ═══ */
+
+function TargetTile({ label, value, bgClass, textClass, metric }: {
+  label: string; value: string; bgClass: string; textClass: string; metric: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <div
+        onClick={() => setOpen(true)}
+        className={`rounded-lg ${bgClass} p-3 text-center cursor-pointer hover:shadow-md hover:ring-2 hover:ring-indigo-300 transition-all group`}
+      >
+        <p className={`text-xl font-bold ${textClass} group-hover:scale-105 transition-transform`}>{value}</p>
+        <p className={`text-xs ${textClass} opacity-80 capitalize`}>{label}</p>
+        <p className="text-[9px] text-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity mt-0.5">Click to drill down</p>
+      </div>
+      {open && <DrillDownModal metric={metric} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
 type AgentId = 'sales' | 'recruiting' | 'jobSearch' | 'gm' | 'coach';
+
+const DAILY_TARGET_METRICS: Record<string, string> = {
+  submissions: 'submissions',
+  replyFollowups: 'replyFollowups',
+  newVendorOutreach: 'newVendorOutreach',
+  benchCallsScheduled: 'benchCallsScheduled',
+};
+
+const WEEKLY_TARGET_METRICS: Record<string, string> = {
+  interviews: 'interviews',
+  offers: 'offers',
+  closures: 'closures',
+  newConsultantsOnboarded: 'newConsultantsOnboarded',
+};
 
 export default function AiAgentsPage() {
   const [activeAgent, setActiveAgent] = useState<AgentId>('gm');
@@ -183,34 +364,49 @@ export default function AiAgentsPage() {
           {/* ═══ GM STRATEGIST ═══ */}
           {activeAgent === 'gm' && data.closurePlan && (
             <>
-              {/* Current State */}
+              {/* Current State — Clickable Metric Cards */}
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-                {[
-                  { label: 'Quality Reqs', value: data.closurePlan?.currentState?.qualityReqsAvailable, icon: FireIcon, color: 'text-orange-600' },
-                  { label: 'Bench Size', value: data.closurePlan?.currentState?.benchSize, icon: UserGroupIcon, color: 'text-blue-600' },
-                  { label: 'Trusted Vendors', value: data.closurePlan?.currentState?.trustedVendorCount, icon: ShieldCheckIcon, color: 'text-green-600' },
-                  { label: 'Subs Needed/Day', value: data.closurePlan?.dailyTargets?.submissions, icon: BoltIcon, color: 'text-indigo-600' },
-                  { label: 'Pipeline', value: `${data.closurePlan?.currentState?.currentPipeline?.submitted ?? 0}/${data.closurePlan?.currentState?.currentPipeline?.interviewing ?? 0}/${data.closurePlan?.currentState?.currentPipeline?.offered ?? 0}`, icon: ChartBarIcon, color: 'text-purple-600' },
-                  { label: 'Close Prob', value: data.closurePlan?.currentState?.currentPipeline?.closureProbability, icon: RocketLaunchIcon, color: 'text-emerald-600' },
-                ].map((m) => (
-                  <div key={m.label} className="rounded-xl border bg-white p-4 text-center">
-                    <m.icon className={`h-6 w-6 mx-auto ${m.color}`} />
-                    <p className="text-2xl font-bold text-gray-900 mt-2">{typeof m.value === 'number' ? fmt(m.value) : m.value}</p>
-                    <p className="text-xs text-gray-500">{m.label}</p>
-                  </div>
-                ))}
+                <MetricCard
+                  label="Quality Reqs" value={data.closurePlan?.currentState?.qualityReqsAvailable}
+                  icon={FireIcon} color="text-orange-600" metric="qualityReqs"
+                />
+                <MetricCard
+                  label="Bench Size" value={data.closurePlan?.currentState?.benchSize}
+                  icon={UserGroupIcon} color="text-blue-600" metric="benchSize"
+                />
+                <MetricCard
+                  label="Trusted Vendors" value={data.closurePlan?.currentState?.trustedVendorCount}
+                  icon={ShieldCheckIcon} color="text-green-600" metric="trustedVendors"
+                />
+                <MetricCard
+                  label="Subs Needed/Day" value={data.closurePlan?.dailyTargets?.submissions}
+                  icon={BoltIcon} color="text-indigo-600" metric="subsNeeded"
+                />
+                <MetricCard
+                  label="Pipeline"
+                  value={`${data.closurePlan?.currentState?.currentPipeline?.submitted ?? 0}/${data.closurePlan?.currentState?.currentPipeline?.interviewing ?? 0}/${data.closurePlan?.currentState?.currentPipeline?.offered ?? 0}`}
+                  icon={ChartBarIcon} color="text-purple-600" metric="pipeline"
+                />
+                <MetricCard
+                  label="Close Prob" value={data.closurePlan?.currentState?.currentPipeline?.closureProbability}
+                  icon={RocketLaunchIcon} color="text-emerald-600" metric="closeProbability"
+                />
               </div>
 
-              {/* Daily & Weekly Targets */}
+              {/* Daily & Weekly Targets — Clickable Tiles */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div className="rounded-xl border bg-white p-5">
                   <h3 className="text-base font-semibold mb-3 flex items-center gap-2"><BoltIcon className="h-5 w-5 text-amber-500" /> Daily Targets</h3>
                   <div className="grid grid-cols-2 gap-3">
                     {Object.entries(data.closurePlan?.dailyTargets || {}).map(([k, v]) => (
-                      <div key={k} className="rounded-lg bg-amber-50 p-3 text-center">
-                        <p className="text-xl font-bold text-amber-700">{String(v)}</p>
-                        <p className="text-xs text-amber-600 capitalize">{k.replace(/([A-Z])/g, ' $1')}</p>
-                      </div>
+                      <TargetTile
+                        key={k}
+                        label={k.replace(/([A-Z])/g, ' $1')}
+                        value={String(v)}
+                        bgClass="bg-amber-50"
+                        textClass="text-amber-700"
+                        metric={DAILY_TARGET_METRICS[k] || k}
+                      />
                     ))}
                   </div>
                 </div>
@@ -218,10 +414,14 @@ export default function AiAgentsPage() {
                   <h3 className="text-base font-semibold mb-3 flex items-center gap-2"><ClockIcon className="h-5 w-5 text-blue-500" /> Weekly Targets</h3>
                   <div className="grid grid-cols-2 gap-3">
                     {Object.entries(data.closurePlan?.weeklyTargets || {}).map(([k, v]) => (
-                      <div key={k} className="rounded-lg bg-blue-50 p-3 text-center">
-                        <p className="text-xl font-bold text-blue-700">{String(v)}</p>
-                        <p className="text-xs text-blue-600 capitalize">{k.replace(/([A-Z])/g, ' $1')}</p>
-                      </div>
+                      <TargetTile
+                        key={k}
+                        label={k.replace(/([A-Z])/g, ' $1')}
+                        value={String(v)}
+                        bgClass="bg-blue-50"
+                        textClass="text-blue-700"
+                        metric={WEEKLY_TARGET_METRICS[k] || k}
+                      />
                     ))}
                   </div>
                 </div>
@@ -292,7 +492,6 @@ export default function AiAgentsPage() {
           {/* ═══ SALES STRATEGIST ═══ */}
           {activeAgent === 'sales' && data.data && (
             <>
-              {/* Insights */}
               <div className="rounded-xl border bg-gradient-to-r from-emerald-50 to-green-50 p-5">
                 <h3 className="text-base font-semibold mb-3 flex items-center gap-2"><SparklesIcon className="h-5 w-5 text-emerald-600" /> Strategic Insights</h3>
                 <ul className="space-y-2">
@@ -304,7 +503,6 @@ export default function AiAgentsPage() {
                 </ul>
               </div>
 
-              {/* Top Tech Demand */}
               <div className="rounded-xl border bg-white p-5">
                 <h3 className="text-base font-semibold mb-3">Technology Demand (Market)</h3>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
@@ -318,7 +516,6 @@ export default function AiAgentsPage() {
                 </div>
               </div>
 
-              {/* Bill Rate Distribution */}
               <div className="rounded-xl border bg-white p-5">
                 <h3 className="text-base font-semibold mb-3">Bill Rate Distribution</h3>
                 <div className="space-y-2">
@@ -338,7 +535,6 @@ export default function AiAgentsPage() {
                 </div>
               </div>
 
-              {/* Top Vendors */}
               <div className="rounded-xl border bg-white p-5">
                 <h3 className="text-base font-semibold mb-3">Top Vendors by Req Volume</h3>
                 <div className="overflow-x-auto">
@@ -371,7 +567,6 @@ export default function AiAgentsPage() {
                 </div>
               </div>
 
-              {/* Location Hotspots */}
               <div className="rounded-xl border bg-white p-5">
                 <h3 className="text-base font-semibold mb-3 flex items-center gap-2"><MapPinIcon className="h-5 w-5 text-blue-500" /> Location Hotspots</h3>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
@@ -400,26 +595,21 @@ export default function AiAgentsPage() {
                 </ul>
               </div>
 
-              {/* Talent Pool */}
               {data.data.talentPool?.[0] && (
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
                   {[
-                    { label: 'Total Consultants', value: data.data.talentPool[0].totalConsultants },
-                    { label: 'With Skills', value: data.data.talentPool[0].withSkills },
-                    { label: 'With Email', value: data.data.talentPool[0].withEmail },
-                    { label: 'With Phone', value: data.data.talentPool[0].withPhone },
-                    { label: 'Active 30d', value: data.data.talentPool[0].activeLast30d },
-                    { label: 'Active 7d', value: data.data.talentPool[0].activeLast7d },
+                    { label: 'Total Consultants', value: data.data.talentPool[0].totalConsultants, metric: 'benchSize' },
+                    { label: 'With Skills', value: data.data.talentPool[0].withSkills, metric: 'benchSize' },
+                    { label: 'With Email', value: data.data.talentPool[0].withEmail, metric: 'benchSize' },
+                    { label: 'With Phone', value: data.data.talentPool[0].withPhone, metric: 'benchSize' },
+                    { label: 'Active 30d', value: data.data.talentPool[0].activeLast30d, metric: 'benchSize' },
+                    { label: 'Active 7d', value: data.data.talentPool[0].activeLast7d, metric: 'benchSize' },
                   ].map((m) => (
-                    <div key={m.label} className="rounded-xl border bg-white p-4 text-center">
-                      <p className="text-2xl font-bold text-purple-600">{fmt(m.value)}</p>
-                      <p className="text-xs text-gray-500">{m.label}</p>
-                    </div>
+                    <MetricCard key={m.label} label={m.label} value={m.value} icon={UserGroupIcon} color="text-purple-600" metric={m.metric} />
                   ))}
                 </div>
               )}
 
-              {/* Supply/Demand Gap */}
               <div className="rounded-xl border bg-white p-5">
                 <h3 className="text-base font-semibold mb-3">Skill Supply vs Demand Gap</h3>
                 <div className="overflow-x-auto">
@@ -466,7 +656,6 @@ export default function AiAgentsPage() {
                 </ul>
               </div>
 
-              {/* Hard-to-fill Roles */}
               <div className="rounded-xl border bg-white p-5">
                 <h3 className="text-base font-semibold mb-3">Hard-to-Fill Roles (30 Days)</h3>
                 <div className="overflow-x-auto">
@@ -495,7 +684,6 @@ export default function AiAgentsPage() {
                 </div>
               </div>
 
-              {/* Rate by Technology */}
               <div className="rounded-xl border bg-white p-5">
                 <h3 className="text-base font-semibold mb-3">Average Rate by Technology</h3>
                 <div className="space-y-2">
@@ -512,7 +700,6 @@ export default function AiAgentsPage() {
                 </div>
               </div>
 
-              {/* Freshness */}
               <div className="rounded-xl border bg-white p-5">
                 <h3 className="text-base font-semibold mb-3">Req Freshness Distribution</h3>
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -530,7 +717,6 @@ export default function AiAgentsPage() {
           {/* ═══ MANAGERIAL COACH ═══ */}
           {activeAgent === 'coach' && data.coaching && (
             <>
-              {/* Team Actions */}
               <div className="rounded-xl border bg-gradient-to-r from-amber-50 to-orange-50 p-5">
                 <h3 className="text-base font-semibold mb-3 flex items-center gap-2"><AcademicCapIcon className="h-5 w-5 text-amber-600" /> Team Improvement Actions</h3>
                 <ul className="space-y-2">
@@ -543,7 +729,6 @@ export default function AiAgentsPage() {
                 </ul>
               </div>
 
-              {/* Individual Coaching Plans */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {data.coaching.individual?.map((r: any) => (
                   <div key={r.email} className="rounded-xl border bg-white p-5 shadow-sm">
@@ -555,14 +740,12 @@ export default function AiAgentsPage() {
                       <GradeBadge grade={r.grade} />
                     </div>
 
-                    {/* Metrics */}
                     <div className="grid grid-cols-3 gap-2 text-center mb-4">
                       <div className="rounded-lg bg-gray-50 p-2"><p className="text-lg font-bold">{fmt(r.metrics?.reqsReceived)}</p><p className="text-[10px] text-gray-500">Reqs</p></div>
                       <div className="rounded-lg bg-gray-50 p-2"><p className="text-lg font-bold">{fmt(r.metrics?.submissionsSent)}</p><p className="text-[10px] text-gray-500">Submissions</p></div>
                       <div className="rounded-lg bg-gray-50 p-2"><p className="text-lg font-bold">{fmt(r.metrics?.interviews)}</p><p className="text-[10px] text-gray-500">Interviews</p></div>
                     </div>
 
-                    {/* Strengths */}
                     {r.strengths?.length > 0 && (
                       <div className="mb-3">
                         <h4 className="text-xs font-medium text-green-700 mb-1">Strengths</h4>
@@ -574,7 +757,6 @@ export default function AiAgentsPage() {
                       </div>
                     )}
 
-                    {/* Areas for Improvement */}
                     {r.improvements?.length > 0 && (
                       <div className="mb-3">
                         <h4 className="text-xs font-medium text-amber-700 mb-1">Areas for Improvement</h4>
@@ -586,7 +768,6 @@ export default function AiAgentsPage() {
                       </div>
                     )}
 
-                    {/* Action Items */}
                     {r.actions?.length > 0 && (
                       <div>
                         <h4 className="text-xs font-medium text-indigo-700 mb-1">Action Items</h4>

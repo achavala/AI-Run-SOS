@@ -1,4 +1,4 @@
-import { Controller, Get, Headers } from '@nestjs/common';
+import { Controller, Get, Query, Headers, BadRequestException } from '@nestjs/common';
 import { AiAgentsService } from './ai-agents.service';
 import { StrategyResearchService } from './strategy-research.service';
 
@@ -37,5 +37,19 @@ export class AiAgentsController {
   @Get('strategy-research')
   getStrategyResearch() {
     return this.strategy.getCloudResourcesStrategy();
+  }
+
+  @Get('drilldown')
+  async getDrilldown(
+    @Query('metric') metric: string,
+    @Headers('x-tenant-id') tenantId: string,
+    @Query('limit') limit?: string,
+  ) {
+    if (!metric) throw new BadRequestException('metric query param required');
+    return this.svc.getDrilldownData(
+      metric,
+      tenantId || '00000000-0000-0000-0000-000000000000',
+      limit ? parseInt(limit, 10) : 50,
+    );
   }
 }

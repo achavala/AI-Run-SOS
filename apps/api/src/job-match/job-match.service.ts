@@ -2353,34 +2353,44 @@ export class JobMatchService {
 
   /* ═══════════════════════════════════════════════════════════════
    *  GENERATE BASELINE RESUMES FOR ALL CONSULTANTS
-   *  Replaces fake s3:// seed URLs with real HTML resume content
-   *  stored as data:text/html;base64,... in ResumeVersion.fileUrl
+   *  Handles: (1) replacing fake s3:// seed URLs, (2) updating
+   *  existing baseline-generated resumes, (3) creating new
+   *  ResumeVersion for consultants with no resume at all.
    * ═══════════════════════════════════════════════════════════════ */
 
   async generateBaselineResumes(tenantId: string) {
     this.logger.log(`generateBaselineResumes: tenantId=${tenantId}`);
 
-    // Find all consultants who have s3:// resume URLs (seed data)
+    // Find ALL consultants in this tenant
     const consultants = await this.prisma.consultant.findMany({
-      where: {
-        tenantId,
-        resumeVersions: { some: { fileUrl: { startsWith: 's3://' } } },
-      },
+      where: { tenantId },
       include: {
         workAuths: { where: { isCurrent: true } },
-        resumeVersions: {
-          where: { fileUrl: { startsWith: 's3://' } },
-          orderBy: { createdAt: 'desc' },
-        },
+        resumeVersions: { orderBy: { createdAt: 'desc' } },
       },
     });
 
-    this.logger.log(`Found ${consultants.length} consultants with seed resume URLs`);
+    this.logger.log(`Found ${consultants.length} total consultants`);
 
     const results: { consultantId: string; name: string; status: string }[] = [];
 
     for (const c of consultants) {
       try {
+        // Skip consultants that already have a real uploaded resume (not s3:// or baseline-generated)
+        const hasRealResume = c.resumeVersions.some(
+          (rv) =>
+            rv.fileUrl.startsWith('data:') &&
+            rv.source !== 'baseline-generated',
+        );
+        if (hasRealResume) {
+          results.push({
+            consultantId: c.id,
+            name: `${c.firstName} ${c.lastName}`,
+            status: 'skipped-has-real-resume',
+          });
+          continue;
+        }
+
         const skills = Array.isArray(c.skills) ? (c.skills as string[]) : [];
         const performanceHistory = Array.isArray(c.performanceHistory)
           ? (c.performanceHistory as any[])
@@ -2406,24 +2416,42 @@ export class JobMatchService {
           template,
         );
 
-        // Convert HTML to data URI
         const base64 = Buffer.from(html, 'utf-8').toString('base64');
         const dataUri = `data:text/html;base64,${base64}`;
         const fileHash = crypto.createHash('sha256').update(html).digest('hex').slice(0, 16);
 
-        // Update all s3:// ResumeVersions for this consultant
-        for (const rv of c.resumeVersions) {
-          await this.prisma.resumeVersion.update({
-            where: { id: rv.id },
+        // Find existing seed or baseline-generated resume versions
+        const seedOrBaseline = c.resumeVersions.filter(
+          (rv) => rv.fileUrl.startsWith('s3://') || rv.source === 'baseline-generated',
+        );
+
+        if (seedOrBaseline.length > 0) {
+          // Update existing seed/baseline resumes
+          for (const rv of seedOrBaseline) {
+            await this.prisma.resumeVersion.update({
+              where: { id: rv.id },
+              data: {
+                fileUrl: dataUri,
+                fileHash: `sha256:${fileHash}`,
+                source: 'baseline-generated',
+              },
+            });
+          }
+        } else {
+          // No resume at all — create a new ResumeVersion
+          await this.prisma.resumeVersion.create({
             data: {
+              tenantId,
+              consultantId: c.id,
+              version: 'v1.0',
               fileUrl: dataUri,
               fileHash: `sha256:${fileHash}`,
               source: 'baseline-generated',
+              isCurrent: true,
             },
           });
         }
 
-        // Update resumeFreshnessAt on consultant
         await this.prisma.consultant.update({
           where: { id: c.id },
           data: { resumeFreshnessAt: new Date() },
@@ -2432,22 +2460,24 @@ export class JobMatchService {
         results.push({
           consultantId: c.id,
           name: `${c.firstName} ${c.lastName}`,
-          status: 'generated',
+          status: seedOrBaseline.length > 0 ? 'updated' : 'created',
         });
-        this.logger.log(`Baseline resume generated for ${c.firstName} ${c.lastName}`);
+        this.logger.log(`Baseline resume ${seedOrBaseline.length > 0 ? 'updated' : 'created'} for ${c.firstName} ${c.lastName}`);
       } catch (err: any) {
         results.push({
           consultantId: c.id,
           name: `${c.firstName} ${c.lastName}`,
           status: `error: ${err.message}`,
         });
-        this.logger.error(`Failed to generate baseline resume for ${c.firstName} ${c.lastName}: ${err.message}`);
+        this.logger.error(`Failed baseline resume for ${c.firstName} ${c.lastName}: ${err.message}`);
       }
     }
 
     return {
       total: consultants.length,
-      generated: results.filter((r) => r.status === 'generated').length,
+      updated: results.filter((r) => r.status === 'updated').length,
+      created: results.filter((r) => r.status === 'created').length,
+      skipped: results.filter((r) => r.status.startsWith('skipped')).length,
       errors: results.filter((r) => r.status.startsWith('error')).length,
       details: results,
     };
@@ -2468,10 +2498,68 @@ export class JobMatchService {
     },
     template: { headerColor: string; sections: string[] },
   ): string {
-    const skillsHtml = data.skills
-      .map((s) => `<span class="skill-tag">${this.escapeHtml(s)}</span>`)
-      .join('');
+    // ── Professional Summary ─────────────────────────────────
+    const podLabels: Record<string, string> = {
+      SWE: 'Software Engineering',
+      CLOUD_DEVOPS: 'Cloud & DevOps',
+      DATA: 'Data Engineering & Analytics',
+      CYBER: 'Cybersecurity',
+    };
+    const primaryPod = data.pods[0] ?? '';
+    const podLabel = podLabels[primaryPod] ?? 'Technology';
+    const topSkills = data.skills.slice(0, 3).join(', ');
+    const authLabel = data.workAuth?.type
+      ? ` Authorized to work in the United States (${data.workAuth.type}).`
+      : '';
 
+    const summary = data.skills.length > 0
+      ? `${podLabel} professional with hands-on expertise in ${topSkills}${data.skills.length > 3 ? ` and ${data.skills.length - 3} additional technologies` : ''}. Proven track record in delivering enterprise-grade solutions.${authLabel}`
+      : `Technology professional available for new opportunities.${authLabel}`;
+
+    // ── Categorize skills into groups ────────────────────────
+    const skillCategories: { label: string; skills: string[] }[] = [];
+    const categorized = new Set<string>();
+
+    const categoryDefs: [string, string[]][] = [
+      ['Programming Languages', ['java', 'python', 'go', 'c#', 'c++', 'ruby', 'rust', 'scala', 'kotlin', 'swift', 'typescript', 'javascript', 'php']],
+      ['Frameworks & Libraries', ['spring boot', 'spring', 'react', 'angular', 'vue', 'next.js', 'django', 'flask', 'fastapi', 'express', 'node.js', 'nestjs', '.net', 'asp.net', 'rxjs', 'tailwindcss', 'graphql']],
+      ['Cloud & Infrastructure', ['aws', 'azure', 'gcp', 'google cloud', 'docker', 'kubernetes', 'terraform', 'ansible', 'linux', 'helm', 'eks', 'aws eks', 'fargate', 'lambda', 'serverless']],
+      ['Data & Databases', ['postgresql', 'postgres', 'mysql', 'mongodb', 'redis', 'snowflake', 'spark', 'kafka', 'airflow', 'dbt', 'redshift', 'dynamodb', 'elasticsearch', 'sql', 'tableau', 'looker', 'power bi', 'excel', 'aws glue', 'databricks']],
+      ['DevOps & CI/CD', ['ci/cd', 'jenkins', 'gitlab', 'github actions', 'circleci', 'aws codepipeline', 'bash', 'prometheus', 'grafana', 'datadog', 'splunk', 'new relic']],
+      ['AI & Machine Learning', ['machine learning', 'tensorflow', 'pytorch', 'aws sagemaker', 'sagemaker', 'nlp', 'deep learning', 'computer vision', 'llm', 'langchain', 'openai']],
+      ['Security', ['penetration testing', 'soc', 'siem', 'incident response', 'comptia', 'iam', 'cloud security', 'aws security hub', 'okta', 'cyberark']],
+    ];
+
+    for (const [label, keywords] of categoryDefs) {
+      const matched = data.skills.filter((s) => {
+        if (categorized.has(s)) return false; // already placed in a category
+        const sl = s.toLowerCase();
+        return keywords.some((kw) => sl === kw || (kw.length > 2 && sl.includes(kw)));
+      });
+      if (matched.length > 0) {
+        skillCategories.push({ label, skills: matched });
+        matched.forEach((sk) => categorized.add(sk));
+      }
+    }
+    const uncategorized = data.skills.filter((s) => !categorized.has(s));
+    if (uncategorized.length > 0) {
+      skillCategories.push({ label: 'Other Technologies', skills: uncategorized });
+    }
+
+    // ── Build skill table HTML ───────────────────────────────
+    const skillTableHtml = skillCategories.length > 0
+      ? skillCategories
+          .map(
+            (cat) => `
+        <tr>
+          <td class="skill-cat">${this.escapeHtml(cat.label)}</td>
+          <td class="skill-list">${cat.skills.map((s) => this.escapeHtml(s)).join(', ')}</td>
+        </tr>`,
+          )
+          .join('')
+      : '';
+
+    // ── Experience section ───────────────────────────────────
     const experienceHtml = (data.experience || [])
       .slice(0, 8)
       .map((exp: any) => {
@@ -2488,17 +2576,10 @@ export class JobMatchService {
       })
       .join('');
 
-    const authBadge = data.workAuth
-      ? `<span class="auth-badge">${this.escapeHtml(data.workAuth.type)}${
-          data.workAuth.expiry
-            ? ` (exp ${new Date(data.workAuth.expiry).toISOString().slice(0, 10)})`
-            : ''
-        }</span>`
+    // ── Work authorization line ──────────────────────────────
+    const authLine = data.workAuth
+      ? `${data.workAuth.type}${data.workAuth.expiry ? ` — Valid through ${new Date(data.workAuth.expiry).toISOString().slice(0, 10)}` : ' — No expiry'}`
       : '';
-
-    const podBadges = data.pods
-      .map((p) => `<span class="pod-badge">${this.escapeHtml(p)}</span>`)
-      .join(' ');
 
     return `<!DOCTYPE html>
 <html>
@@ -2506,51 +2587,57 @@ export class JobMatchService {
 <meta charset="utf-8">
 <title>${this.escapeHtml(data.name)} — Professional Resume</title>
 <style>
-  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 20px; color: #1f2937; line-height: 1.6; font-size: 11pt; }
-  .header { background: ${template.headerColor}; color: white; padding: 24px 28px; margin: -20px -20px 20px; }
-  .header h1 { margin: 0 0 4px; font-size: 20pt; font-weight: 600; }
-  .header .contact { font-size: 10pt; opacity: 0.9; }
-  .header .meta { font-size: 9pt; opacity: 0.8; margin-top: 8px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-  .auth-badge { background: rgba(255,255,255,0.2); padding: 2px 10px; border-radius: 12px; font-size: 9pt; }
-  .pod-badge { background: rgba(255,255,255,0.15); padding: 2px 8px; border-radius: 8px; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.5px; }
-  h2 { color: ${template.headerColor}; border-bottom: 2px solid ${template.headerColor}; padding-bottom: 4px; font-size: 13pt; margin-top: 24px; }
-  .skills-bar { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
-  .skill-tag { background: ${template.headerColor}15; color: ${template.headerColor}; padding: 3px 12px; border-radius: 12px; font-size: 9pt; font-weight: 500; }
-  .experience-entry { margin-bottom: 16px; }
-  .experience-entry h3 { margin: 0 0 2px; font-size: 11pt; color: #374151; }
-  .experience-entry .period { font-size: 9pt; color: #6b7280; margin-bottom: 4px; }
-  .experience-entry p { margin: 4px 0 0; font-size: 10pt; }
-  .availability { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px 16px; margin: 16px 0; font-size: 10pt; }
-  .availability strong { color: #166534; }
-  .branding { text-align: right; font-size: 8pt; color: #9ca3af; margin-top: 24px; border-top: 1px solid #e5e7eb; padding-top: 8px; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; color: #1f2937; line-height: 1.6; font-size: 10.5pt; }
+  .header { background: ${template.headerColor}; color: white; padding: 28px 32px 20px; }
+  .header h1 { margin: 0 0 4px; font-size: 22pt; font-weight: 600; letter-spacing: -0.5px; }
+  .header .contact { font-size: 10pt; opacity: 0.92; }
+  .header .tagline { font-size: 10pt; opacity: 0.82; margin-top: 6px; font-style: italic; }
+  .content { padding: 20px 32px 24px; }
+  h2 { color: ${template.headerColor}; border-bottom: 2px solid ${template.headerColor}; padding-bottom: 4px; font-size: 12pt; margin: 22px 0 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .summary { font-size: 10.5pt; color: #374151; margin-bottom: 6px; }
+  table.skills { width: 100%; border-collapse: collapse; margin: 6px 0 4px; }
+  table.skills td { padding: 5px 10px; font-size: 10pt; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+  .skill-cat { font-weight: 600; color: ${template.headerColor}; width: 180px; white-space: nowrap; }
+  .skill-list { color: #374151; }
+  .experience-entry { margin-bottom: 14px; }
+  .experience-entry h3 { margin: 0 0 2px; font-size: 10.5pt; color: #374151; font-weight: 600; }
+  .experience-entry .period { font-size: 9pt; color: #6b7280; margin-bottom: 3px; }
+  .experience-entry p { margin: 3px 0 0; font-size: 10pt; color: #4b5563; }
+  .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; margin: 8px 0; font-size: 10pt; }
+  .info-grid .label { font-weight: 600; color: #6b7280; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.3px; }
+  .info-grid .value { color: #1f2937; }
+  .footer { text-align: right; font-size: 8pt; color: #9ca3af; margin-top: 20px; border-top: 1px solid #e5e7eb; padding-top: 8px; }
 </style>
 </head>
 <body>
   <div class="header">
     <h1>${this.escapeHtml(data.name)}</h1>
-    <div class="contact">${this.escapeHtml(data.email)}${data.phone ? ' | ' + this.escapeHtml(data.phone) : ''}</div>
-    <div class="meta">
-      ${authBadge}
-      ${podBadges}
+    <div class="contact">${this.escapeHtml(data.email)}${data.phone ? ' &nbsp;|&nbsp; ' + this.escapeHtml(data.phone) : ''}</div>
+    <div class="tagline">${this.escapeHtml(podLabel)} Professional</div>
+  </div>
+
+  <div class="content">
+    <h2>Professional Summary</h2>
+    <p class="summary">${this.escapeHtml(summary)}</p>
+
+    <h2>${template.sections[1] || 'Technical Skills'}</h2>
+    ${skillTableHtml ? `<table class="skills">${skillTableHtml}</table>` : '<p class="summary">Skills to be updated.</p>'}
+
+    ${data.experience.length > 0 ? `
+    <h2>${template.sections[2] || 'Professional Experience'}</h2>
+    ${experienceHtml}` : ''}
+
+    <h2>Additional Information</h2>
+    <div class="info-grid">
+      ${authLine ? `<div><div class="label">Work Authorization</div><div class="value">${this.escapeHtml(authLine)}</div></div>` : ''}
+      ${data.desiredRate ? `<div><div class="label">Desired Rate</div><div class="value">$${data.desiredRate}/hr</div></div>` : ''}
+      ${data.availableFrom ? `<div><div class="label">Available From</div><div class="value">${new Date(data.availableFrom).toISOString().slice(0, 10)}</div></div>` : ''}
+      ${data.pods.length > 0 ? `<div><div class="label">Practice Areas</div><div class="value">${data.pods.map((p) => this.escapeHtml(p)).join(', ')}</div></div>` : ''}
     </div>
+
+    <div class="footer">Presented by Cloud Resources Inc. | Generated ${new Date().toISOString().slice(0, 10)}</div>
   </div>
-
-  <h2>${template.sections[1] || 'Technical Skills'}</h2>
-  <div class="skills-bar">${skillsHtml || '<span style="color:#9ca3af">Skills to be updated</span>'}</div>
-
-  ${data.experience.length > 0 ? `
-  <h2>${template.sections[2] || 'Professional Experience'}</h2>
-  ${experienceHtml}
-  ` : ''}
-
-  <div class="availability">
-    ${data.desiredRate ? `<strong>Desired Rate:</strong> $${data.desiredRate}/hr` : ''}
-    ${data.desiredRate && data.availableFrom ? ' &nbsp;|&nbsp; ' : ''}
-    ${data.availableFrom ? `<strong>Available From:</strong> ${new Date(data.availableFrom).toISOString().slice(0, 10)}` : ''}
-    ${!data.desiredRate && !data.availableFrom ? '<strong>Available for new opportunities</strong>' : ''}
-  </div>
-
-  <div class="branding">Presented by Cloud Resources Inc. | Generated ${new Date().toISOString().slice(0, 10)}</div>
 </body>
 </html>`;
   }
