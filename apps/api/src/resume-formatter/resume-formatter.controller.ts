@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Req, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Req, Res, UseGuards, Headers, NotFoundException } from '@nestjs/common';
 import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -22,6 +22,35 @@ export class ResumeFormatterController {
       body.rawContent,
       body.pod,
     );
+  }
+
+  @Get(':consultantId/html/:versionType')
+  @Roles('MANAGEMENT', 'RECRUITMENT', 'SALES')
+  async serveHtml(
+    @Req() req: any,
+    @Param('consultantId') consultantId: string,
+    @Param('versionType') versionType: string,
+    @Res() res: Response,
+  ) {
+    const version = await this.resumeFormatterService.getCurrentVersion(
+      req.tenantId,
+      consultantId,
+      versionType,
+    );
+    if (!version) throw new NotFoundException('No resume version found');
+
+    let html = '';
+    if (version.fileUrl.startsWith('data:text/html;base64,')) {
+      html = Buffer.from(
+        version.fileUrl.replace('data:text/html;base64,', ''),
+        'base64',
+      ).toString('utf-8');
+    } else {
+      throw new NotFoundException('Resume HTML not available');
+    }
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
   }
 
   @Get(':consultantId/pdf/:versionType')

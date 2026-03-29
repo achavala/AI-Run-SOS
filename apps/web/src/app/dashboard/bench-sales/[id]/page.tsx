@@ -199,7 +199,6 @@ export default function ConsultantProfilePage() {
   const [error, setError] = useState<string | null>(null);
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
   const [generatingResume, setGeneratingResume] = useState<string | null>(null);
-  const [previewResumeUrl, setPreviewResumeUrl] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [selectedRow, setSelectedRow] = useState<any>(null);
 
@@ -452,92 +451,12 @@ export default function ConsultantProfilePage() {
         )}
 
         {/* Resume */}
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h3 className="mb-3 text-sm font-semibold text-gray-500 uppercase tracking-wider">Resume</h3>
-          {c.currentResume ? (
-            <div className="space-y-3">
-              <div className="flex items-center gap-3">
-                <DocumentTextIcon className="h-8 w-8 text-indigo-500" />
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-gray-900">
-                    {c.currentResume.version || 'Current Resume'}
-                    {c.currentResume.source && (
-                      <span className="ml-2 text-xs text-gray-400">
-                        ({c.currentResume.source === 'baseline-generated' ? 'Auto-generated' : c.currentResume.source})
-                      </span>
-                    )}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    Uploaded {new Date(c.currentResume.createdAt).toLocaleDateString()}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setPreviewResumeUrl(
-                    previewResumeUrl === c.currentResume!.fileUrl ? null : c.currentResume!.fileUrl,
-                  )}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-500"
-                >
-                  <DocumentTextIcon className="h-4 w-4" />
-                  {previewResumeUrl === c.currentResume.fileUrl ? 'Hide Resume' : 'View Resume'}
-                </button>
-              </div>
-
-              {/* Inline resume preview */}
-              {previewResumeUrl && (
-                <div className="mt-3 rounded-lg border border-gray-200 overflow-hidden bg-white">
-                  {previewResumeUrl.startsWith('http://') || previewResumeUrl.startsWith('https://') || previewResumeUrl.startsWith('data:') ? (
-                    <iframe
-                      src={previewResumeUrl}
-                      className="w-full border-0"
-                      style={{ height: '600px' }}
-                      title="Resume Preview"
-                    />
-                  ) : previewResumeUrl.startsWith('s3://') ? (
-                    <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
-                      <DocumentTextIcon className="h-16 w-16 text-gray-300 mb-4" />
-                      <p className="text-sm font-medium text-gray-700">
-                        {c.currentResume!.version || 'Resume'} (Seed Data)
-                      </p>
-                      <p className="mt-3 text-xs text-gray-400">
-                        This is placeholder seed data. Upload a real resume to replace it.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
-                      <DocumentTextIcon className="h-16 w-16 text-gray-300 mb-4" />
-                      <p className="text-sm font-medium text-gray-700">
-                        {c.currentResume!.version || 'Resume'}
-                      </p>
-                      <p className="mt-1 text-xs text-gray-500 font-mono">{previewResumeUrl.split('/').pop()}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {c.resumeHistory.length > 1 && (
-                <div className="border-t border-gray-100 pt-2">
-                  <p className="text-xs font-medium text-gray-500 mb-1">Previous Versions</p>
-                  {c.resumeHistory.filter((r) => r.id !== c.currentResume!.id).slice(0, 3).map((r) => (
-                    <div key={r.id} className="flex items-center gap-2 text-xs text-gray-500 py-0.5">
-                      <DocumentTextIcon className="h-3.5 w-3.5 text-gray-400" />
-                      <span>{r.version}</span>
-                      <span>·</span>
-                      <button
-                        onClick={() => setPreviewResumeUrl(previewResumeUrl === r.fileUrl ? null : r.fileUrl)}
-                        className="text-indigo-600 hover:underline"
-                      >
-                        View
-                      </button>
-                      <span className="text-gray-400">{new Date(r.createdAt).toLocaleDateString()}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            <p className="text-sm text-gray-400">No resume uploaded</p>
-          )}
-        </div>
+        <ResumeSection
+          currentResume={c.currentResume}
+          resumeHistory={c.resumeHistory}
+          consultantId={c.id}
+          consultantName={`${c.firstName} ${c.lastName}`}
+        />
 
         {/* Stats Row */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
@@ -831,6 +750,193 @@ export default function ConsultantProfilePage() {
 }
 
 /* ---------- sub-components ---------- */
+
+function decodeBase64Html(dataUri: string): string {
+  if (!dataUri.startsWith('data:text/html;base64,')) return '';
+  try {
+    return atob(dataUri.replace('data:text/html;base64,', ''));
+  } catch {
+    return '';
+  }
+}
+
+function ResumeSection({
+  currentResume,
+  resumeHistory,
+  consultantId,
+  consultantName,
+}: {
+  currentResume: ResumeInfo | null;
+  resumeHistory: ResumeInfo[];
+  consultantId: string;
+  consultantName: string;
+}) {
+  const [showResume, setShowResume] = useState(false);
+  const [fullScreen, setFullScreen] = useState(false);
+  const [activeVersion, setActiveVersion] = useState<ResumeInfo | null>(currentResume);
+
+  const openInNewTab = () => {
+    if (!activeVersion) return;
+    const html = decodeBase64Html(activeVersion.fileUrl);
+    if (html) {
+      const w = window.open('', '_blank');
+      if (w) { w.document.write(html); w.document.close(); }
+    }
+  };
+
+  const resumeHtml = activeVersion ? decodeBase64Html(activeVersion.fileUrl) : '';
+  const isDataUri = activeVersion?.fileUrl?.startsWith('data:text/html;base64,');
+  const isUrl = activeVersion?.fileUrl?.startsWith('http');
+  const isS3 = activeVersion?.fileUrl?.startsWith('s3://');
+
+  return (
+    <>
+      <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+        <h3 className="mb-3 text-sm font-semibold text-gray-500 uppercase tracking-wider">Resume</h3>
+        {currentResume ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <DocumentTextIcon className="h-8 w-8 text-indigo-500 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900">
+                  {activeVersion?.version || 'Current Resume'}
+                  {activeVersion?.source && (
+                    <span className="ml-2 text-xs text-gray-400">
+                      ({activeVersion.source === 'baseline-generated' ? 'Auto-generated' : activeVersion.source})
+                    </span>
+                  )}
+                </p>
+                <p className="text-xs text-gray-500">
+                  Uploaded {activeVersion ? new Date(activeVersion.createdAt).toLocaleDateString() : ''}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => setShowResume(!showResume)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-500"
+                >
+                  <DocumentTextIcon className="h-4 w-4" />
+                  {showResume ? 'Hide Resume' : 'View Resume'}
+                </button>
+                {isDataUri && (
+                  <>
+                    <button
+                      onClick={openInNewTab}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                    >
+                      <ArrowTopRightOnSquareIcon className="h-4 w-4" />
+                      New Tab
+                    </button>
+                    <button
+                      onClick={() => setFullScreen(true)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                    >
+                      Full Screen
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Inline resume preview */}
+            {showResume && (
+              <div className="mt-3 rounded-lg border border-gray-200 overflow-hidden bg-white">
+                {isDataUri && resumeHtml ? (
+                  <div
+                    className="resume-embed w-full bg-white"
+                    dangerouslySetInnerHTML={{ __html: resumeHtml }}
+                    style={{ padding: '20px' }}
+                  />
+                ) : isUrl ? (
+                  <iframe
+                    src={activeVersion!.fileUrl}
+                    className="w-full border-0"
+                    style={{ minHeight: '800px' }}
+                    title="Resume Preview"
+                  />
+                ) : isS3 ? (
+                  <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
+                    <DocumentTextIcon className="h-16 w-16 text-gray-300 mb-4" />
+                    <p className="text-sm font-medium text-gray-700">
+                      {activeVersion!.version || 'Resume'} (Seed Data)
+                    </p>
+                    <p className="mt-3 text-xs text-gray-400">
+                      This is placeholder seed data. Upload a real resume to replace it.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
+                    <DocumentTextIcon className="h-16 w-16 text-gray-300 mb-4" />
+                    <p className="text-sm font-medium text-gray-700">{activeVersion!.version || 'Resume'}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Version selector */}
+            {resumeHistory.length > 1 && (
+              <div className="border-t border-gray-100 pt-3">
+                <p className="text-xs font-medium text-gray-500 mb-2">All Versions</p>
+                <div className="flex flex-wrap gap-2">
+                  {resumeHistory.map((r) => (
+                    <button
+                      key={r.id}
+                      onClick={() => { setActiveVersion(r); setShowResume(true); }}
+                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                        activeVersion?.id === r.id
+                          ? 'bg-indigo-100 text-indigo-700 ring-1 ring-indigo-300'
+                          : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                      }`}
+                    >
+                      <DocumentTextIcon className="h-3.5 w-3.5" />
+                      {r.version}
+                      {r.isCurrent && <span className="text-[9px] text-green-600 ml-1">Current</span>}
+                      <span className="text-[9px] text-gray-400">{new Date(r.createdAt).toLocaleDateString()}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-400">No resume uploaded</p>
+        )}
+      </div>
+
+      {/* Full Screen Resume Modal */}
+      {fullScreen && resumeHtml && (
+        <div className="fixed inset-0 z-50 bg-white overflow-auto" style={{ padding: 0 }}>
+          <div className="sticky top-0 z-10 flex items-center justify-between bg-white border-b border-gray-200 px-6 py-3 shadow-sm">
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold text-gray-900">{consultantName} — Resume</h2>
+              <span className="inline-flex rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                {activeVersion?.version}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={openInNewTab}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+              >
+                <ArrowTopRightOnSquareIcon className="h-4 w-4" />
+                Open in New Tab
+              </button>
+              <button
+                onClick={() => setFullScreen(false)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-gray-900 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-gray-700"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+          <div className="max-w-4xl mx-auto py-8 px-6">
+            <div dangerouslySetInnerHTML={{ __html: resumeHtml }} />
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 function StatCard({ label, value, accent }: { label: string; value: number; accent?: boolean }) {
   return (
