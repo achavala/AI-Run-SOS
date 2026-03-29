@@ -2212,6 +2212,30 @@ export class JobMatchService {
       .replace(/'/g, '&#39;');
   }
 
+  /** Convert extracted resume text into structured HTML sections. */
+  private formatExtractedText(text: string): string {
+    if (!text || !text.trim()) return '';
+    const escaped = this.escapeHtml(text);
+    const lines = escaped.split(/\n/).filter(l => l.trim());
+
+    const sectionHeaders = /^(PROFESSIONAL\s+EXPERIENCE|WORK\s+EXPERIENCE|EXPERIENCE|EDUCATION|CERTIFICATIONS?|PROJECTS?|SUMMARY|OBJECTIVE|ACHIEVEMENTS?|AWARDS?|PUBLICATIONS?|SKILLS|TECHNICAL\s+SKILLS|CORE\s+COMPETENCIES|EMPLOYMENT\s+HISTORY|WORK\s+HISTORY)\s*$/i;
+
+    let html = '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (sectionHeaders.test(trimmed)) {
+        html += `<h3 style="margin-top:16px;margin-bottom:6px;font-weight:600;color:#374151;font-size:11pt;border-bottom:1px solid #e5e7eb;padding-bottom:3px;">${trimmed}</h3>\n`;
+      } else if (/^\d{4}\s*[-–]\s*(present|\d{4})/i.test(trimmed) || /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(trimmed)) {
+        html += `<div style="font-size:9pt;color:#6b7280;margin-bottom:2px;">${trimmed}</div>\n`;
+      } else if (/^[•●○▪▸►–-]\s/.test(trimmed)) {
+        html += `<div style="padding-left:16px;margin-bottom:3px;font-size:10pt;">• ${trimmed.replace(/^[•●○▪▸►–-]\s*/, '')}</div>\n`;
+      } else if (trimmed.length > 0) {
+        html += `<p style="margin:3px 0;font-size:10pt;color:#4b5563;">${trimmed}</p>\n`;
+      }
+    }
+    return html;
+  }
+
   /* ═══════════════════════════════════════════════════════════════
    *  SERVE RESUME HTML FROM DB
    * ═══════════════════════════════════════════════════════════════ */
@@ -2399,6 +2423,17 @@ export class JobMatchService {
         const podKey = (c.pods as string[])?.[0] ?? 'DEFAULT';
         const template = POD_TEMPLATES[podKey] ?? POD_TEMPLATES.DEFAULT!;
 
+        let extractedText = '';
+        try {
+          const extracted = await this.prisma.extractedConsultant.findFirst({
+            where: { email: c.email },
+            include: { resumeVersions: { orderBy: { createdAt: 'desc' }, take: 1 } },
+          });
+          if (extracted?.resumeVersions?.[0]?.extractedText) {
+            extractedText = extracted.resumeVersions[0].extractedText;
+          }
+        } catch { /* extracted table may not have data */ }
+
         const html = this.buildBaselineHtml(
           {
             name: `${c.firstName} ${c.lastName}`,
@@ -2406,6 +2441,7 @@ export class JobMatchService {
             phone: c.phone,
             skills,
             experience: performanceHistory,
+            extractedResumeText: extractedText,
             workAuth: currentAuth
               ? { type: currentAuth.authType, expiry: currentAuth.expiryDate }
               : null,
@@ -2491,6 +2527,7 @@ export class JobMatchService {
       phone: string | null;
       skills: string[];
       experience: any[];
+      extractedResumeText?: string;
       workAuth: { type: string; expiry: Date | null } | null;
       desiredRate: number | null;
       availableFrom: Date | null;
@@ -2607,6 +2644,7 @@ export class JobMatchService {
   .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; margin: 8px 0; font-size: 10pt; }
   .info-grid .label { font-weight: 600; color: #6b7280; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.3px; }
   .info-grid .value { color: #1f2937; }
+  .extracted-content { margin: 8px 0; }
   .footer { text-align: right; font-size: 8pt; color: #9ca3af; margin-top: 20px; border-top: 1px solid #e5e7eb; padding-top: 8px; }
 </style>
 </head>
@@ -2626,7 +2664,9 @@ export class JobMatchService {
 
     ${data.experience.length > 0 ? `
     <h2>${template.sections[2] || 'Professional Experience'}</h2>
-    ${experienceHtml}` : ''}
+    ${experienceHtml}` : data.extractedResumeText ? `
+    <h2>Professional Experience</h2>
+    <div class="extracted-content">${this.formatExtractedText(data.extractedResumeText)}</div>` : ''}
 
     <h2>Additional Information</h2>
     <div class="info-grid">
