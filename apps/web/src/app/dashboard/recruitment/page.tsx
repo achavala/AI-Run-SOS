@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/page-header';
 import { KpiCard } from '@/components/kpi-card';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable, type Column } from '@/components/data-table';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 import {
   BriefcaseIcon,
   DocumentTextIcon,
@@ -174,6 +175,7 @@ export default function RecruitmentPage() {
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -275,30 +277,38 @@ export default function RecruitmentPage() {
 
       {/* KPIs */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard
-          title="Open Jobs"
-          value={String(jobs.length)}
-          subtitle="active positions"
-          icon={BriefcaseIcon}
-        />
-        <KpiCard
-          title="Today's Submissions"
-          value={String(todaysSubmissions.length)}
-          subtitle="submitted today"
-          icon={DocumentTextIcon}
-        />
-        <KpiCard
-          title="Interviews Today"
-          value={String(interviewingSubmissions.length)}
-          subtitle="in progress"
-          icon={CalendarIcon}
-        />
-        <KpiCard
-          title="Match Quality"
-          value={`${avgMatchScore}%`}
-          subtitle="avg score"
-          icon={SparklesIcon}
-        />
+        <ClickableMetric metric="activeJobs" title="Open Jobs">
+          <KpiCard
+            title="Open Jobs"
+            value={String(jobs.length)}
+            subtitle="active positions"
+            icon={BriefcaseIcon}
+          />
+        </ClickableMetric>
+        <ClickableMetric metric="todaySubmissions" title="Today's Submissions">
+          <KpiCard
+            title="Today's Submissions"
+            value={String(todaysSubmissions.length)}
+            subtitle="submitted today"
+            icon={DocumentTextIcon}
+          />
+        </ClickableMetric>
+        <ClickableMetric metric="todayInterviews" title="Interviews Today">
+          <KpiCard
+            title="Interviews Today"
+            value={String(interviewingSubmissions.length)}
+            subtitle="in progress"
+            icon={CalendarIcon}
+          />
+        </ClickableMetric>
+        <ClickableMetric metric="matchQuality" title="Match Quality">
+          <KpiCard
+            title="Match Quality"
+            value={`${avgMatchScore}%`}
+            subtitle="avg score"
+            icon={SparklesIcon}
+          />
+        </ClickableMetric>
       </div>
 
       {/* Open Jobs Table */}
@@ -331,7 +341,8 @@ export default function RecruitmentPage() {
               recentSubmissions.map((sub) => (
                 <div
                   key={sub.id}
-                  className="flex items-center justify-between rounded-lg border border-gray-100 p-3 transition-colors hover:bg-gray-50"
+                  onClick={() => setSelectedRow(sub)}
+                  className="flex items-center justify-between rounded-lg border border-gray-100 p-3 transition-colors hover:bg-gray-50 cursor-pointer"
                 >
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-gray-900">
@@ -366,7 +377,8 @@ export default function RecruitmentPage() {
               interviewingSubmissions.map((sub) => (
                 <div
                   key={sub.id}
-                  className="flex items-center justify-between rounded-lg border border-gray-100 p-3 transition-colors hover:bg-gray-50"
+                  onClick={() => setSelectedRow(sub)}
+                  className="flex items-center justify-between rounded-lg border border-gray-100 p-3 transition-colors hover:bg-gray-50 cursor-pointer"
                 >
                   <div className="flex items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-50 text-xs font-bold text-indigo-600">
@@ -388,6 +400,14 @@ export default function RecruitmentPage() {
           </div>
         </div>
       </div>
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title={selectedRow.title || selectedRow.consultantName || selectedRow.consultant?.name || 'Details'}
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
+      )}
     </>
   );
 }

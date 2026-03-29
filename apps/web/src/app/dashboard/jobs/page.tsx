@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable, type Column } from '@/components/data-table';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 import { PlusIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import { api } from '@/lib/api';
 
@@ -151,6 +152,7 @@ export default function JobsPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -254,6 +256,14 @@ export default function JobsPage() {
         keyField="id"
         emptyMessage="No jobs match your filters"
       />
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title={selectedRow.title || selectedRow.name || 'Details'}
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
+      )}
     </>
   );
 }

@@ -27,6 +27,7 @@ import {
   ShieldCheckIcon,
   PlayIcon,
 } from '@heroicons/react/24/outline';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -222,6 +223,7 @@ export default function BenchConsultantDetailPage() {
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [triggeringAi, setTriggeringAi] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   const fetchConsultant = useCallback(async () => {
     try {
@@ -425,46 +427,54 @@ export default function BenchConsultantDetailPage() {
 
       {/* Summary strip */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-          <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Status</p>
-          <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold mt-1 ${
-            BENCH_STATUS_COLORS[c.benchStatus] ?? 'bg-gray-100 text-gray-600'
-          }`}>
-            {c.benchStatus?.replace(/_/g, ' ')}
-          </span>
-        </div>
-        <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-          <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Readiness</p>
-          <p className={`text-2xl font-bold mt-0.5 ${scoreTextColor(c.readinessScore)}`}>
-            {c.readinessScore != null ? Math.round(c.readinessScore) : '--'}
-            <span className="text-sm text-gray-400">/100</span>
-          </p>
-        </div>
-        <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-          <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">AI Pipeline</p>
-          <p className="text-sm font-semibold mt-1">
-            {aiRun ? `${aiRun.stepsCompleted}/${aiRun.totalSteps} steps` : 'Not started'}
-          </p>
-          {aiRun && (
-            <div className="mt-1 h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all ${
-                  aiRun.status === 'COMPLETED' ? 'bg-emerald-500'
-                  : aiRun.status === 'FAILED' ? 'bg-red-500'
-                  : 'bg-indigo-500'
-                }`}
-                style={{ width: `${(aiRun.stepsCompleted / aiRun.totalSteps) * 100}%` }}
-              />
-            </div>
-          )}
-        </div>
-        <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-          <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Rate</p>
-          <p className="text-2xl font-bold text-gray-900 mt-0.5">
-            {c.desiredRate != null ? `$${c.desiredRate}` : '--'}
-            <span className="text-sm text-gray-400">/hr</span>
-          </p>
-        </div>
+        <ClickableMetric metric="benchSize" title="Bench Status">
+          <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Status</p>
+            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold mt-1 ${
+              BENCH_STATUS_COLORS[c.benchStatus] ?? 'bg-gray-100 text-gray-600'
+            }`}>
+              {c.benchStatus?.replace(/_/g, ' ')}
+            </span>
+          </div>
+        </ClickableMetric>
+        <ClickableMetric metric="matchQuality" title="Readiness Score">
+          <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Readiness</p>
+            <p className={`text-2xl font-bold mt-0.5 ${scoreTextColor(c.readinessScore)}`}>
+              {c.readinessScore != null ? Math.round(c.readinessScore) : '--'}
+              <span className="text-sm text-gray-400">/100</span>
+            </p>
+          </div>
+        </ClickableMetric>
+        <ClickableMetric metric="autoSubmitQueue" title="AI Pipeline">
+          <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">AI Pipeline</p>
+            <p className="text-sm font-semibold mt-1">
+              {aiRun ? `${aiRun.stepsCompleted}/${aiRun.totalSteps} steps` : 'Not started'}
+            </p>
+            {aiRun && (
+              <div className="mt-1 h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    aiRun.status === 'COMPLETED' ? 'bg-emerald-500'
+                    : aiRun.status === 'FAILED' ? 'bg-red-500'
+                    : 'bg-indigo-500'
+                  }`}
+                  style={{ width: `${(aiRun.stepsCompleted / aiRun.totalSteps) * 100}%` }}
+                />
+              </div>
+            )}
+          </div>
+        </ClickableMetric>
+        <ClickableMetric metric="submissions" title="Desired Rate">
+          <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Rate</p>
+            <p className="text-2xl font-bold text-gray-900 mt-0.5">
+              {c.desiredRate != null ? `$${c.desiredRate}` : '--'}
+              <span className="text-sm text-gray-400">/hr</span>
+            </p>
+          </div>
+        </ClickableMetric>
       </div>
 
       {/* AI Pipeline Steps — visual tracker */}
@@ -539,13 +549,21 @@ export default function BenchConsultantDetailPage() {
 
       {/* Tab Content */}
       <div>
-        {activeTab === 'overview' && <OverviewTab consultant={c} />}
+        {activeTab === 'overview' && <OverviewTab consultant={c} onItemClick={setSelectedRow} />}
         {ALL_STEPS.includes(activeTab) && (
           <AiStepTab step={activeTab} output={outputsByStep[activeTab] ?? null} />
         )}
-        {activeTab === 'documents' && <DocumentsTab documents={c.documents} />}
-        {activeTab === 'timeline' && <TimelineTab activities={c.activities} />}
+        {activeTab === 'documents' && <DocumentsTab documents={c.documents} onItemClick={setSelectedRow} />}
+        {activeTab === 'timeline' && <TimelineTab activities={c.activities} onItemClick={setSelectedRow} />}
       </div>
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title={selectedRow.title || selectedRow.fileName || selectedRow.status || "Details"}
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
+      )}
     </>
   );
 }
@@ -554,7 +572,7 @@ export default function BenchConsultantDetailPage() {
 /*  Tab: Overview                                                      */
 /* ------------------------------------------------------------------ */
 
-function OverviewTab({ consultant: c }: { consultant: BenchConsultantDetail }) {
+function OverviewTab({ consultant: c, onItemClick }: { consultant: BenchConsultantDetail; onItemClick: (item: any) => void }) {
   return (
     <div className="space-y-6">
       {/* Contact + Details */}
@@ -613,22 +631,24 @@ function OverviewTab({ consultant: c }: { consultant: BenchConsultantDetail }) {
 
       {/* Readiness breakdown */}
       {c.readinessScore != null && (
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Readiness Score</h3>
-          <div className="flex items-center gap-4">
-            <div className={`text-4xl font-bold ${scoreTextColor(c.readinessScore)}`}>
-              {Math.round(c.readinessScore)}
-            </div>
-            <div className="flex-1">
-              <div className="h-3 rounded-full bg-gray-100 overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all ${scoreColor(c.readinessScore)}`}
-                  style={{ width: `${Math.min(c.readinessScore, 100)}%` }}
-                />
+        <ClickableMetric metric="matchQuality" title="Readiness Score">
+          <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Readiness Score</h3>
+            <div className="flex items-center gap-4">
+              <div className={`text-4xl font-bold ${scoreTextColor(c.readinessScore)}`}>
+                {Math.round(c.readinessScore)}
+              </div>
+              <div className="flex-1">
+                <div className="h-3 rounded-full bg-gray-100 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${scoreColor(c.readinessScore)}`}
+                    style={{ width: `${Math.min(c.readinessScore, 100)}%` }}
+                  />
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        </ClickableMetric>
       )}
     </div>
   );
@@ -711,7 +731,7 @@ function AiStepTab({ step, output }: { step: string; output: AiOutput | null }) 
 /*  Tab: Documents                                                     */
 /* ------------------------------------------------------------------ */
 
-function DocumentsTab({ documents }: { documents: ConsultantDoc[] }) {
+function DocumentsTab({ documents, onItemClick }: { documents: ConsultantDoc[]; onItemClick: (item: any) => void }) {
   if (!documents || documents.length === 0) {
     return (
       <div className="rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 p-12 text-center">
@@ -724,7 +744,7 @@ function DocumentsTab({ documents }: { documents: ConsultantDoc[] }) {
   return (
     <div className="space-y-3">
       {documents.map((doc) => (
-        <div key={doc.id} className="flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+        <div key={doc.id} onClick={() => onItemClick(doc)} className="cursor-pointer hover:bg-indigo-50 flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
           <DocumentTextIcon className="h-8 w-8 text-indigo-500 shrink-0" />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-gray-900 truncate">{doc.fileName}</p>
@@ -752,7 +772,7 @@ function DocumentsTab({ documents }: { documents: ConsultantDoc[] }) {
 /*  Tab: Timeline                                                      */
 /* ------------------------------------------------------------------ */
 
-function TimelineTab({ activities }: { activities: Activity[] }) {
+function TimelineTab({ activities, onItemClick }: { activities: Activity[]; onItemClick: (item: any) => void }) {
   if (!activities || activities.length === 0) {
     return (
       <div className="rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 p-12 text-center">
@@ -773,7 +793,7 @@ function TimelineTab({ activities }: { activities: Activity[] }) {
   return (
     <div className="space-y-0">
       {activities.map((activity, i) => (
-        <div key={activity.id} className="flex gap-4 pb-4">
+        <div key={activity.id} onClick={() => onItemClick(activity)} className="cursor-pointer hover:bg-indigo-50 rounded-lg flex gap-4 pb-4">
           {/* Timeline line */}
           <div className="flex flex-col items-center">
             <div className={`h-8 w-8 rounded-full flex items-center justify-center ${

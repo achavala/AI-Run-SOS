@@ -17,7 +17,9 @@ import {
   BriefcaseIcon,
   CalendarDaysIcon,
   TagIcon,
+  InformationCircleIcon,
 } from '@heroicons/react/24/outline';
+import { StaticDrillDownModal } from '@/components/drill-down-modal';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -173,6 +175,7 @@ export default function ConsultantsPanel() {
   const [minRate, setMinRate] = useState('');
   const [maxRate, setMaxRate] = useState('');
   const [sort, setSort] = useState('placeable');
+  const [detailItem, setDetailItem] = useState<any>(null);
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -338,11 +341,20 @@ export default function ConsultantsPanel() {
                     <EnvelopeIcon className="h-3.5 w-3.5 shrink-0" />{c.email}
                   </p>
                 </div>
-                {c.visaBadge && (
-                  <span className={`shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${VISA_COLORS[c.visaBadge] || 'bg-gray-100 text-gray-600'}`}>
-                    {c.visaBadge}
-                  </span>
-                )}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setDetailItem(c); }}
+                    className="inline-flex items-center justify-center rounded-lg p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                    title="View details"
+                  >
+                    <InformationCircleIcon className="h-4.5 w-4.5" />
+                  </button>
+                  {c.visaBadge && (
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${VISA_COLORS[c.visaBadge] || 'bg-gray-100 text-gray-600'}`}>
+                      {c.visaBadge}
+                    </span>
+                  )}
+                </div>
               </div>
               {c.techCategories && c.techCategories.length > 0 && (
                 <div className="mt-2.5 flex flex-wrap gap-1">
@@ -408,6 +420,14 @@ export default function ConsultantsPanel() {
             </button>
           </div>
         </div>
+      )}
+
+      {detailItem && (
+        <StaticDrillDownModal
+          title={`${detailItem.firstName} ${detailItem.lastName}`}
+          rows={[detailItem]}
+          onClose={() => setDetailItem(null)}
+        />
       )}
     </>
   );

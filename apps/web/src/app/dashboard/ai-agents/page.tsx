@@ -22,6 +22,7 @@ import {
   MapPinIcon,
   ClockIcon,
   XMarkIcon,
+  ChevronLeftIcon,
 } from '@heroicons/react/24/outline';
 
 function fmt(n: number | null | undefined): string {
@@ -63,6 +64,7 @@ function DrillDownModal({ metric, onClose }: { metric: string; onClose: () => vo
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [detailRecord, setDetailRecord] = useState<any>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -91,14 +93,30 @@ function DrillDownModal({ metric, onClose }: { metric: string; onClose: () => vo
     return String(val);
   };
 
+  const renderDetailValue = (val: any): React.ReactNode => {
+    if (val == null) return <span className="text-gray-400">—</span>;
+    if (val instanceof Date || (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(val))) {
+      return new Date(val).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+    if (Array.isArray(val)) {
+      return val.length === 0
+        ? <span className="text-gray-400">—</span>
+        : <div className="flex flex-wrap gap-1">{val.map((v, i) => <span key={i} className="inline-flex rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>)}</div>;
+    }
+    if (typeof val === 'object') {
+      return <pre className="text-xs bg-gray-50 rounded p-2 whitespace-pre-wrap break-all">{JSON.stringify(val, null, 2)}</pre>;
+    }
+    return String(val);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm pt-16 px-4" onClick={onClose}>
       <div className="w-full max-w-5xl max-h-[80vh] bg-white rounded-2xl shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b bg-gradient-to-r from-indigo-50 to-purple-50">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">{data?.title || metric}</h2>
-            <p className="text-xs text-gray-500">{data?.description || ''}</p>
+            <h2 className="text-lg font-semibold text-gray-900">{detailRecord ? 'Record Detail' : (data?.title || metric)}</h2>
+            <p className="text-xs text-gray-500">{detailRecord ? 'All fields for this record' : (data?.description || '')}</p>
           </div>
           <button onClick={onClose} className="p-2 rounded-lg hover:bg-gray-200 transition-colors">
             <XMarkIcon className="h-5 w-5 text-gray-600" />
@@ -121,9 +139,30 @@ function DrillDownModal({ metric, onClose }: { metric: string; onClose: () => vo
             </div>
           )}
 
-          {!loading && !error && data?.rows && (
+          {!loading && !error && data?.rows && detailRecord && (
+            <div>
+              <button
+                onClick={() => setDetailRecord(null)}
+                className="mb-4 inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <ChevronLeftIcon className="h-4 w-4" /> Back to list
+              </button>
+              <div className="rounded-xl border border-gray-200 divide-y divide-gray-100">
+                {Object.entries(detailRecord).map(([key, val]) => (
+                  <div key={key} className="flex gap-4 px-4 py-3">
+                    <span className="text-xs font-medium text-gray-500 w-40 shrink-0 capitalize pt-0.5">
+                      {key.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').trim()}
+                    </span>
+                    <div className="text-sm text-gray-800 min-w-0 flex-1">{renderDetailValue(val)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!loading && !error && data?.rows && !detailRecord && (
             <>
-              <p className="text-xs text-gray-400 mb-3">{data.rows.length} records</p>
+              <p className="text-xs text-gray-400 mb-3">{data.rows.length} records — click a row to see full details</p>
               {data.rows.length === 0 ? (
                 <p className="text-sm text-gray-500 text-center py-12">No records found for this metric</p>
               ) : (
@@ -140,7 +179,11 @@ function DrillDownModal({ metric, onClose }: { metric: string; onClose: () => vo
                   </thead>
                   <tbody>
                     {data.rows.map((row: any, idx: number) => (
-                      <tr key={row.id || idx} className="border-b border-gray-50 hover:bg-indigo-50/50 transition-colors">
+                      <tr
+                        key={row.id || idx}
+                        onClick={() => setDetailRecord(row)}
+                        className="border-b border-gray-50 hover:bg-indigo-50/50 transition-colors cursor-pointer"
+                      >
                         <td className="px-3 py-2 text-xs text-gray-400">{idx + 1}</td>
                         {Object.entries(row).filter(([k]) => k !== 'id').map(([key, val]) => (
                           <td key={key} className="px-3 py-2 text-xs text-gray-700 max-w-[200px] truncate">

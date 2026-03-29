@@ -18,8 +18,10 @@ import {
   CurrencyDollarIcon,
   CalendarDaysIcon,
   TagIcon,
+  InformationCircleIcon,
 } from '@heroicons/react/24/outline';
 import AddConsultantModal from '../_components/add-consultant-modal';
+import { StaticDrillDownModal } from '@/components/drill-down-modal';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -162,6 +164,7 @@ export default function CurrentBenchPanel() {
   const [status, setStatus] = useState('ALL');
   const [sort, setSort] = useState('newest');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [detailItem, setDetailItem] = useState<any>(null);
 
   const fetchConsultants = useCallback(
     async (page = 1) => {
@@ -388,8 +391,15 @@ export default function CurrentBenchPanel() {
                   )}
                 </div>
 
-                {/* Right: AI status + readiness */}
+                {/* Right: info icon + AI status + readiness */}
                 <div className="shrink-0 text-right space-y-2">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setDetailItem(c); }}
+                    className="inline-flex items-center justify-center rounded-lg p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                    title="View details"
+                  >
+                    <InformationCircleIcon className="h-5 w-5" />
+                  </button>
                   {/* Readiness score */}
                   <div>
                     <div className="flex items-center justify-end gap-1">
@@ -488,6 +498,14 @@ export default function CurrentBenchPanel() {
         <AddConsultantModal
           onClose={() => setShowAddModal(false)}
           onSuccess={handleAddSuccess}
+        />
+      )}
+
+      {detailItem && (
+        <StaticDrillDownModal
+          title={`${detailItem.firstName} ${detailItem.lastName}`}
+          rows={[detailItem]}
+          onClose={() => setDetailItem(null)}
         />
       )}
     </>

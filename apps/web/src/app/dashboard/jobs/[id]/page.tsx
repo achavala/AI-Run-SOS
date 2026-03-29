@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable, type Column } from '@/components/data-table';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 import {
   ArrowLeftIcon,
   MapPinIcon,
@@ -83,6 +84,7 @@ export default function JobDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [selectedRow, setSelectedRow] = useState<any>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [candidatesLoading, setCandidatesLoading] = useState(false);
   const [candidatesError, setCandidatesError] = useState<string | null>(null);
@@ -280,24 +282,36 @@ export default function JobDetailPage() {
             </div>
 
             <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
-              <div className="flex items-center gap-2">
-                <CurrencyDollarIcon className="h-4 w-4 text-gray-400" />
-                <div>
-                  <p className="text-xs text-gray-500">Bill Rate</p>
-                  <p className="text-sm font-semibold">
-                    {formatRate(job.billRateMin, job.billRateMax)}
-                  </p>
+              <ClickableMetric
+                metric="submissions"
+                title={`Bill Rate — ${job.title}`}
+                staticData={{ title: `Bill Rate — ${job.title}`, rows: submissions.map(s => ({ id: s.id, consultant: `${s.consultant.firstName} ${s.consultant.lastName}`, billRate: s.billRate != null ? `$${s.billRate}/hr` : '—', status: s.status })) }}
+              >
+                <div className="flex items-center gap-2">
+                  <CurrencyDollarIcon className="h-4 w-4 text-gray-400" />
+                  <div>
+                    <p className="text-xs text-gray-500">Bill Rate</p>
+                    <p className="text-sm font-semibold">
+                      {formatRate(job.billRateMin, job.billRateMax)}
+                    </p>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <CurrencyDollarIcon className="h-4 w-4 text-gray-400" />
-                <div>
-                  <p className="text-xs text-gray-500">Pay Rate</p>
-                  <p className="text-sm font-semibold">
-                    {formatRate(job.payRateMin, job.payRateMax)}
-                  </p>
+              </ClickableMetric>
+              <ClickableMetric
+                metric="submissions"
+                title={`Pay Rate — ${job.title}`}
+                staticData={{ title: `Pay Rate — ${job.title}`, rows: submissions.map(s => ({ id: s.id, consultant: `${s.consultant.firstName} ${s.consultant.lastName}`, payRate: s.payRate != null ? `$${s.payRate}/hr` : '—', status: s.status })) }}
+              >
+                <div className="flex items-center gap-2">
+                  <CurrencyDollarIcon className="h-4 w-4 text-gray-400" />
+                  <div>
+                    <p className="text-xs text-gray-500">Pay Rate</p>
+                    <p className="text-sm font-semibold">
+                      {formatRate(job.payRateMin, job.payRateMax)}
+                    </p>
+                  </div>
                 </div>
-              </div>
+              </ClickableMetric>
               <div className="flex items-center gap-2">
                 <MapPinIcon className="h-4 w-4 text-gray-400" />
                 <div>
@@ -396,7 +410,8 @@ export default function JobDetailPage() {
                 {candidates.map((c) => (
                   <div
                     key={c.id}
-                    className="flex items-center justify-between py-3 first:pt-0 last:pb-0"
+                    onClick={() => setSelectedRow(c)}
+                    className="flex items-center justify-between py-3 first:pt-0 last:pb-0 cursor-pointer hover:bg-gray-50 rounded-lg px-2 -mx-2 transition-colors"
                   >
                     <div>
                       <p className="text-sm font-medium text-gray-900">
@@ -480,6 +495,7 @@ export default function JobDetailPage() {
                   label: 'Total',
                   count: submissions.length,
                   color: 'bg-gray-500',
+                  filterStatus: null as string | null,
                 },
                 {
                   label: 'Interviewing',
@@ -487,12 +503,14 @@ export default function JobDetailPage() {
                     (s) => s.status === 'INTERVIEWING',
                   ).length,
                   color: 'bg-blue-500',
+                  filterStatus: 'INTERVIEWING',
                 },
                 {
                   label: 'Submitted',
                   count: submissions.filter((s) => s.status === 'SUBMITTED')
                     .length,
                   color: 'bg-emerald-500',
+                  filterStatus: 'SUBMITTED',
                 },
                 {
                   label: 'Pending Consent',
@@ -500,26 +518,46 @@ export default function JobDetailPage() {
                     (s) => s.status === 'CONSENT_PENDING',
                   ).length,
                   color: 'bg-amber-500',
+                  filterStatus: 'CONSENT_PENDING',
                 },
                 {
                   label: 'Rejected',
                   count: submissions.filter((s) => s.status === 'REJECTED')
                     .length,
                   color: 'bg-red-500',
+                  filterStatus: 'REJECTED',
                 },
               ].map((stat) => (
-                <div
+                <ClickableMetric
                   key={stat.label}
-                  className="flex items-center justify-between"
+                  metric="submissions"
+                  title={`${stat.label} Submissions`}
+                  staticData={{
+                    title: `${stat.label} Submissions`,
+                    rows: (stat.filterStatus
+                      ? submissions.filter((s) => s.status === stat.filterStatus)
+                      : submissions
+                    ).map((s) => ({
+                      id: s.id,
+                      consultant: `${s.consultant.firstName} ${s.consultant.lastName}`,
+                      status: s.status,
+                      matchScore: s.matchScore,
+                      payRate: s.payRate,
+                      billRate: s.billRate,
+                      submittedAt: s.submittedAt,
+                    })),
+                  }}
                 >
-                  <div className="flex items-center gap-2">
-                    <div className={`h-2 w-2 rounded-full ${stat.color}`} />
-                    <span className="text-sm text-gray-600">{stat.label}</span>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className={`h-2 w-2 rounded-full ${stat.color}`} />
+                      <span className="text-sm text-gray-600">{stat.label}</span>
+                    </div>
+                    <span className="text-sm font-semibold text-gray-900">
+                      {stat.count}
+                    </span>
                   </div>
-                  <span className="text-sm font-semibold text-gray-900">
-                    {stat.count}
-                  </span>
-                </div>
+                </ClickableMetric>
               ))}
             </div>
           </div>
@@ -533,6 +571,14 @@ export default function JobDetailPage() {
           </div>
         </div>
       </div>
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title={selectedRow.title || `${selectedRow.firstName ?? ''} ${selectedRow.lastName ?? ''}`.trim() || selectedRow.name || 'Details'}
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
+      )}
     </>
   );
 }

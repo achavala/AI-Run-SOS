@@ -25,6 +25,7 @@ import {
   StarIcon,
   TagIcon,
 } from '@heroicons/react/24/outline';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 
 /* ---------- types ---------- */
 
@@ -200,6 +201,7 @@ export default function ConsultantProfilePage() {
   const [generatingResume, setGeneratingResume] = useState<string | null>(null);
   const [previewResumeUrl, setPreviewResumeUrl] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   const fetchConsultant = useCallback(async () => {
     try {
@@ -539,11 +541,21 @@ export default function ConsultantProfilePage() {
 
         {/* Stats Row */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-          <StatCard label="Total Submissions" value={c.stats.totalSubmissions} />
-          <StatCard label="Active Submissions" value={c.stats.activeSubmissions} accent />
-          <StatCard label="Interviews" value={c.stats.totalInterviews} />
-          <StatCard label="Placements" value={c.stats.totalPlacements} accent />
-          <StatCard label="Offers" value={c.stats.totalOffers} />
+          <ClickableMetric metric="submissions" title="Total Submissions">
+            <StatCard label="Total Submissions" value={c.stats.totalSubmissions} />
+          </ClickableMetric>
+          <ClickableMetric metric="activeJobs" title="Active Submissions">
+            <StatCard label="Active Submissions" value={c.stats.activeSubmissions} accent />
+          </ClickableMetric>
+          <ClickableMetric metric="allConsultants" title="Interviews">
+            <StatCard label="Interviews" value={c.stats.totalInterviews} />
+          </ClickableMetric>
+          <ClickableMetric metric="benchSize" title="Placements">
+            <StatCard label="Placements" value={c.stats.totalPlacements} accent />
+          </ClickableMetric>
+          <ClickableMetric metric="matchQuality" title="Offers">
+            <StatCard label="Offers" value={c.stats.totalOffers} />
+          </ClickableMetric>
         </div>
 
         {/* Recent Submissions Table */}
@@ -564,7 +576,7 @@ export default function ConsultantProfilePage() {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {c.submissions.slice(0, 20).map((sub) => (
-                    <tr key={sub.id} className="hover:bg-gray-50/50 transition-colors">
+                    <tr key={sub.id} onClick={() => setSelectedRow(sub)} className="cursor-pointer hover:bg-indigo-50 transition-colors">
                       <td className="px-6 py-3 text-sm font-medium text-gray-900">{sub.jobTitle ?? '—'}</td>
                       <td className="px-6 py-3 text-sm text-gray-600">{sub.vendorName ?? '—'}</td>
                       <td className="px-6 py-3">
@@ -806,6 +818,14 @@ export default function ConsultantProfilePage() {
           )}
         </div>
       </div>
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title={selectedRow.jobTitle || selectedRow.status || "Details"}
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
+      )}
     </>
   );
 }

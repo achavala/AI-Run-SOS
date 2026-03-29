@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 import {
   ArrowTopRightOnSquareIcon,
   ArrowLeftIcon,
@@ -192,6 +193,7 @@ export default function JobMatchPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   const showToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -308,18 +310,22 @@ export default function JobMatchPage() {
 
             {/* Realness score */}
             {job.realnessScore !== null && (
-              <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600">
-                <ShieldCheckIcon className="h-4 w-4" />
-                Realness {job.realnessScore}
-              </span>
+              <ClickableMetric metric="realnessScore" title="Realness Score Details">
+                <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600">
+                  <ShieldCheckIcon className="h-4 w-4" />
+                  Realness {job.realnessScore}
+                </span>
+              </ClickableMetric>
             )}
 
             {/* Actionability score */}
             {job.actionabilityScore !== null && (
-              <span className="inline-flex items-center gap-1 text-xs font-bold text-blue-600">
-                <CheckBadgeIcon className="h-4 w-4" />
-                Actionability {job.actionabilityScore}
-              </span>
+              <ClickableMetric metric="actionabilityScore" title="Actionability Score Details">
+                <span className="inline-flex items-center gap-1 text-xs font-bold text-blue-600">
+                  <CheckBadgeIcon className="h-4 w-4" />
+                  Actionability {job.actionabilityScore}
+                </span>
+              </ClickableMetric>
             )}
           </div>
         </div>
@@ -421,9 +427,11 @@ export default function JobMatchPage() {
         <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
           <SparklesIcon className="h-5 w-5 text-indigo-500" />
           Top Matching Consultants
-          <span className="ml-1 rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-semibold text-indigo-700">
-            {matches.length}
-          </span>
+          <ClickableMetric metric="matchQuality" title="Match Quality Details" staticData={{ title: 'All Matched Consultants', rows: matches }}>
+            <span className="ml-1 rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-semibold text-indigo-700">
+              {matches.length}
+            </span>
+          </ClickableMetric>
         </h2>
 
         {matches.length === 0 ? (
@@ -433,11 +441,19 @@ export default function JobMatchPage() {
         ) : (
           <div className="mt-4 space-y-4">
             {matches.map((match) => (
-              <ConsultantCard key={match.consultantId} match={match} jobId={id} job={job} onToast={showToast} />
+              <ConsultantCard key={match.consultantId} match={match} jobId={id} job={job} onToast={showToast} onSelect={() => setSelectedRow(match)} />
             ))}
           </div>
         )}
       </div>
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title={`${selectedRow.firstName || ''} ${selectedRow.lastName || ''}`.trim() || 'Details'}
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
+      )}
     </>
   );
 }
@@ -449,11 +465,13 @@ function ConsultantCard({
   jobId,
   job,
   onToast,
+  onSelect,
 }: {
   match: MatchedConsultant;
   jobId: string;
   job: MarketJob;
   onToast: (message: string, type: 'success' | 'error') => void;
+  onSelect?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [resumeLoading, setResumeLoading] = useState(false);
@@ -508,7 +526,7 @@ function ConsultantCard({
   };
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+    <div onClick={onSelect} className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm cursor-pointer hover:border-indigo-300 hover:shadow-md transition-all">
       <div className="flex items-start gap-4">
         {/* Overall Score Badge */}
         <div
@@ -541,13 +559,13 @@ function ConsultantCard({
           {/* Contact */}
           <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-gray-500">
             {match.email && (
-              <a href={`mailto:${match.email}`} className="flex items-center gap-1 text-indigo-600 hover:underline">
+              <a href={`mailto:${match.email}`} onClick={(e) => e.stopPropagation()} className="flex items-center gap-1 text-indigo-600 hover:underline">
                 <EnvelopeIcon className="h-3.5 w-3.5" />
                 {match.email}
               </a>
             )}
             {match.phone && (
-              <a href={`tel:${match.phone}`} className="flex items-center gap-1 text-indigo-600 hover:underline">
+              <a href={`tel:${match.phone}`} onClick={(e) => e.stopPropagation()} className="flex items-center gap-1 text-indigo-600 hover:underline">
                 <PhoneIcon className="h-3.5 w-3.5" />
                 {match.phone}
               </a>
@@ -627,7 +645,7 @@ function ConsultantCard({
 
           {/* Score Breakdown (expandable) */}
           <button
-            onClick={() => setExpanded(!expanded)}
+            onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
             className="mt-3 flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-500 transition"
           >
             {expanded ? (
@@ -676,7 +694,7 @@ function ConsultantCard({
           {/* Action Buttons */}
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <button
-              onClick={handleGenerateResume}
+              onClick={(e) => { e.stopPropagation(); handleGenerateResume(); }}
               disabled={resumeLoading}
               className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 transition"
             >
@@ -684,7 +702,7 @@ function ConsultantCard({
               {resumeLoading ? 'Generating...' : 'Generate Resume'}
             </button>
             <button
-              onClick={handleInitiateSubmission}
+              onClick={(e) => { e.stopPropagation(); handleInitiateSubmission(); }}
               disabled={submitLoading}
               className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-300 bg-white px-3 py-1.5 text-xs font-medium text-indigo-700 shadow-sm hover:bg-indigo-50 disabled:opacity-50 transition"
             >

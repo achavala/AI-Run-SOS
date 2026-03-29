@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 import {
   MagnifyingGlassIcon,
   EnvelopeIcon,
@@ -182,6 +183,7 @@ function OverviewTab() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   useEffect(() => {
     Promise.all([
@@ -218,21 +220,22 @@ function OverviewTab() {
       {/* Stats grid */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {statCards.map((s) => (
-          <div
-            key={s.label}
-            className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
-          >
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-gray-500">{s.label}</p>
-              <s.icon className={`h-5 w-5 ${s.color}`} />
+          <ClickableMetric key={s.label} metric={s.label.replace(/\s+/g, '')}>
+            <div
+              className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+            >
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-gray-500">{s.label}</p>
+                <s.icon className={`h-5 w-5 ${s.color}`} />
+              </div>
+              <p className="mt-1 text-2xl font-bold text-gray-900">
+                {formatNumber(s.value)}
+              </p>
+              {s.sub && (
+                <p className="mt-0.5 text-[10px] text-gray-400">{s.sub}</p>
+              )}
             </div>
-            <p className="mt-1 text-2xl font-bold text-gray-900">
-              {formatNumber(s.value)}
-            </p>
-            {s.sub && (
-              <p className="mt-0.5 text-[10px] text-gray-400">{s.sub}</p>
-            )}
-          </div>
+          </ClickableMetric>
         ))}
       </div>
 
@@ -242,15 +245,16 @@ function OverviewTab() {
           <h3 className="mb-3 text-sm font-semibold text-gray-700">PST Batches</h3>
           <div className="flex flex-wrap gap-2">
             {overview.batches.map((b) => (
-              <div
-                key={b.name}
-                className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm"
-              >
-                <p className="text-xs font-medium text-gray-900">{b.name}</p>
-                <p className="text-[10px] text-gray-500">
-                  {formatNumber(b.count)} emails
-                </p>
-              </div>
+              <ClickableMetric key={b.name} metric={`pstBatch_${b.name}`}>
+                <div
+                  className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm"
+                >
+                  <p className="text-xs font-medium text-gray-900">{b.name}</p>
+                  <p className="text-[10px] text-gray-500">
+                    {formatNumber(b.count)} emails
+                  </p>
+                </div>
+              </ClickableMetric>
             ))}
           </div>
         </div>
@@ -262,21 +266,22 @@ function OverviewTab() {
           <h3 className="mb-3 text-sm font-semibold text-gray-700">Employment Type Breakdown</h3>
           <div className="flex flex-wrap gap-3">
             {overview.employmentTypes.map((et) => (
-              <div
-                key={et.type}
-                className={`rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm`}
-              >
-                <span
-                  className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${
-                    EMP_TYPE_COLORS[et.type] ?? 'bg-gray-100 text-gray-700'
-                  }`}
+              <ClickableMetric key={et.type} metric={`employmentType_${et.type}`}>
+                <div
+                  className={`rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm`}
                 >
-                  {EMP_TYPE_LABELS[et.type] ?? et.type}
-                </span>
-                <p className="mt-1 text-xl font-bold text-gray-900">
-                  {formatNumber(et.count)}
-                </p>
-              </div>
+                  <span
+                    className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${
+                      EMP_TYPE_COLORS[et.type] ?? 'bg-gray-100 text-gray-700'
+                    }`}
+                  >
+                    {EMP_TYPE_LABELS[et.type] ?? et.type}
+                  </span>
+                  <p className="mt-1 text-xl font-bold text-gray-900">
+                    {formatNumber(et.count)}
+                  </p>
+                </div>
+              </ClickableMetric>
             ))}
           </div>
         </div>
@@ -300,7 +305,7 @@ function OverviewTab() {
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {vendors.map((v) => (
-                  <tr key={v.id} className="hover:bg-gray-50">
+                  <tr key={v.id} onClick={() => setSelectedRow(v)} className="cursor-pointer hover:bg-indigo-50">
                     <td className="px-4 py-2.5 font-medium text-gray-900 whitespace-nowrap">{v.company}</td>
                     <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{v.domain ?? '—'}</td>
                     <td className="px-4 py-2.5 text-right text-gray-700 tabular-nums">{v.emailCount.toLocaleString()}</td>
@@ -339,6 +344,14 @@ function OverviewTab() {
           </div>
         </div>
       )}
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title={selectedRow.company || selectedRow.name || 'Details'}
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
+      )}
     </div>
   );
 }
@@ -353,6 +366,7 @@ function ContactsTab() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [hasPhone, setHasPhone] = useState(false);
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   const fetchContacts = useCallback(async (page = 1) => {
     setLoading(true);
@@ -425,14 +439,14 @@ function ContactsTab() {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {contacts.map((c) => (
-                <tr key={c.id} className="hover:bg-gray-50">
+                <tr key={c.id} onClick={() => setSelectedRow(c)} className="cursor-pointer hover:bg-indigo-50">
                   <td className="px-4 py-2.5 font-medium text-gray-900 whitespace-nowrap">{c.name || '—'}</td>
                   <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{c.email}</td>
                   <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{c.company ?? '—'}</td>
                   <td className="px-4 py-2.5 whitespace-nowrap">
                     {c.phone ? (
                       <button
-                        onClick={() => navigator.clipboard.writeText(c.phone!)}
+                        onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(c.phone!); }}
                         className="text-indigo-600 hover:text-indigo-500 hover:underline"
                         title="Click to copy"
                       >
@@ -448,6 +462,7 @@ function ContactsTab() {
                         href={c.linkedIn}
                         target="_blank"
                         rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
                         className="inline-flex text-indigo-600 hover:text-indigo-500"
                         title={c.linkedIn}
                       >
@@ -468,6 +483,14 @@ function ContactsTab() {
 
       {/* Pagination */}
       <PaginationBar pagination={pagination} onPageChange={fetchContacts} />
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title={selectedRow.name || 'Contact Details'}
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
+      )}
     </div>
   );
 }
@@ -486,6 +509,7 @@ function ConsultantsTab() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [selected, setSelected] = useState<ConsultantDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   useEffect(() => {
     api.get<Skill[]>('/pst-intel/skills').then((sk) => setSkills(sk.slice(0, 30))).catch(() => {});
@@ -573,10 +597,10 @@ function ConsultantsTab() {
           {/* Consultant list */}
           <div className="xl:col-span-2 space-y-3">
             {consultants.map((c) => (
-              <button
+              <div
                 key={c.id}
-                onClick={() => selectConsultant(c)}
-                className={`w-full text-left rounded-xl border bg-white p-4 shadow-sm transition hover:shadow-md ${
+                onClick={() => setSelectedRow(c)}
+                className={`w-full text-left rounded-xl border bg-white p-4 shadow-sm transition hover:shadow-md cursor-pointer ${
                   selected?.id === c.id
                     ? 'border-indigo-400 ring-2 ring-indigo-100'
                     : 'border-gray-200'
@@ -584,7 +608,7 @@ function ConsultantsTab() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <h3 className="text-sm font-semibold text-gray-900">{c.fullName}</h3>
+                    <h3 className="text-sm font-semibold text-gray-900 hover:text-indigo-600" onClick={(e) => { e.stopPropagation(); selectConsultant(c); }}>{c.fullName}</h3>
                     {c.email && <p className="mt-0.5 text-xs text-gray-500">{c.email}</p>}
                     {c.phone && (
                       <p className="mt-0.5 flex items-center gap-1 text-xs text-gray-500">
@@ -626,7 +650,7 @@ function ConsultantsTab() {
                     {c.lastSeenAt && <p className="text-[10px] text-gray-400">{formatDate(c.lastSeenAt)}</p>}
                   </div>
                 </div>
-              </button>
+              </div>
             ))}
 
             <PaginationBar pagination={pagination} onPageChange={fetchConsultants} />
@@ -708,6 +732,14 @@ function ConsultantsTab() {
           </div>
         </div>
       )}
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title={selectedRow.fullName || 'Consultant Details'}
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
+      )}
     </div>
   );
 }
@@ -722,6 +754,7 @@ function ReqSignalsTab() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [employmentType, setEmploymentType] = useState('ALL');
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   const fetchSignals = useCallback(async (page = 1) => {
     setLoading(true);
@@ -796,7 +829,7 @@ function ReqSignalsTab() {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {signals.map((s) => (
-                <tr key={s.id} className="hover:bg-gray-50">
+                <tr key={s.id} onClick={() => setSelectedRow(s)} className="cursor-pointer hover:bg-indigo-50">
                   <td className="px-4 py-2.5 font-medium text-gray-900 whitespace-nowrap max-w-[200px] truncate">
                     {s.title}
                   </td>
@@ -806,6 +839,7 @@ function ReqSignalsTab() {
                       s.contactEmail ? (
                         <a
                           href={`mailto:${s.contactEmail}`}
+                          onClick={(e) => e.stopPropagation()}
                           className="text-indigo-600 hover:text-indigo-500 hover:underline"
                         >
                           {s.contactName}
@@ -859,6 +893,14 @@ function ReqSignalsTab() {
       )}
 
       <PaginationBar pagination={pagination} onPageChange={fetchSignals} />
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title={selectedRow.title || 'Signal Details'}
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
+      )}
     </div>
   );
 }
