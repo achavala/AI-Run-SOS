@@ -460,7 +460,9 @@ export default function ConsultantProfilePage() {
                   <p className="text-sm font-medium text-gray-900">
                     {c.currentResume.version || 'Current Resume'}
                     {c.currentResume.source && (
-                      <span className="ml-2 text-xs text-gray-400">({c.currentResume.source})</span>
+                      <span className="ml-2 text-xs text-gray-400">
+                        ({c.currentResume.source === 'baseline-generated' ? 'Auto-generated' : c.currentResume.source})
+                      </span>
                     )}
                   </p>
                   <p className="text-xs text-gray-500">
@@ -481,25 +483,30 @@ export default function ConsultantProfilePage() {
               {/* Inline resume preview */}
               {previewResumeUrl && (
                 <div className="mt-3 rounded-lg border border-gray-200 overflow-hidden bg-white">
-                  {previewResumeUrl.startsWith('http://') || previewResumeUrl.startsWith('https://') ? (
+                  {previewResumeUrl.startsWith('http://') || previewResumeUrl.startsWith('https://') || previewResumeUrl.startsWith('data:') ? (
                     <iframe
                       src={previewResumeUrl}
                       className="w-full border-0"
                       style={{ height: '600px' }}
                       title="Resume Preview"
                     />
+                  ) : previewResumeUrl.startsWith('s3://') ? (
+                    <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
+                      <DocumentTextIcon className="h-16 w-16 text-gray-300 mb-4" />
+                      <p className="text-sm font-medium text-gray-700">
+                        {c.currentResume!.version || 'Resume'} (Seed Data)
+                      </p>
+                      <p className="mt-3 text-xs text-gray-400">
+                        This is placeholder seed data. Upload a real resume to replace it.
+                      </p>
+                    </div>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
                       <DocumentTextIcon className="h-16 w-16 text-gray-300 mb-4" />
                       <p className="text-sm font-medium text-gray-700">
-                        {c.currentResume!.version || 'Resume'} — {previewResumeUrl.split('/').pop()}
+                        {c.currentResume!.version || 'Resume'}
                       </p>
-                      <p className="mt-1 text-xs text-gray-500">
-                        Stored at: <span className="font-mono text-gray-600">{previewResumeUrl}</span>
-                      </p>
-                      <p className="mt-3 text-xs text-gray-400">
-                        Resume file is stored remotely. Download functionality coming soon.
-                      </p>
+                      <p className="mt-1 text-xs text-gray-500 font-mono">{previewResumeUrl.split('/').pop()}</p>
                     </div>
                   )}
                 </div>

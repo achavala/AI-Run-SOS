@@ -145,6 +145,21 @@ export class JobMatchController {
     return this.svc.uploadResume(tenantId, body.consultantId, file, body.version);
   }
 
+  /* ── Serve a ResumeVersion file (uploaded data URI or local file) ─── */
+
+  @Get('resume-version/:id')
+  @Roles('MANAGEMENT', 'SUPERADMIN', 'RECRUITMENT', 'SALES')
+  async serveResumeVersion(
+    @CurrentTenant() tenantId: string,
+    @Param('id') versionId: string,
+    @Res() res: Response,
+  ) {
+    const content = await this.svc.getResumeVersionContent(tenantId, versionId);
+    res.setHeader('Content-Type', content.mimeType);
+    if (content.disposition) res.setHeader('Content-Disposition', content.disposition);
+    res.send(content.buffer);
+  }
+
   /* ── Handle approval (public — no auth guard for email links) ── */
 
   @Get('approval/:token')
@@ -221,6 +236,14 @@ export class JobMatchController {
         return s !== 'complete' && s !== 'error' && s !== 'not_found';
       }, true),
     );
+  }
+
+  /* ── Admin: generate baseline resumes for all consultants ── */
+
+  @Post('admin/generate-baseline-resumes')
+  @Roles('MANAGEMENT', 'SUPERADMIN')
+  generateBaselineResumes(@CurrentTenant() tenantId: string) {
+    return this.svc.generateBaselineResumes(tenantId);
   }
 
   /* ── Admin: clean fake seed data ─────────────────────── */

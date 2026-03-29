@@ -2294,6 +2294,268 @@ export class JobMatchService {
   }
 
   /* ═══════════════════════════════════════════════════════════════
+   *  SERVE RESUME VERSION CONTENT
+   *  Handles: data: URIs (uploaded), local file paths, s3:// (seed)
+   * ═══════════════════════════════════════════════════════════════ */
+
+  async getResumeVersionContent(tenantId: string, versionId: string) {
+    const rv = await this.prisma.resumeVersion.findFirst({
+      where: { id: versionId, tenantId },
+    });
+    if (!rv) throw new NotFoundException('Resume version not found');
+
+    const fileUrl = rv.fileUrl;
+
+    // data: URI (uploaded resume)
+    if (fileUrl.startsWith('data:')) {
+      const match = fileUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (!match || !match[1] || !match[2]) throw new NotFoundException('Invalid data URI');
+      const mimeType = match[1]!;
+      const buffer = Buffer.from(match[2]!, 'base64');
+      const ext = mimeType.includes('pdf') ? 'pdf' : mimeType.includes('html') ? 'html' : 'bin';
+      return {
+        buffer,
+        mimeType,
+        disposition: `inline; filename="resume.${ext}"`,
+      };
+    }
+
+    // Local file path (generated resume)
+    if (fileUrl.startsWith('/') || fileUrl.startsWith('resume://')) {
+      // resume:// protocol — resolve to actual path
+      let filePath = fileUrl;
+      if (fileUrl.startsWith('resume://')) {
+        const parts = fileUrl.replace('resume://', '').split('/');
+        filePath = path.join(this.resumeBaseDir, ...parts) + '.html';
+      }
+
+      try {
+        const buffer = fs.readFileSync(filePath);
+        const ext = path.extname(filePath).toLowerCase();
+        const mimeType = ext === '.pdf' ? 'application/pdf' : ext === '.html' ? 'text/html' : 'application/octet-stream';
+        return {
+          buffer,
+          mimeType,
+          disposition: `inline; filename="${path.basename(filePath)}"`,
+        };
+      } catch {
+        throw new NotFoundException(`Resume file not found on disk: ${path.basename(filePath)}`);
+      }
+    }
+
+    // s3:// URLs (fake seed data)
+    if (fileUrl.startsWith('s3://')) {
+      throw new NotFoundException('This is placeholder seed data — no actual file exists. Upload a real resume.');
+    }
+
+    throw new NotFoundException('Unknown resume file format');
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+   *  GENERATE BASELINE RESUMES FOR ALL CONSULTANTS
+   *  Replaces fake s3:// seed URLs with real HTML resume content
+   *  stored as data:text/html;base64,... in ResumeVersion.fileUrl
+   * ═══════════════════════════════════════════════════════════════ */
+
+  async generateBaselineResumes(tenantId: string) {
+    this.logger.log(`generateBaselineResumes: tenantId=${tenantId}`);
+
+    // Find all consultants who have s3:// resume URLs (seed data)
+    const consultants = await this.prisma.consultant.findMany({
+      where: {
+        tenantId,
+        resumeVersions: { some: { fileUrl: { startsWith: 's3://' } } },
+      },
+      include: {
+        workAuths: { where: { isCurrent: true } },
+        resumeVersions: {
+          where: { fileUrl: { startsWith: 's3://' } },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+
+    this.logger.log(`Found ${consultants.length} consultants with seed resume URLs`);
+
+    const results: { consultantId: string; name: string; status: string }[] = [];
+
+    for (const c of consultants) {
+      try {
+        const skills = Array.isArray(c.skills) ? (c.skills as string[]) : [];
+        const performanceHistory = Array.isArray(c.performanceHistory)
+          ? (c.performanceHistory as any[])
+          : [];
+        const currentAuth = c.workAuths.find((wa) => wa.isCurrent) ?? null;
+        const podKey = (c.pods as string[])?.[0] ?? 'DEFAULT';
+        const template = POD_TEMPLATES[podKey] ?? POD_TEMPLATES.DEFAULT!;
+
+        const html = this.buildBaselineHtml(
+          {
+            name: `${c.firstName} ${c.lastName}`,
+            email: c.email,
+            phone: c.phone,
+            skills,
+            experience: performanceHistory,
+            workAuth: currentAuth
+              ? { type: currentAuth.authType, expiry: currentAuth.expiryDate }
+              : null,
+            desiredRate: c.desiredRate,
+            availableFrom: c.availableFrom,
+            pods: (c.pods as string[]) ?? [],
+          },
+          template,
+        );
+
+        // Convert HTML to data URI
+        const base64 = Buffer.from(html, 'utf-8').toString('base64');
+        const dataUri = `data:text/html;base64,${base64}`;
+        const fileHash = crypto.createHash('sha256').update(html).digest('hex').slice(0, 16);
+
+        // Update all s3:// ResumeVersions for this consultant
+        for (const rv of c.resumeVersions) {
+          await this.prisma.resumeVersion.update({
+            where: { id: rv.id },
+            data: {
+              fileUrl: dataUri,
+              fileHash: `sha256:${fileHash}`,
+              source: 'baseline-generated',
+            },
+          });
+        }
+
+        // Update resumeFreshnessAt on consultant
+        await this.prisma.consultant.update({
+          where: { id: c.id },
+          data: { resumeFreshnessAt: new Date() },
+        });
+
+        results.push({
+          consultantId: c.id,
+          name: `${c.firstName} ${c.lastName}`,
+          status: 'generated',
+        });
+        this.logger.log(`Baseline resume generated for ${c.firstName} ${c.lastName}`);
+      } catch (err: any) {
+        results.push({
+          consultantId: c.id,
+          name: `${c.firstName} ${c.lastName}`,
+          status: `error: ${err.message}`,
+        });
+        this.logger.error(`Failed to generate baseline resume for ${c.firstName} ${c.lastName}: ${err.message}`);
+      }
+    }
+
+    return {
+      total: consultants.length,
+      generated: results.filter((r) => r.status === 'generated').length,
+      errors: results.filter((r) => r.status.startsWith('error')).length,
+      details: results,
+    };
+  }
+
+  /** Build a baseline HTML resume from consultant profile data (no job context). */
+  private buildBaselineHtml(
+    data: {
+      name: string;
+      email: string;
+      phone: string | null;
+      skills: string[];
+      experience: any[];
+      workAuth: { type: string; expiry: Date | null } | null;
+      desiredRate: number | null;
+      availableFrom: Date | null;
+      pods: string[];
+    },
+    template: { headerColor: string; sections: string[] },
+  ): string {
+    const skillsHtml = data.skills
+      .map((s) => `<span class="skill-tag">${this.escapeHtml(s)}</span>`)
+      .join('');
+
+    const experienceHtml = (data.experience || [])
+      .slice(0, 8)
+      .map((exp: any) => {
+        const title = exp.title || exp.role || 'Role';
+        const company = exp.company || exp.client || '';
+        const period = exp.period || exp.dates || '';
+        const desc = exp.description || exp.summary || '';
+        return `
+          <div class="experience-entry">
+            <h3>${this.escapeHtml(String(title))}${company ? ` &mdash; ${this.escapeHtml(String(company))}` : ''}</h3>
+            ${period ? `<div class="period">${this.escapeHtml(String(period))}</div>` : ''}
+            ${desc ? `<p>${this.escapeHtml(String(desc))}</p>` : ''}
+          </div>`;
+      })
+      .join('');
+
+    const authBadge = data.workAuth
+      ? `<span class="auth-badge">${this.escapeHtml(data.workAuth.type)}${
+          data.workAuth.expiry
+            ? ` (exp ${new Date(data.workAuth.expiry).toISOString().slice(0, 10)})`
+            : ''
+        }</span>`
+      : '';
+
+    const podBadges = data.pods
+      .map((p) => `<span class="pod-badge">${this.escapeHtml(p)}</span>`)
+      .join(' ');
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${this.escapeHtml(data.name)} — Professional Resume</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 20px; color: #1f2937; line-height: 1.6; font-size: 11pt; }
+  .header { background: ${template.headerColor}; color: white; padding: 24px 28px; margin: -20px -20px 20px; }
+  .header h1 { margin: 0 0 4px; font-size: 20pt; font-weight: 600; }
+  .header .contact { font-size: 10pt; opacity: 0.9; }
+  .header .meta { font-size: 9pt; opacity: 0.8; margin-top: 8px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .auth-badge { background: rgba(255,255,255,0.2); padding: 2px 10px; border-radius: 12px; font-size: 9pt; }
+  .pod-badge { background: rgba(255,255,255,0.15); padding: 2px 8px; border-radius: 8px; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.5px; }
+  h2 { color: ${template.headerColor}; border-bottom: 2px solid ${template.headerColor}; padding-bottom: 4px; font-size: 13pt; margin-top: 24px; }
+  .skills-bar { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  .skill-tag { background: ${template.headerColor}15; color: ${template.headerColor}; padding: 3px 12px; border-radius: 12px; font-size: 9pt; font-weight: 500; }
+  .experience-entry { margin-bottom: 16px; }
+  .experience-entry h3 { margin: 0 0 2px; font-size: 11pt; color: #374151; }
+  .experience-entry .period { font-size: 9pt; color: #6b7280; margin-bottom: 4px; }
+  .experience-entry p { margin: 4px 0 0; font-size: 10pt; }
+  .availability { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px 16px; margin: 16px 0; font-size: 10pt; }
+  .availability strong { color: #166534; }
+  .branding { text-align: right; font-size: 8pt; color: #9ca3af; margin-top: 24px; border-top: 1px solid #e5e7eb; padding-top: 8px; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>${this.escapeHtml(data.name)}</h1>
+    <div class="contact">${this.escapeHtml(data.email)}${data.phone ? ' | ' + this.escapeHtml(data.phone) : ''}</div>
+    <div class="meta">
+      ${authBadge}
+      ${podBadges}
+    </div>
+  </div>
+
+  <h2>${template.sections[1] || 'Technical Skills'}</h2>
+  <div class="skills-bar">${skillsHtml || '<span style="color:#9ca3af">Skills to be updated</span>'}</div>
+
+  ${data.experience.length > 0 ? `
+  <h2>${template.sections[2] || 'Professional Experience'}</h2>
+  ${experienceHtml}
+  ` : ''}
+
+  <div class="availability">
+    ${data.desiredRate ? `<strong>Desired Rate:</strong> $${data.desiredRate}/hr` : ''}
+    ${data.desiredRate && data.availableFrom ? ' &nbsp;|&nbsp; ' : ''}
+    ${data.availableFrom ? `<strong>Available From:</strong> ${new Date(data.availableFrom).toISOString().slice(0, 10)}` : ''}
+    ${!data.desiredRate && !data.availableFrom ? '<strong>Available for new opportunities</strong>' : ''}
+  </div>
+
+  <div class="branding">Presented by Cloud Resources Inc. | Generated ${new Date().toISOString().slice(0, 10)}</div>
+</body>
+</html>`;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
    *  CLEAN FAKE SEED DATA (s3://resumes/... URLs)
    * ═══════════════════════════════════════════════════════════════ */
 

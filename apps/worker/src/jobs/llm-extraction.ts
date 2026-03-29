@@ -1,7 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import axios from "axios";
 
-const OPENAI_MODEL = process.env.LLM_MODEL || "gpt-4o-mini";
+const CLAUDE_MODEL = process.env.LLM_MODEL || "claude-opus-4-6";
 
 interface ExtractionResult {
   jobTitle: string | null;
@@ -36,9 +36,9 @@ export async function handleLlmExtraction(
   prisma: PrismaClient,
   _data: Record<string, unknown>
 ): Promise<void> {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    console.log("[llm-extraction] OPENAI_API_KEY not set, skipping");
+    console.log("[llm-extraction] ANTHROPIC_API_KEY not set, skipping");
     return;
   }
 
@@ -64,7 +64,7 @@ export async function handleLlmExtraction(
     return;
   }
 
-  console.log(`[llm-extraction] Processing ${ambiguousEmails.length} ambiguous emails with LLM`);
+  console.log(`[llm-extraction] Processing ${ambiguousEmails.length} ambiguous emails with Claude ${CLAUDE_MODEL}`);
 
   let enriched = 0;
   let failed = 0;
@@ -78,7 +78,7 @@ export async function handleLlmExtraction(
         (email.bodyText || "").slice(0, 4000),
       ].join("\n");
 
-      const result = await callLlm(apiKey, emailText);
+      const result = await callClaude(apiKey, emailText);
       if (!result) {
         failed++;
         continue;
@@ -151,35 +151,34 @@ export async function handleLlmExtraction(
   console.log(`[llm-extraction] Complete: ${enriched} enriched, ${failed} failed out of ${ambiguousEmails.length}`);
 }
 
-async function callLlm(apiKey: string, emailText: string): Promise<ExtractionResult | null> {
+async function callClaude(apiKey: string, emailText: string): Promise<ExtractionResult | null> {
   try {
     const response = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
+      "https://api.anthropic.com/v1/messages",
       {
-        model: OPENAI_MODEL,
-        messages: [
-          { role: "system", content: EXTRACTION_PROMPT },
-          { role: "user", content: emailText },
-        ],
-        temperature: 0.1,
+        model: CLAUDE_MODEL,
         max_tokens: 800,
+        messages: [
+          { role: "user", content: `${EXTRACTION_PROMPT}\n\n---\n\n${emailText}` },
+        ],
       },
       {
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
           "Content-Type": "application/json",
         },
         timeout: 30_000,
       }
     );
 
-    const content = response.data?.choices?.[0]?.message?.content;
+    const content = response.data?.content?.[0]?.text;
     if (!content) return null;
 
     const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     return JSON.parse(cleaned) as ExtractionResult;
   } catch (err: any) {
-    console.error(`[llm-extraction] LLM call failed: ${err.message}`);
+    console.error(`[llm-extraction] Claude API call failed: ${err.message}`);
     return null;
   }
 }

@@ -1,5 +1,4 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 const FREE_EMAIL_DOMAINS = new Set([
@@ -231,14 +230,9 @@ export class BenchSalesService {
       };
     }
 
-    /* location filter — text search on consultant's assignments/placements location or job location */
+    /* location filter */
     if (filters.location) {
       const loc = filters.location.trim();
-      // Consultants don't have a direct location field, but their active
-      // assignments carry location.  We also fall back to checking the
-      // first-name / last-name fields in case location is appended there
-      // by import scripts.  In practice the main hit will come from
-      // assignments.job.location.
       andConditions.push({
         OR: [
           { assignments: { some: { job: { location: { contains: loc, mode: 'insensitive' } } } } },
@@ -274,7 +268,6 @@ export class BenchSalesService {
           ];
           break;
         }
-        // default: no filter
       }
     }
 
@@ -286,27 +279,13 @@ export class BenchSalesService {
       where.desiredRate = { ...where.desiredRate, lte: filters.maxRate };
     }
 
-    /* ---------- exclude vendor domains at DB level ---------- */
-    const vendorDomainList = Array.from(vendorDomains);
-    if (vendorDomainList.length > 0) {
-      const domainPatterns = vendorDomainList.map((d) => `%@${d}`);
-      andConditions.push({
-        OR: [
-          { email: null },
-          { NOT: { email: { in: [] } } },
-          ...domainPatterns.map(() => ({ email: { not: { equals: '' } } })),
-        ],
-      });
-      // Raw-filter approach: we add an exclusion of vendor email domains
-      // via NOT condition on email suffix
-      for (const d of vendorDomainList.slice(0, 50)) {
-        andConditions.push({
-          NOT: { email: { endsWith: `@${d}` } },
-        });
-      }
+    /* ---------- exclude vendor email domains at DB level ---------- */
+    const vendorDomainList = Array.from(vendorDomains).slice(0, 50);
+    for (const d of vendorDomainList) {
+      andConditions.push({ NOT: { email: { endsWith: `@${d}` } } });
     }
 
-    // Exclude recruiter patterns in names
+    /* exclude recruiter patterns in names */
     andConditions.push(
       { NOT: { firstName: { contains: 'recruiter', mode: 'insensitive' as const } } },
       { NOT: { firstName: { contains: 'recruiting', mode: 'insensitive' as const } } },
@@ -314,14 +293,11 @@ export class BenchSalesService {
     );
 
     if (andConditions.length > 0) {
-      where.AND = [...(where.AND || []), ...andConditions];
+      where.AND = andConditions;
     }
 
-    /* ---------- fetch candidates with DB-level pagination ---------- */
-    const skip = (page - 1) * pageSize;
-    const orderBy = this.buildSortOrder(filters.sort);
-
-    const [rawConsultants, filteredTotal] = await Promise.all([
+    /* ---------- fetch all matching candidates ---------- */
+    const [rawConsultants, dbTotal] = await Promise.all([
       this.prisma.consultant.findMany({
         where,
         include: {
@@ -329,51 +305,53 @@ export class BenchSalesService {
           resumeVersions: { where: { isCurrent: true }, take: 1, orderBy: { createdAt: 'desc' } },
           _count: { select: { submissions: true, placements: true } },
         },
-        orderBy,
-        skip,
-        take: pageSize,
       }),
       this.prisma.consultant.count({ where }),
     ]);
 
+    /* ---------- tech category post-filter ---------- */
+    let consultants = rawConsultants;
+    if (filters.techCategory && filters.techCategory !== 'all') {
+      consultants = consultants.filter((c) => {
+        const skills = (c.skills as string[]) ?? [];
+        return matchesTechCategory(skills, filters.techCategory!);
+      });
+    }
+
+    const filteredTotal = consultants.length;
+
     /* ---------- compute placeability + enrich ---------- */
     const now = new Date();
 
-    const enriched = rawConsultants.map((c) => {
+    const enriched = consultants.map((c) => {
       const skills = (c.skills as string[]) ?? [];
       const currentAuth = c.workAuths[0] ?? null;
       const currentResume = c.resumeVersions[0] ?? null;
       const detectedCategories = detectTechCategories(skills);
 
       /* --- placeability score (0-100) --- */
-      // qualityScore weight 40%
       const qualityComponent = ((c.qualityScore ?? 0) / 100) * 40;
 
-      // resumeFreshness weight 20%  — fresher resume = higher score
       let resumeFreshnessComponent = 0;
       if (c.resumeFreshnessAt) {
         const daysOld = daysBetween(now, c.resumeFreshnessAt);
-        // 0 days old = 20, >180 days old = 0
         resumeFreshnessComponent = Math.max(0, 20 - (daysOld / 180) * 20);
       } else if (currentResume) {
         const daysOld = daysBetween(now, currentResume.createdAt);
         resumeFreshnessComponent = Math.max(0, 20 - (daysOld / 180) * 20);
       }
 
-      // skills depth weight 20% — more skills = higher (cap at 8 to avoid penalizing specialists)
       const skillsDepthComponent = Math.min(skills.length / 8, 1) * 20;
 
-      // availability weight 20% — available sooner = higher
-      let availabilityComponent = 10; // default: unknown availability gets mid-range
+      let availabilityComponent = 10;
       if (c.availableFrom) {
         const daysUntil = daysBetween(now, c.availableFrom);
         if (c.availableFrom <= now) {
-          availabilityComponent = 20; // already available
+          availabilityComponent = 20;
         } else {
           availabilityComponent = Math.max(0, 20 - (daysUntil / 60) * 20);
         }
       } else {
-        // null availableFrom treated as "could be immediate"
         availabilityComponent = 15;
       }
 
@@ -417,12 +395,33 @@ export class BenchSalesService {
       };
     });
 
+    /* ---------- sort ---------- */
+    const sortKey = filters.sort ?? 'placeable';
+    switch (sortKey) {
+      case 'placeable':
+        enriched.sort((a, b) => b.placeabilityScore - a.placeabilityScore);
+        break;
+      case 'rate-desc':
+        enriched.sort((a, b) => (b.desiredRate ?? 0) - (a.desiredRate ?? 0));
+        break;
+      case 'newest':
+        enriched.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        break;
+      case 'score':
+        enriched.sort((a, b) => (b.qualityScore ?? 0) - (a.qualityScore ?? 0));
+        break;
+    }
+
+    /* ---------- paginate in-memory ---------- */
+    const skip = (page - 1) * pageSize;
+    const paged = enriched.slice(skip, skip + pageSize);
+
     this.logger.log(
-      `getConsultants returning ${enriched.length}/${filteredTotal} consultants (page ${page})`,
+      `getConsultants returning ${paged.length}/${filteredTotal} consultants (page ${page})`,
     );
 
     return {
-      data: enriched,
+      data: paged,
       total: filteredTotal,
       page,
       pageSize,
@@ -491,7 +490,6 @@ export class BenchSalesService {
     const activeSubmissions = consultant.submissions.filter((s) => activeStatuses.includes(s.status));
     const interviewingCount = consultant.submissions.filter((s) => s.status === 'INTERVIEWING').length;
 
-    /* --- count interviews via submissions --- */
     const interviewSubmissionIds = consultant.submissions
       .filter((s) => s.status === 'INTERVIEWING' || s.status === 'OFFERED' || s.status === 'ACCEPTED')
       .map((s) => s.id);
@@ -627,7 +625,6 @@ export class BenchSalesService {
   async getTopJobsForConsultant(tenantId: string, consultantId: string, limit = 10) {
     this.logger.log(`getTopJobsForConsultant tenant=${tenantId} consultant=${consultantId} limit=${limit}`);
 
-    /* --- load consultant --- */
     const consultant = await this.prisma.consultant.findFirst({
       where: { id: consultantId, tenantId },
       include: {
@@ -642,8 +639,6 @@ export class BenchSalesService {
     const skills = (consultant.skills as string[]) ?? [];
     const currentAuth = consultant.workAuths[0] ?? null;
     const visaType = currentAuth?.authType ?? null;
-
-    /* H1B consultants can only do C2C (employer must transfer/sponsor) */
     const h1bRestricted = visaType === 'H1B' || visaType === 'L1';
 
     /* --- Fetch active market jobs --- */
@@ -655,56 +650,29 @@ export class BenchSalesService {
     const marketJobs = await this.prisma.marketJob.findMany({
       where: marketJobWhere,
       orderBy: { postedAt: 'desc' },
-      take: 500, // cap for scoring performance
+      take: 500,
       select: {
-        id: true,
-        title: true,
-        company: true,
-        description: true,
-        location: true,
-        locationType: true,
-        employmentType: true,
-        skills: true,
-        hourlyRateMin: true,
-        hourlyRateMax: true,
-        rateText: true,
-        applyUrl: true,
-        sourceUrl: true,
-        source: true,
-        postedAt: true,
-        sourcePostedAt: true,
-        realnessScore: true,
-        actionabilityScore: true,
-        recruiterName: true,
-        recruiterEmail: true,
+        id: true, title: true, company: true, description: true,
+        location: true, locationType: true, employmentType: true,
+        skills: true, hourlyRateMin: true, hourlyRateMax: true,
+        rateText: true, applyUrl: true, sourceUrl: true, source: true,
+        postedAt: true, sourcePostedAt: true, realnessScore: true,
+        actionabilityScore: true, recruiterName: true, recruiterEmail: true,
         status: true,
       },
     });
 
     /* --- Fetch active internal jobs --- */
-    const internalJobWhere: any = {
-      tenantId,
-      status: { in: ['NEW', 'QUALIFYING', 'ACTIVE'] },
-    };
-
     const internalJobs = await this.prisma.job.findMany({
-      where: internalJobWhere,
+      where: { tenantId, status: { in: ['NEW', 'QUALIFYING', 'ACTIVE'] } },
       orderBy: { createdAt: 'desc' },
       take: 200,
       select: {
-        id: true,
-        title: true,
-        description: true,
-        location: true,
-        locationType: true,
-        skills: true,
-        rateMin: true,
-        rateMax: true,
-        rateType: true,
-        status: true,
+        id: true, title: true, description: true, location: true,
+        locationType: true, skills: true, rateMin: true, rateMax: true,
+        rateType: true, status: true,
         vendor: { select: { id: true, companyName: true } },
-        closureLikelihood: true,
-        createdAt: true,
+        closureLikelihood: true, createdAt: true,
       },
     });
 
@@ -713,25 +681,16 @@ export class BenchSalesService {
     /* --- Score market jobs --- */
     const scoredMarket = marketJobs.map((job) => {
       const jobSkills = (job.skills as string[]) ?? [];
-
-      // 1. Skill overlap (0-50)
       const overlap = skillOverlapScore(skills, jobSkills);
       const skillScore = overlap * 50;
 
-      // 2. Rate fit (0-20) — how well does job rate match consultant desired rate
-      let rateScore = 10; // default mid-range if no rate info
+      let rateScore = 10;
       if (consultant.desiredRate && job.hourlyRateMax) {
-        if (job.hourlyRateMax >= consultant.desiredRate) {
-          rateScore = 20; // job pays at or above desired
-        } else if (job.hourlyRateMin && job.hourlyRateMin >= consultant.desiredRate * 0.85) {
-          rateScore = 14; // within 15% of desired
-        } else {
-          const ratio = (job.hourlyRateMax ?? 0) / consultant.desiredRate;
-          rateScore = Math.max(0, ratio * 15);
-        }
+        if (job.hourlyRateMax >= consultant.desiredRate) rateScore = 20;
+        else if (job.hourlyRateMin && job.hourlyRateMin >= consultant.desiredRate * 0.85) rateScore = 14;
+        else rateScore = Math.max(0, ((job.hourlyRateMax ?? 0) / consultant.desiredRate) * 15);
       }
 
-      // 3. Freshness (0-15) — prefer recently posted
       let freshnessScore = 5;
       const postedDate = job.sourcePostedAt ?? job.postedAt;
       if (postedDate) {
@@ -739,39 +698,25 @@ export class BenchSalesService {
         freshnessScore = Math.max(0, 15 - (daysOld / 14) * 15);
       }
 
-      // 4. Realness / Actionability (0-15)
       const realnessComponent = ((job.realnessScore ?? 50) / 100) * 8;
       const actionabilityComponent = ((job.actionabilityScore ?? 50) / 100) * 7;
       const qualityScore = realnessComponent + actionabilityComponent;
-
       const totalScore = Math.round(skillScore + rateScore + freshnessScore + qualityScore);
 
       return {
-        id: job.id,
-        source: 'MARKET' as const,
-        title: job.title,
-        company: job.company,
-        location: job.location,
-        locationType: job.locationType,
+        id: job.id, source: 'MARKET' as const, title: job.title,
+        company: job.company, location: job.location, locationType: job.locationType,
         employmentType: job.employmentType,
         employmentTypeBadge: formatEmploymentType(job.employmentType),
-        skills: jobSkills,
-        rateMin: job.hourlyRateMin,
-        rateMax: job.hourlyRateMax,
-        rateText: job.rateText,
-        applyUrl: job.applyUrl,
-        sourceUrl: job.sourceUrl,
+        skills: jobSkills, rateMin: job.hourlyRateMin, rateMax: job.hourlyRateMax,
+        rateText: job.rateText, applyUrl: job.applyUrl, sourceUrl: job.sourceUrl,
         jobSource: job.source,
         postedAt: (job.sourcePostedAt ?? job.postedAt)?.toISOString() ?? null,
-        recruiterName: job.recruiterName,
-        recruiterEmail: job.recruiterEmail,
-        realnessScore: job.realnessScore,
-        matchScore: totalScore,
+        recruiterName: job.recruiterName, recruiterEmail: job.recruiterEmail,
+        realnessScore: job.realnessScore, matchScore: totalScore,
         scoreBreakdown: {
-          skillOverlap: Math.round(skillScore),
-          rateFit: Math.round(rateScore),
-          freshness: Math.round(freshnessScore),
-          quality: Math.round(qualityScore),
+          skillOverlap: Math.round(skillScore), rateFit: Math.round(rateScore),
+          freshness: Math.round(freshnessScore), quality: Math.round(qualityScore),
         },
       };
     });
@@ -779,68 +724,45 @@ export class BenchSalesService {
     /* --- Score internal jobs --- */
     const scoredInternal = internalJobs.map((job) => {
       const jobSkills = (job.skills as string[]) ?? [];
-
-      // 1. Skill overlap (0-50)
       const overlap = skillOverlapScore(skills, jobSkills);
       const skillScore = overlap * 50;
 
-      // 2. Rate fit (0-20)
       let rateScore = 10;
-      const jobRate = job.rateType === 'ANNUAL' && job.rateMax
-        ? job.rateMax / 2080 // convert annual to hourly
-        : job.rateMax;
+      const jobRate = job.rateType === 'ANNUAL' && job.rateMax ? job.rateMax / 2080 : job.rateMax;
       if (consultant.desiredRate && jobRate) {
-        if (jobRate >= consultant.desiredRate) {
-          rateScore = 20;
-        } else if (jobRate >= consultant.desiredRate * 0.85) {
-          rateScore = 14;
-        } else {
-          rateScore = Math.max(0, (jobRate / consultant.desiredRate) * 15);
-        }
+        if (jobRate >= consultant.desiredRate) rateScore = 20;
+        else if (jobRate >= consultant.desiredRate * 0.85) rateScore = 14;
+        else rateScore = Math.max(0, (jobRate / consultant.desiredRate) * 15);
       }
 
-      // 3. Freshness (0-15)
       const daysOld = daysBetween(now, job.createdAt);
       const freshnessScore = Math.max(0, 15 - (daysOld / 14) * 15);
-
-      // 4. Closure likelihood + internal bonus (0-15)
       const closureComponent = ((job.closureLikelihood ?? 0.5) * 10);
-      const internalBonus = 5; // internal jobs get a reliability boost
+      const internalBonus = 5;
       const qualityScore = Math.min(15, closureComponent + internalBonus);
-
       const totalScore = Math.round(skillScore + rateScore + freshnessScore + qualityScore);
 
       const rateMin = job.rateType === 'ANNUAL' && job.rateMin ? job.rateMin / 2080 : job.rateMin;
       const rateMaxHourly = job.rateType === 'ANNUAL' && job.rateMax ? job.rateMax / 2080 : job.rateMax;
 
       return {
-        id: job.id,
-        source: 'INTERNAL' as const,
-        title: job.title,
+        id: job.id, source: 'INTERNAL' as const, title: job.title,
         company: (job.vendor as any)?.companyName ?? null,
-        location: job.location,
-        locationType: job.locationType,
-        employmentType: null,
-        employmentTypeBadge: 'Internal Req',
+        location: job.location, locationType: job.locationType,
+        employmentType: null, employmentTypeBadge: 'Internal Req',
         skills: jobSkills,
         rateMin: rateMin ? Math.round(rateMin * 100) / 100 : null,
         rateMax: rateMaxHourly ? Math.round(rateMaxHourly * 100) / 100 : null,
         rateText: job.rateMin && job.rateMax
           ? `$${job.rateMin}–$${job.rateMax} ${job.rateType === 'ANNUAL' ? '/yr' : '/hr'}`
           : null,
-        applyUrl: null,
-        sourceUrl: null,
-        jobSource: 'INTERNAL',
+        applyUrl: null, sourceUrl: null, jobSource: 'INTERNAL',
         postedAt: job.createdAt.toISOString(),
-        recruiterName: null,
-        recruiterEmail: null,
-        realnessScore: null,
+        recruiterName: null, recruiterEmail: null, realnessScore: null,
         matchScore: totalScore,
         scoreBreakdown: {
-          skillOverlap: Math.round(skillScore),
-          rateFit: Math.round(rateScore),
-          freshness: Math.round(freshnessScore),
-          quality: Math.round(qualityScore),
+          skillOverlap: Math.round(skillScore), rateFit: Math.round(rateScore),
+          freshness: Math.round(freshnessScore), quality: Math.round(qualityScore),
         },
       };
     });
@@ -886,72 +808,63 @@ export class BenchSalesService {
   /*  Private: load vendor domains for filtering (tenant-scoped)       */
   /* ================================================================ */
 
-  private buildSortOrder(sort?: string): any {
-    switch (sort) {
-      case 'rate-desc':
-        return { desiredRate: { sort: 'desc' as const, nulls: 'last' as const } };
-      case 'newest':
-        return { createdAt: 'desc' as const };
-      case 'score':
-        return { qualityScore: { sort: 'desc' as const, nulls: 'last' as const } };
-      case 'placeable':
-      default:
-        return { qualityScore: { sort: 'desc' as const, nulls: 'last' as const } };
-    }
-  }
-
   private vendorDomainsCacheMap = new Map<string, { domains: Set<string>; at: number }>();
 
-  private async loadVendorDomains(tenantId?: string): Promise<Set<string>> {
-    const cacheKey = tenantId ?? '__global__';
-    const cached = this.vendorDomainsCacheMap.get(cacheKey);
+  private async loadVendorDomains(tenantId: string): Promise<Set<string>> {
+    const cached = this.vendorDomainsCacheMap.get(tenantId);
     if (cached && Date.now() - cached.at < 300_000) {
       return cached.domains;
     }
 
     const domains = new Set<string>();
-    const vendorWhere: any = tenantId ? { tenantId } : {};
 
-    // 1. ExtractedVendorCompany domains (from email extraction pipeline)
-    const extractedVendors = await this.prisma.extractedVendorCompany.findMany({
-      select: { domain: true },
-      where: vendorWhere,
-    });
-    for (const v of extractedVendors) {
-      if (v.domain) {
-        const d = v.domain.toLowerCase();
-        if (!FREE_EMAIL_DOMAINS.has(d)) domains.add(d);
+    // 1. ExtractedVendorCompany — no tenantId on this model, load all
+    try {
+      const extractedVendors = await this.prisma.extractedVendorCompany.findMany({
+        select: { domain: true },
+      });
+      for (const v of extractedVendors) {
+        if (v.domain) {
+          const d = v.domain.toLowerCase();
+          if (!FREE_EMAIL_DOMAINS.has(d)) domains.add(d);
+        }
       }
+    } catch (err: any) {
+      this.logger.warn(`Failed to load ExtractedVendorCompany domains: ${err.message}`);
     }
 
-    // 2. Vendor table domains (manually created vendors)
-    const vendors = await this.prisma.vendor.findMany({
-      select: { domain: true },
-      where: { ...vendorWhere, domain: { not: null } },
-    });
-    for (const v of vendors) {
-      if (v.domain) {
-        const d = v.domain.toLowerCase();
-        if (!FREE_EMAIL_DOMAINS.has(d)) domains.add(d);
+    // 2. Vendor table domains (tenant-scoped)
+    try {
+      const vendors = await this.prisma.vendor.findMany({
+        select: { domain: true },
+        where: { tenantId, domain: { not: null } },
+      });
+      for (const v of vendors) {
+        if (v.domain) {
+          const d = v.domain.toLowerCase();
+          if (!FREE_EMAIL_DOMAINS.has(d)) domains.add(d);
+        }
       }
+    } catch (err: any) {
+      this.logger.warn(`Failed to load Vendor domains: ${err.message}`);
     }
 
-    // 3. VendorContact emails → extract domains (skip free email providers)
-    const contactWhere: any = { email: { not: null } };
-    if (tenantId) {
-      contactWhere.vendor = { tenantId };
-    }
-    const vendorContacts = await this.prisma.vendorContact.findMany({
-      select: { email: true },
-      where: contactWhere,
-    });
-    for (const vc of vendorContacts) {
-      const d = vc.email?.split('@')[1]?.toLowerCase();
-      if (d && !FREE_EMAIL_DOMAINS.has(d)) domains.add(d);
+    // 3. VendorContact emails → extract domains (tenant-scoped via vendor)
+    try {
+      const vendorContacts = await this.prisma.vendorContact.findMany({
+        select: { email: true },
+        where: { email: { not: null }, vendor: { tenantId } },
+      });
+      for (const vc of vendorContacts) {
+        const d = vc.email?.split('@')[1]?.toLowerCase();
+        if (d && !FREE_EMAIL_DOMAINS.has(d)) domains.add(d);
+      }
+    } catch (err: any) {
+      this.logger.warn(`Failed to load VendorContact domains: ${err.message}`);
     }
 
-    this.logger.log(`Loaded ${domains.size} vendor domains for tenant=${tenantId ?? 'global'} (excluding ${FREE_EMAIL_DOMAINS.size} free email providers)`);
-    this.vendorDomainsCacheMap.set(cacheKey, { domains, at: Date.now() });
+    this.logger.log(`Loaded ${domains.size} vendor domains for tenant=${tenantId}`);
+    this.vendorDomainsCacheMap.set(tenantId, { domains, at: Date.now() });
     return domains;
   }
 }
