@@ -336,11 +336,26 @@ export default function ClosureEnginePage() {
                       <div>
                         <p className="font-medium text-gray-700">Contact</p>
                         <p className="text-gray-500">{req.contactName || '—'}</p>
-                        <p className="text-indigo-600">{req.contactEmail || 'no email'}</p>
+                        {req.contactEmail ? (
+                          <a
+                            href={req.contactEmail.startsWith('http') ? req.contactEmail : `mailto:${req.contactEmail}`}
+                            target={req.contactEmail.startsWith('http') ? '_blank' : undefined}
+                            rel={req.contactEmail.startsWith('http') ? 'noopener noreferrer' : undefined}
+                            className="text-indigo-600 hover:underline break-all"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {req.contactEmail.startsWith('http') ? 'View Posting' : req.contactEmail}
+                          </a>
+                        ) : <p className="text-gray-400">no email</p>}
                       </div>
                       <div>
                         <p className="font-medium text-gray-700">Vendor</p>
-                        <p className="text-gray-500">{req.vendorDomain || '—'}</p>
+                        {req.vendorDomain ? (
+                          <a href={`https://${req.vendorDomain}`} target="_blank" rel="noopener noreferrer"
+                            className="text-indigo-600 hover:underline" onClick={(e) => e.stopPropagation()}>
+                            {req.vendorDomain}
+                          </a>
+                        ) : <p className="text-gray-500">—</p>}
                       </div>
                       <div>
                         <p className="font-medium text-gray-700">Skills</p>
@@ -386,7 +401,7 @@ export default function ClosureEnginePage() {
                   <div className="flex items-center justify-between mb-3">
                     <div>
                       <h3 className="text-base font-semibold capitalize">{r.name}</h3>
-                      <p className="text-[10px] text-gray-400">{r.recruiterEmail}</p>
+                      <a href={`mailto:${r.recruiterEmail}`} className="text-[10px] text-indigo-500 hover:underline">{r.recruiterEmail}</a>
                     </div>
                     <span className={`text-xs font-bold rounded-full px-2 py-1 ${
                       r.remainingCapacity > 20 ? 'bg-green-100 text-green-700' :
@@ -467,7 +482,10 @@ export default function ClosureEnginePage() {
                 <tbody>
                   {feedbackData.vendors?.map((v: any) => (
                     <tr key={v.vendorDomain} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-3 px-4 font-medium">{v.vendorDomain}</td>
+                      <td className="py-3 px-4 font-medium">
+                        <a href={`https://${v.vendorDomain}`} target="_blank" rel="noopener noreferrer"
+                          className="text-indigo-600 hover:underline">{v.vendorDomain}</a>
+                      </td>
                       <td className="py-3 px-4 text-right">{fmt(v.submissionsSent)}</td>
                       <td className="py-3 px-4 text-right">{fmt(v.totalReplies)}</td>
                       <td className="py-3 px-4 text-right font-medium text-green-600">{fmt(v.interviewRequests)}</td>
@@ -536,7 +554,7 @@ export default function ClosureEnginePage() {
                     </div>
                     <div>
                       <h4 className="font-semibold text-gray-900">{c.name}</h4>
-                      <p className="text-xs text-gray-500">{c.email}</p>
+                      <a href={`mailto:${c.email}`} className="text-xs text-indigo-600 hover:underline">{c.email}</a>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">

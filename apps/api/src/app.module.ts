@@ -1,6 +1,7 @@
 import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_INTERCEPTOR, APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { TenantMiddleware } from './auth/tenant.middleware';
@@ -28,11 +29,15 @@ import { EmailModule } from './email/email.module';
 import { AutoSubmitModule } from './auto-submit/auto-submit.module';
 import { ResumeFormatterModule } from './resume-formatter/resume-formatter.module';
 import { StrategyOpsModule } from './strategy-ops/strategy-ops.module';
+import { BenchSalesModule } from './bench-sales/bench-sales.module';
+import { JobMatchModule } from './job-match/job-match.module';
 import { AuditInterceptor } from './common/audit.interceptor';
+import { ErrorReporterService } from './common/error-reporter.service';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 60 }]),
     PrismaModule,
     EmailModule,
     AuthModule,
@@ -59,13 +64,21 @@ import { AuditInterceptor } from './common/audit.interceptor';
     AutoSubmitModule,
     ResumeFormatterModule,
     StrategyOpsModule,
+    BenchSalesModule,
+    JobMatchModule,
   ],
   providers: [
+    ErrorReporterService,
     {
       provide: APP_INTERCEPTOR,
       useClass: AuditInterceptor,
     },
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
   ],
+  exports: [ErrorReporterService],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

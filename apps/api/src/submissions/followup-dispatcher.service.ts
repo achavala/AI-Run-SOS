@@ -46,39 +46,33 @@ export class FollowupDispatcherService {
   }
 
   async processFollowups() {
-    let dueFollowups: DueFollowup[] = [];
-    try {
-      dueFollowups = await this.prisma.$queryRaw`
-        SELECT 
-          sf.id,
-          sf.submission_id as "submissionId",
-          sf.followup_number as "number",
-          sf.scheduled_at as "scheduledAt",
-          s.status as "submissionStatus",
-          s."sentEmailId",
-          s."sentConversationId",
-          s."sentFrom",
-          s."sentTo",
-          s."sentSubject",
-          c."firstName" || ' ' || c."lastName" as "consultantName",
-          j.title as "jobTitle",
-          v."companyName" as "vendorName",
-          v."trustScore" as "vendorTrustScore"
-        FROM submission_followup sf
-        JOIN "Submission" s ON s.id = sf.submission_id
-        JOIN "Consultant" c ON c.id = s."consultantId"
-        JOIN "Job" j ON j.id = s."jobId"
-        JOIN "Vendor" v ON v.id = j."vendorId"
-        WHERE sf.status = 'PENDING'
-          AND sf.scheduled_at <= NOW()
-          AND s.status IN ('SUBMITTED')
-        ORDER BY sf.scheduled_at ASC
-        LIMIT 30
-      ` as DueFollowup[];
-    } catch {
-      this.logger.debug('submission_followup table may not exist');
-      return;
-    }
+    const dueFollowups = await this.prisma.$queryRaw<DueFollowup[]>`
+      SELECT 
+        sf.id,
+        sf.submission_id as "submissionId",
+        sf.followup_number as "number",
+        sf.scheduled_at as "scheduledAt",
+        s.status as "submissionStatus",
+        s."sentEmailId",
+        s."sentConversationId",
+        s."sentFrom",
+        s."sentTo",
+        s."sentSubject",
+        c."firstName" || ' ' || c."lastName" as "consultantName",
+        j.title as "jobTitle",
+        v."companyName" as "vendorName",
+        v."trustScore" as "vendorTrustScore"
+      FROM "submission_followup" sf
+      JOIN "Submission" s ON s.id = sf.submission_id
+      JOIN "Consultant" c ON c.id = s."consultantId"
+      JOIN "Job" j ON j.id = s."jobId"
+      JOIN "Vendor" v ON v.id = j."vendorId"
+      WHERE sf.status = 'PENDING'
+        AND sf.scheduled_at <= NOW()
+        AND s.status IN ('SUBMITTED')
+      ORDER BY sf.scheduled_at ASC
+      LIMIT 30
+    `;
 
     if (dueFollowups.length === 0) {
       this.logger.debug('No due follow-ups');
@@ -93,7 +87,6 @@ export class FollowupDispatcherService {
 
     for (const fu of dueFollowups) {
       try {
-        // Escalation: HIGH trust vendor + silent after follow-up #2
         if (fu.number >= 3 && fu.vendorTrustScore && fu.vendorTrustScore >= 70) {
           await this.escalateToHuman(fu);
           escalated++;
@@ -138,14 +131,10 @@ export class FollowupDispatcherService {
           `Followup #${fu.number} sent for submission ${fu.submissionId} (${fu.consultantName} → ${fu.vendorName})`,
         );
 
-        // Rate limit: 500ms between sends
         await new Promise((r) => setTimeout(r, 500));
       } catch (err: any) {
         failed++;
-        this.logger.error(
-          `Followup ${fu.id} failed: ${err.message}`,
-        );
-        // Don't mark as sent — it'll retry next cycle
+        this.logger.error(`Followup ${fu.id} failed: ${err.message}`);
       }
     }
 
@@ -157,60 +146,47 @@ export class FollowupDispatcherService {
   private generateFollowupBody(fu: DueFollowup): string {
     const templates: Record<number, string> = {
       1: `Hi,<br><br>Just following up on my submission of <b>${fu.consultantName}</b> for the <b>${fu.jobTitle}</b> position. Please let me know if you need any additional information or if you'd like to schedule an interview.<br><br>Best regards`,
-
       2: `Hi,<br><br>Following up again regarding <b>${fu.consultantName}</b> for the <b>${fu.jobTitle}</b> role. ${fu.consultantName} remains available and interested. Would appreciate any update on the status.<br><br>Best regards`,
-
       3: `Hi,<br><br>This is my final follow-up regarding the submission of <b>${fu.consultantName}</b> for <b>${fu.jobTitle}</b>. If the position has been filled or is no longer active, please let me know so I can update our records.<br><br>Thank you for your time.<br><br>Best regards`,
     };
-
     return templates[fu.number] ?? templates[3]!;
   }
 
   private async markSent(followupId: string, submissionId: string, number: number, graphMessageId: string | null) {
-    try {
-      await this.prisma.$executeRaw`
-        UPDATE submission_followup SET status = 'SENT', sent_at = NOW()
-        WHERE id = ${followupId}::uuid
-      `;
-    } catch {
-      // submission_followup table may not exist
-    }
+    await this.prisma.submissionFollowup.update({
+      where: { id: followupId },
+      data: { status: 'SENT', sentAt: new Date(), graphMessageId },
+    });
 
-    await this.prisma.$executeRaw`
-      INSERT INTO submission_event (submission_id, event_type, actor, details)
-      VALUES (
-        ${submissionId},
-        ${'FOLLOWUP_' + number + '_SENT'},
-        'followup-dispatcher',
-        ${JSON.stringify({ followupId, graphMessageId, automated: true })}::jsonb
-      )
-    `;
+    await this.prisma.submissionEvent.create({
+      data: {
+        submissionId,
+        eventType: `FOLLOWUP_${number}_SENT`,
+        actor: 'followup-dispatcher',
+        details: { followupId, graphMessageId, automated: true },
+      },
+    });
   }
 
   private async escalateToHuman(fu: DueFollowup) {
-    try {
-      await this.prisma.$executeRaw`
-        UPDATE submission_followup SET status = 'ESCALATED', sent_at = NOW()
-        WHERE id = ${fu.id}::uuid
-      `;
-    } catch {
-      // submission_followup table may not exist
-    }
+    await this.prisma.submissionFollowup.update({
+      where: { id: fu.id },
+      data: { status: 'ESCALATED', sentAt: new Date() },
+    });
 
-    await this.prisma.$executeRaw`
-      INSERT INTO submission_event (submission_id, event_type, actor, details)
-      VALUES (
-        ${fu.submissionId},
-        'FOLLOWUP_ESCALATED',
-        'followup-dispatcher',
-        ${JSON.stringify({
+    await this.prisma.submissionEvent.create({
+      data: {
+        submissionId: fu.submissionId,
+        eventType: 'FOLLOWUP_ESCALATED',
+        actor: 'followup-dispatcher',
+        details: {
           followupNumber: fu.number,
           reason: 'High-trust vendor silent after multiple follow-ups',
           vendorTrustScore: fu.vendorTrustScore,
           vendorName: fu.vendorName,
-        })}::jsonb
-      )
-    `;
+        },
+      },
+    });
 
     this.logger.warn(
       `ESCALATED: Submission ${fu.submissionId} — ${fu.vendorName} (trust: ${fu.vendorTrustScore}) silent after follow-up #${fu.number}`,

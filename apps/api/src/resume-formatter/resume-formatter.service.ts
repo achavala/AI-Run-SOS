@@ -49,9 +49,6 @@ export class ResumeFormatterService {
 
   constructor(private prisma: PrismaService) {}
 
-  /**
-   * Generate all three resume versions for a consultant and store them.
-   */
   async formatAndStore(
     tenantId: string,
     consultantId: string,
@@ -65,8 +62,6 @@ export class ResumeFormatterService {
 
     const podKey = pod || 'DEFAULT';
     const template = POD_TEMPLATES[podKey] ?? POD_TEMPLATES.DEFAULT!;
-
-    // Generate all 3 versions
     const tpl = template!;
 
     const clean = this.formatResume(rawContent, consultant, tpl, {
@@ -88,7 +83,6 @@ export class ResumeFormatterService {
       watermarkText: `CR-${consultantId.slice(-6)}-${Date.now().toString(36)}`,
     });
 
-    // Store versions
     const versions = [
       { formatted: clean, version: 'clean' },
       { formatted: vendorBranded, version: 'vendor' },
@@ -98,7 +92,6 @@ export class ResumeFormatterService {
     for (const v of versions) {
       const hash = crypto.createHash('sha256').update(v.formatted.content).digest('hex').slice(0, 16);
 
-      // Mark old versions as not current
       await this.prisma.resumeVersion.updateMany({
         where: { tenantId, consultantId, version: v.version, isCurrent: true },
         data: { isCurrent: false },
@@ -109,7 +102,7 @@ export class ResumeFormatterService {
           tenantId,
           consultantId,
           version: v.version,
-          fileUrl: `resume://${consultantId}/${v.version}/${hash}`,
+          fileUrl: `data:text/html;base64,${Buffer.from(v.formatted.content).toString('base64')}`,
           fileHash: hash,
           watermark: v.formatted.template === 'WATERMARKED' ? `CR-${consultantId.slice(-6)}` : null,
           source: 'auto-formatter',
@@ -118,6 +111,11 @@ export class ResumeFormatterService {
       });
     }
 
+    await this.prisma.consultant.update({
+      where: { id: consultantId },
+      data: { resumeFreshnessAt: new Date() },
+    });
+
     this.logger.log(
       `Formatted 3 resume versions for consultant ${consultant.firstName} ${consultant.lastName} (${podKey} template)`,
     );
@@ -125,32 +123,51 @@ export class ResumeFormatterService {
     return { clean: clean.content, vendorBranded: vendorBranded.content, watermarked: watermarked.content };
   }
 
-  /**
-   * Get the current resume version for a consultant, by type.
-   */
-  async getCurrentVersion(tenantId: string, consultantId: string, versionType = 'vendor') {
-    return this.prisma.resumeVersion.findFirst({
-      where: { tenantId, consultantId, version: versionType, isCurrent: true },
-      orderBy: { createdAt: 'desc' },
+  async generatePdf(tenantId: string, consultantId: string, versionType = 'vendor'): Promise<Buffer> {
+    const version = await this.getCurrentVersion(tenantId, consultantId, versionType);
+    if (!version) throw new NotFoundException('No resume version found');
+
+    let html: string;
+    if (version.fileUrl.startsWith('data:text/html;base64,')) {
+      html = Buffer.from(version.fileUrl.replace('data:text/html;base64,', ''), 'base64').toString('utf-8');
+    } else {
+      throw new NotFoundException('Resume content not available for PDF generation');
+    }
+
+    let puppeteer: any;
+    try {
+      puppeteer = await import('puppeteer');
+    } catch {
+      throw new Error('Puppeteer not available for PDF generation');
+    }
+
+    const browser = await puppeteer.default.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
     });
+
+    try {
+      const page = await browser.newPage();
+      await page.setContent(html, { waitUntil: 'networkidle0' });
+
+      const pdfBuffer = await page.pdf({
+        format: 'Letter',
+        margin: { top: '0.5in', bottom: '0.5in', left: '0.5in', right: '0.5in' },
+        printBackground: true,
+      });
+
+      this.logger.log(`PDF generated for consultant ${consultantId}, version ${versionType}`);
+      return Buffer.from(pdfBuffer);
+    } finally {
+      await browser.close();
+    }
   }
 
-  /**
-   * Get all versions for a consultant.
-   */
-  async getVersions(tenantId: string, consultantId: string) {
-    return this.prisma.resumeVersion.findMany({
-      where: { tenantId, consultantId },
-      orderBy: [{ version: 'asc' }, { createdAt: 'desc' }],
-    });
-  }
-
-  /**
-   * Get resume content formatted as HTML for email attachment.
-   */
   async getResumeForSubmission(tenantId: string, consultantId: string): Promise<{
     content: string;
+    contentBytes: string;
     fileName: string;
+    contentType: string;
     hash: string;
   } | null> {
     const consultant = await this.prisma.consultant.findFirst({
@@ -161,11 +178,45 @@ export class ResumeFormatterService {
     const version = await this.getCurrentVersion(tenantId, consultantId, 'vendor');
     if (!version) return null;
 
-    return {
-      content: version.fileUrl,
-      fileName: `${consultant.firstName}_${consultant.lastName}_Resume.pdf`,
-      hash: version.fileHash,
-    };
+    const fileName = `${consultant.firstName}_${consultant.lastName}_Resume`;
+
+    try {
+      const pdfBuffer = await this.generatePdf(tenantId, consultantId, 'vendor');
+      return {
+        content: pdfBuffer.toString('base64'),
+        contentBytes: pdfBuffer.toString('base64'),
+        fileName: `${fileName}.pdf`,
+        contentType: 'application/pdf',
+        hash: version.fileHash,
+      };
+    } catch {
+      // Fallback to HTML if PDF generation fails
+      let html = '';
+      if (version.fileUrl.startsWith('data:text/html;base64,')) {
+        html = Buffer.from(version.fileUrl.replace('data:text/html;base64,', ''), 'base64').toString('utf-8');
+      }
+      return {
+        content: Buffer.from(html || '').toString('base64'),
+        contentBytes: Buffer.from(html || '').toString('base64'),
+        fileName: `${fileName}.html`,
+        contentType: 'text/html',
+        hash: version.fileHash,
+      };
+    }
+  }
+
+  async getCurrentVersion(tenantId: string, consultantId: string, versionType = 'vendor') {
+    return this.prisma.resumeVersion.findFirst({
+      where: { tenantId, consultantId, version: versionType, isCurrent: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getVersions(tenantId: string, consultantId: string) {
+    return this.prisma.resumeVersion.findMany({
+      where: { tenantId, consultantId },
+      orderBy: [{ version: 'asc' }, { createdAt: 'desc' }],
+    });
   }
 
   private formatResume(
@@ -176,7 +227,6 @@ export class ResumeFormatterService {
   ): FormattedResume {
     let content = rawContent;
 
-    // Strip personal address if requested
     if (options.removeAddress) {
       content = content.replace(
         /\d+\s+[\w\s]+(?:St|Street|Ave|Avenue|Blvd|Boulevard|Dr|Drive|Ln|Lane|Rd|Road|Way|Ct|Court|Pl|Place)[\s,]+[\w\s]+,?\s*[A-Z]{2}\s*\d{5}(-\d{4})?/gi,
@@ -184,7 +234,6 @@ export class ResumeFormatterService {
       );
     }
 
-    // Strip phone if requested
     if (options.removePhone) {
       content = content.replace(
         /(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g,
@@ -193,7 +242,6 @@ export class ResumeFormatterService {
     }
 
     const html = this.buildHtmlResume(content, consultant, template, options);
-
     const hash = crypto.createHash('sha256').update(html).digest('hex').slice(0, 16);
 
     return {

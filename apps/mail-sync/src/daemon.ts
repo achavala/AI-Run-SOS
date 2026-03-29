@@ -119,8 +119,8 @@ function ts() {
 
 async function main() {
   console.log("╔════════════════════════════════════════════════╗");
-  console.log("║   Mail Sync Daemon — Delta Mode (60 min)       ║");
-  console.log("║   Auto-syncs + extracts every hour             ║");
+  console.log("║   Mail Sync Daemon — Delta Mode (30 min)       ║");
+  console.log("║   Auto-syncs + extracts every 30 minutes       ║");
   console.log("╚════════════════════════════════════════════════╝\n");
 
   const ok = await validateCredentials();
@@ -132,12 +132,12 @@ async function main() {
   // Run immediately on startup
   await syncCycle();
 
-  // Then every 60 minutes
-  cron.schedule("0 * * * *", () => {
+  // Then every 30 minutes
+  cron.schedule("*/30 * * * *", () => {
     syncCycle();
   });
 
-  console.log(`\n[${ts()}] Daemon running. Next sync in 60 minutes. Press Ctrl+C to stop.`);
+  console.log(`\n[${ts()}] Daemon running. Next sync in 30 minutes. Press Ctrl+C to stop.`);
 }
 
 main().catch((err) => {

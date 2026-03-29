@@ -19,6 +19,12 @@ import {
   BanknotesIcon,
   BuildingOffice2Icon,
   StarIcon,
+  ShieldCheckIcon,
+  BriefcaseIcon,
+  PhoneIcon,
+  ClipboardDocumentIcon,
+  FunnelIcon,
+  SparklesIcon,
 } from '@heroicons/react/24/outline';
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -33,7 +39,32 @@ const SOURCE_COLORS: Record<string, string> = {
   RemoteOK: 'bg-teal-100 text-teal-700 border-teal-200',
   GREENHOUSE: 'bg-emerald-100 text-emerald-700 border-emerald-200',
   LEVER: 'bg-cyan-100 text-cyan-700 border-cyan-200',
+  LINKEDIN: 'bg-sky-100 text-sky-700 border-sky-200',
+  LinkedIn: 'bg-sky-100 text-sky-700 border-sky-200',
   OTHER: 'bg-gray-100 text-gray-700 border-gray-200',
+};
+
+const VENDOR_TIER_COLORS: Record<string, string> = {
+  prime_like: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+  direct_like: 'bg-blue-100 text-blue-800 border-blue-300',
+  reputable_staffing: 'bg-violet-100 text-violet-800 border-violet-300',
+  generic: 'bg-gray-100 text-gray-700 border-gray-200',
+  low_confidence: 'bg-gray-50 text-gray-500 border-gray-200',
+};
+
+const VENDOR_TIER_LABELS: Record<string, string> = {
+  prime_like: 'Prime Vendor',
+  direct_like: 'Direct Vendor',
+  reputable_staffing: 'Staffing Vendor',
+  generic: 'Generic',
+  low_confidence: 'Unverified',
+};
+
+const LIKELIHOOD_COLORS: Record<string, string> = {
+  high: 'text-emerald-700 bg-emerald-50',
+  medium: 'text-blue-700 bg-blue-50',
+  low: 'text-amber-700 bg-amber-50',
+  unlikely: 'text-gray-500 bg-gray-50',
 };
 
 const TIER_COLORS: Record<string, string> = {
@@ -81,20 +112,33 @@ function emailUsername(email: string): string {
 }
 
 type EmpFilter = 'ALL' | 'C2C' | 'W2' | 'CONTRACT' | 'C2H';
-type FeedTab = 'email' | 'boards' | 'highpaid';
+type FeedTab = 'linkedin' | 'email' | 'boards' | 'highpaid';
 type CompTier = 'ALL' | 'MEGA' | 'ELITE' | 'PREMIUM' | 'HIGH';
+type LinkedInSort = 'best' | 'newest' | 'confidence' | 'rate' | 'prime' | 'direct';
+type VendorTierFilter = 'ALL' | 'prime_like' | 'direct_like' | 'reputable_staffing' | 'generic';
+type PostedFilter = 'ALL' | '6h' | '24h' | '72h' | '7d';
+type ContactFilter = 'ALL' | 'has_contact' | 'has_email';
 
 export default function LiveFeedPage() {
   const [data, setData] = useState<any>(null);
   const [highPaidData, setHighPaidData] = useState<any>(null);
+  const [linkedinData, setLinkedinData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [highPaidLoading, setHighPaidLoading] = useState(false);
+  const [linkedinLoading, setLinkedinLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [empFilter, setEmpFilter] = useState<EmpFilter>('ALL');
   const [compTierFilter, setCompTierFilter] = useState<CompTier>('ALL');
-  const [activeTab, setActiveTab] = useState<FeedTab>('email');
+  const [activeTab, setActiveTab] = useState<FeedTab>('linkedin');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(50);
+  // LinkedIn-specific filters
+  const [linkedinSort, setLinkedinSort] = useState<LinkedInSort>('best');
+  const [vendorTierFilter, setVendorTierFilter] = useState<VendorTierFilter>('ALL');
+  const [postedFilter, setPostedFilter] = useState<PostedFilter>('ALL');
+  const [contactFilter, setContactFilter] = useState<ContactFilter>('ALL');
+  const [locationFilter, setLocationFilter] = useState<string>('ALL');
+  const [showLinkedinFilters, setShowLinkedinFilters] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [nextRefreshIn, setNextRefreshIn] = useState(60);
   const [extracting, setExtracting] = useState(false);
@@ -102,10 +146,11 @@ export default function LiveFeedPage() {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const countdownRef = useRef<NodeJS.Timeout | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (bustCache = false) => {
     setLoading(true);
     try {
-      const d = await api.get('/analytics/live-feed?hours=24&limit=500');
+      const qs = bustCache ? '&bustCache=1' : '';
+      const d = await api.get(`/analytics/live-feed?hours=24&limit=500${qs}`);
       setData(d);
       setLastRefresh(new Date());
       setNextRefreshIn(60);
@@ -116,10 +161,11 @@ export default function LiveFeedPage() {
     }
   }, []);
 
-  const loadHighPaid = useCallback(async () => {
+  const loadHighPaid = useCallback(async (bustCache = false) => {
     setHighPaidLoading(true);
     try {
-      const d = await api.get('/analytics/high-paid-feed?minSalary=200000&limit=300');
+      const qs = bustCache ? '&bustCache=1' : '';
+      const d = await api.get(`/analytics/high-paid-feed?minSalary=200000&limit=300${qs}`);
       setHighPaidData(d);
     } catch (err) {
       console.error('Failed to load high-paid feed', err);
@@ -128,10 +174,37 @@ export default function LiveFeedPage() {
     }
   }, []);
 
+  const loadLinkedin = useCallback(async (bustCache = false) => {
+    setLinkedinLoading(true);
+    try {
+      const qs = bustCache ? '?bustCache=1' : '';
+      const d = await api.get(`/analytics/linkedin-feed${qs}`);
+      setLinkedinData(d);
+    } catch (err) {
+      console.error('Failed to load LinkedIn feed', err);
+    } finally {
+      setLinkedinLoading(false);
+    }
+  }, []);
+
+  const refreshAll = useCallback(async () => {
+    setLoading(true);
+    setHighPaidLoading(true);
+    setLinkedinLoading(true);
+    // Fire FAANG crawl in background — don't block the UI refresh.
+    // The crawl hits 30+ career boards and takes 30-60s; waiting for it
+    // makes the spinner hang and returns stale data if the crawl fails.
+    api.post('/analytics/refresh-all-feeds').catch(() => {});
+    await Promise.all([load(true), loadHighPaid(true), loadLinkedin(true)]);
+    setLastRefresh(new Date());
+    setNextRefreshIn(60);
+  }, [load, loadHighPaid, loadLinkedin]);
+
   useEffect(() => {
     load();
     loadHighPaid();
-    timerRef.current = setInterval(() => { load(); loadHighPaid(); }, 60 * 60 * 1000);
+    loadLinkedin();
+    timerRef.current = setInterval(() => { refreshAll(); }, 60 * 60 * 1000);
     countdownRef.current = setInterval(() => {
       setNextRefreshIn(prev => (prev <= 1 ? 60 : prev - 1));
     }, 60 * 1000);
@@ -139,32 +212,72 @@ export default function LiveFeedPage() {
       if (timerRef.current) clearInterval(timerRef.current);
       if (countdownRef.current) clearInterval(countdownRef.current);
     };
-  }, [load, loadHighPaid]);
+  }, [load, loadHighPaid, loadLinkedin, refreshAll]);
 
   const allJobs: any[] = data?.jobs || [];
   const highPaidJobs: any[] = highPaidData?.jobs || [];
+  const linkedinJobs: any[] = linkedinData?.jobs || [];
 
   const emailJobs = useMemo(() => allJobs.filter((j: any) => j.source === 'Email Intel'), [allJobs]);
   const boardJobs = useMemo(() => allJobs.filter((j: any) => j.source !== 'Email Intel'), [allJobs]);
 
-  const currentPool = activeTab === 'email' ? emailJobs : activeTab === 'boards' ? boardJobs : highPaidJobs;
+  const currentPool = activeTab === 'linkedin' ? linkedinJobs :
+                      activeTab === 'email' ? emailJobs :
+                      activeTab === 'boards' ? boardJobs : highPaidJobs;
 
-  const filtered = useMemo(() => currentPool.filter((j: any) => {
-    if (activeTab !== 'highpaid' && empFilter !== 'ALL' && j.employmentType !== empFilter) return false;
-    if (activeTab === 'highpaid' && compTierFilter !== 'ALL' && j.tier !== compTierFilter) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      return (
-        (j.title || '').toLowerCase().includes(q) ||
-        (j.company || '').toLowerCase().includes(q) ||
-        (j.location || '').toLowerCase().includes(q) ||
-        (j.receivedByEmail || '').toLowerCase().includes(q) ||
-        (j.fromEmail || '').toLowerCase().includes(q) ||
-        (j.skills || []).some((s: string) => s.toLowerCase().includes(q))
-      );
+  const filtered = useMemo(() => {
+    let pool = currentPool.filter((j: any) => {
+      if (activeTab !== 'highpaid' && activeTab !== 'linkedin' && empFilter !== 'ALL' && j.employmentType !== empFilter) return false;
+      if (activeTab === 'highpaid' && compTierFilter !== 'ALL' && j.tier !== compTierFilter) return false;
+      // LinkedIn-specific filters
+      if (activeTab === 'linkedin') {
+        if (empFilter !== 'ALL' && j.employmentType !== empFilter) return false;
+        if (vendorTierFilter !== 'ALL' && j.vendorQualityTier !== vendorTierFilter) return false;
+        if (contactFilter === 'has_contact' && !j.contactAvailable) return false;
+        if (contactFilter === 'has_email' && !j.recruiterEmail) return false;
+        if (postedFilter !== 'ALL') {
+          const maxHours = postedFilter === '6h' ? 6 : postedFilter === '24h' ? 24 : postedFilter === '72h' ? 72 : 168;
+          if ((j.freshnessHours || 9999) > maxHours) return false;
+        }
+        if (locationFilter !== 'ALL') {
+          const loc = (j.locationType || '').toUpperCase();
+          if (locationFilter === 'REMOTE' && loc !== 'REMOTE') return false;
+          if (locationFilter === 'HYBRID' && loc !== 'HYBRID') return false;
+          if (locationFilter === 'ONSITE' && loc !== 'ONSITE') return false;
+        }
+      }
+      if (search) {
+        const q = search.toLowerCase();
+        return (
+          (j.title || '').toLowerCase().includes(q) ||
+          (j.company || '').toLowerCase().includes(q) ||
+          (j.location || '').toLowerCase().includes(q) ||
+          (j.receivedByEmail || '').toLowerCase().includes(q) ||
+          (j.fromEmail || '').toLowerCase().includes(q) ||
+          (j.recruiterName || '').toLowerCase().includes(q) ||
+          (j.recruiterEmail || '').toLowerCase().includes(q) ||
+          (j.skills || []).some((s: string) => s.toLowerCase().includes(q))
+        );
+      }
+      return true;
+    });
+    // LinkedIn sorting
+    if (activeTab === 'linkedin' && linkedinSort !== 'best') {
+      pool = [...pool].sort((a, b) => {
+        if (linkedinSort === 'newest') return (b.freshnessHours === a.freshnessHours ? 0 : (a.freshnessHours || 9999) - (b.freshnessHours || 9999));
+        if (linkedinSort === 'confidence') return (b.linkedinScore || 0) - (a.linkedinScore || 0);
+        if (linkedinSort === 'rate') return (b.annualRate || 0) - (a.annualRate || 0);
+        if (linkedinSort === 'prime') return (b.vendorConfidenceScore || 0) - (a.vendorConfidenceScore || 0);
+        if (linkedinSort === 'direct') {
+          const aD = a.vendorQualityTier === 'direct_like' ? 1 : 0;
+          const bD = b.vendorQualityTier === 'direct_like' ? 1 : 0;
+          return bD - aD || (b.vendorConfidenceScore || 0) - (a.vendorConfidenceScore || 0);
+        }
+        return 0;
+      });
     }
-    return true;
-  }), [currentPool, empFilter, compTierFilter, search, activeTab]);
+    return pool;
+  }, [currentPool, empFilter, compTierFilter, search, activeTab, vendorTierFilter, postedFilter, contactFilter, locationFilter, linkedinSort]);
 
   const stats: any[] = data?.stats || [];
   const c2cCount = stats.find((s: any) => s.type === 'C2C')?.count || 0;
@@ -208,7 +321,7 @@ export default function LiveFeedPage() {
                 try {
                   const res: any = await api.post('/mail-intel/re-extract');
                   setExtractResult(`Extracted ${res.signalsCreated} new signals from ${res.emailsScanned} emails`);
-                  await load();
+                  await Promise.all([load(true), loadHighPaid(true), loadLinkedin(true)]);
                 } catch {
                   setExtractResult('Extraction failed');
                 } finally {
@@ -222,11 +335,11 @@ export default function LiveFeedPage() {
               {extracting ? 'Extracting...' : 'Re-Extract Emails'}
             </button>
             <button
-              onClick={load}
-              disabled={loading}
+              onClick={refreshAll}
+              disabled={loading || highPaidLoading || linkedinLoading}
               className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >
-              <ArrowPathIcon className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <ArrowPathIcon className={`h-3.5 w-3.5 ${loading || highPaidLoading || linkedinLoading ? 'animate-spin' : ''}`} />
               Refresh Now
             </button>
           </div>
@@ -240,8 +353,54 @@ export default function LiveFeedPage() {
         </div>
       )}
 
+      {/* Stats Bar — LinkedIn */}
+      {activeTab === 'linkedin' && linkedinData?.summary && (
+        <div className="grid grid-cols-2 sm:grid-cols-7 gap-3">
+          <div className="rounded-xl border-2 border-sky-200 bg-sky-50 p-3 text-center">
+            <p className="text-2xl font-bold text-sky-700">{linkedinData.summary.totalJobs}</p>
+            <p className="text-[10px] font-medium text-sky-600">Total LinkedIn</p>
+          </div>
+          <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 p-3 text-center">
+            <p className="text-2xl font-bold text-emerald-700">{linkedinData.summary.highConfidence}</p>
+            <p className="text-[10px] font-medium text-emerald-600">High Confidence</p>
+          </div>
+          <button
+            onClick={() => setVendorTierFilter(vendorTierFilter === 'prime_like' ? 'ALL' : 'prime_like')}
+            className={`rounded-xl border-2 p-3 text-center transition-all ${vendorTierFilter === 'prime_like' ? 'border-emerald-400 ring-2 ring-emerald-200 bg-emerald-50' : 'border-emerald-200 bg-emerald-50 hover:border-emerald-300'}`}
+          >
+            <p className="text-2xl font-bold text-emerald-700">{linkedinData.summary.primeVendorLikely}</p>
+            <p className="text-[10px] font-medium text-emerald-600">Prime Likely</p>
+          </button>
+          <button
+            onClick={() => setVendorTierFilter(vendorTierFilter === 'direct_like' ? 'ALL' : 'direct_like')}
+            className={`rounded-xl border-2 p-3 text-center transition-all ${vendorTierFilter === 'direct_like' ? 'border-blue-400 ring-2 ring-blue-200 bg-blue-50' : 'border-blue-200 bg-blue-50 hover:border-blue-300'}`}
+          >
+            <p className="text-2xl font-bold text-blue-700">{linkedinData.summary.directVendorLikely}</p>
+            <p className="text-[10px] font-medium text-blue-600">Direct Likely</p>
+          </button>
+          <button
+            onClick={() => setContactFilter(contactFilter === 'has_contact' ? 'ALL' : 'has_contact')}
+            className={`rounded-xl border-2 p-3 text-center transition-all ${contactFilter === 'has_contact' ? 'border-violet-400 ring-2 ring-violet-200 bg-violet-50' : 'border-violet-200 bg-violet-50 hover:border-violet-300'}`}
+          >
+            <p className="text-2xl font-bold text-violet-700">{linkedinData.summary.withContact}</p>
+            <p className="text-[10px] font-medium text-violet-600">With Contact</p>
+          </button>
+          <button
+            onClick={() => setPostedFilter(postedFilter === '24h' ? 'ALL' : '24h')}
+            className={`rounded-xl border-2 p-3 text-center transition-all ${postedFilter === '24h' ? 'border-amber-400 ring-2 ring-amber-200 bg-amber-50' : 'border-amber-200 bg-amber-50 hover:border-amber-300'}`}
+          >
+            <p className="text-2xl font-bold text-amber-700">{linkedinData.summary.freshUnder24h}</p>
+            <p className="text-[10px] font-medium text-amber-600">Fresh &lt;24h</p>
+          </button>
+          <div className="rounded-xl border border-gray-200 bg-white p-3 text-center">
+            <p className="text-2xl font-bold text-gray-700">{fmt(filtered.length)}</p>
+            <p className="text-[10px] text-gray-500 font-medium">Showing</p>
+          </div>
+        </div>
+      )}
+
       {/* Stats Bar */}
-      {activeTab !== 'highpaid' ? (
+      {activeTab === 'email' || activeTab === 'boards' ? (
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <button
             onClick={() => setEmpFilter(empFilter === 'C2C' ? 'ALL' : 'C2C')}
@@ -292,7 +451,7 @@ export default function LiveFeedPage() {
             <p className="text-[10px] text-gray-500 font-medium">Showing</p>
           </div>
         </div>
-      ) : (
+      ) : activeTab === 'highpaid' ? (
         <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
           {(highPaidData?.compBuckets || []).map((b: any) => {
             const tierKey = b.label.includes('500') ? 'MEGA' : b.label.includes('400') ? 'ELITE' : b.label.includes('300') ? 'PREMIUM' : 'HIGH';
@@ -324,10 +483,26 @@ export default function LiveFeedPage() {
             <p className="text-[10px] text-gray-500 font-medium">Showing</p>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Main Tabs */}
       <div className="flex items-center gap-1 rounded-xl border border-gray-200 bg-white p-1">
+        <button
+          onClick={() => { setActiveTab('linkedin'); setExpandedId(null); setVisibleCount(50); setVendorTierFilter('ALL'); setPostedFilter('ALL'); setContactFilter('ALL'); setLocationFilter('ALL'); setLinkedinSort('best'); }}
+          className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all ${
+            activeTab === 'linkedin'
+              ? 'bg-sky-600 text-white shadow-sm'
+              : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+          }`}
+        >
+          <BriefcaseIcon className="h-4 w-4" />
+          LinkedIn
+          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+            activeTab === 'linkedin' ? 'bg-white/20 text-white' : 'bg-sky-100 text-sky-700'
+          }`}>
+            {linkedinJobs.length}
+          </span>
+        </button>
         <button
           onClick={() => { setActiveTab('email'); setExpandedId(null); setVisibleCount(50); }}
           className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all ${
@@ -379,6 +554,111 @@ export default function LiveFeedPage() {
       </div>
 
       {/* Tab-specific source breakdown */}
+      {activeTab === 'linkedin' && linkedinData && (
+        <div className="space-y-3">
+          {/* Vendor tier + top companies */}
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(linkedinData.vendorTierDist || {})
+              .sort(([, a]: any, [, b]: any) => b - a)
+              .map(([tier, count]: any) => (
+                <button
+                  key={tier}
+                  onClick={() => setVendorTierFilter(vendorTierFilter === tier ? 'ALL' : tier as VendorTierFilter)}
+                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-all ${
+                    vendorTierFilter === tier ? 'ring-2 ring-offset-1 ' : ''
+                  }${VENDOR_TIER_COLORS[tier] || 'bg-gray-100 text-gray-700 border-gray-200'}`}
+                >
+                  <ShieldCheckIcon className="h-3 w-3" />
+                  {VENDOR_TIER_LABELS[tier] || tier}: {count}
+                </button>
+              ))}
+          </div>
+          {(linkedinData.topCompanies || []).length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {(linkedinData.topCompanies as any[]).slice(0, 15).map((c: any) => (
+                <span key={c.company} className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-medium text-sky-700">
+                  <BuildingOffice2Icon className="h-3 w-3" />
+                  {c.company}: {c.count}
+                </span>
+              ))}
+            </div>
+          )}
+          {/* Compliance class distribution */}
+          {(linkedinData.complianceDist) && Object.keys(linkedinData.complianceDist).length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(linkedinData.complianceDist).sort(([,a]: any, [,b]: any) => b - a).map(([cls, count]: any) => (
+                <span key={cls} className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-medium ${
+                  cls === 'FIRST_PARTY_CAREER_SITE' ? 'bg-green-50 text-green-700 border-green-200' :
+                  cls === 'LICENSED_PROVIDER' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                  cls === 'EMAIL_INTEL_DERIVED' ? 'bg-violet-50 text-violet-700 border-violet-200' :
+                  cls === 'MANUAL_IMPORT' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                  'bg-gray-50 text-gray-600 border-gray-200'
+                }`}>
+                  {cls.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase())}: {count}
+                </span>
+              ))}
+            </div>
+          )}
+          {/* LinkedIn advanced filters */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setShowLinkedinFilters(!showLinkedinFilters)}
+              className="inline-flex items-center gap-1 rounded-lg border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs font-medium text-sky-700 hover:bg-sky-100"
+            >
+              <FunnelIcon className="h-3.5 w-3.5" />
+              {showLinkedinFilters ? 'Hide Filters' : 'More Filters'}
+            </button>
+            <div className="flex rounded-lg border border-gray-300 bg-white p-0.5">
+              {([['best', 'Best'], ['newest', 'Newest'], ['confidence', 'Score'], ['rate', 'Rate'], ['prime', 'Prime'], ['direct', 'Direct']] as const).map(([val, label]) => (
+                <button
+                  key={val}
+                  onClick={() => setLinkedinSort(val as LinkedInSort)}
+                  className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                    linkedinSort === val ? 'bg-sky-600 text-white' : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex rounded-lg border border-gray-300 bg-white p-0.5">
+              {(['ALL', 'C2C', 'W2', 'CONTRACT'] as const).map((f) => (
+                <button key={f} onClick={() => setEmpFilter(f as EmpFilter)}
+                  className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${empFilter === f ? 'bg-sky-600 text-white' : 'text-gray-600 hover:text-gray-900'}`}
+                >{f}</button>
+              ))}
+            </div>
+          </div>
+          {showLinkedinFilters && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-100 bg-sky-50/50 p-3">
+              <div className="flex rounded-lg border border-gray-300 bg-white p-0.5">
+                <span className="px-2 py-1 text-[10px] text-gray-500 font-medium">Posted:</span>
+                {(['ALL', '6h', '24h', '72h', '7d'] as const).map((f) => (
+                  <button key={f} onClick={() => setPostedFilter(f)}
+                    className={`rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${postedFilter === f ? 'bg-sky-600 text-white' : 'text-gray-600 hover:text-gray-900'}`}
+                  >{f === 'ALL' ? 'Any' : `<${f}`}</button>
+                ))}
+              </div>
+              <div className="flex rounded-lg border border-gray-300 bg-white p-0.5">
+                <span className="px-2 py-1 text-[10px] text-gray-500 font-medium">Location:</span>
+                {(['ALL', 'REMOTE', 'HYBRID', 'ONSITE'] as const).map((f) => (
+                  <button key={f} onClick={() => setLocationFilter(f)}
+                    className={`rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${locationFilter === f ? 'bg-sky-600 text-white' : 'text-gray-600 hover:text-gray-900'}`}
+                  >{f === 'ALL' ? 'Any' : f}</button>
+                ))}
+              </div>
+              <div className="flex rounded-lg border border-gray-300 bg-white p-0.5">
+                <span className="px-2 py-1 text-[10px] text-gray-500 font-medium">Contact:</span>
+                {([['ALL', 'Any'], ['has_contact', 'Has Contact'], ['has_email', 'Has Email']] as const).map(([val, label]) => (
+                  <button key={val} onClick={() => setContactFilter(val as ContactFilter)}
+                    className={`rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${contactFilter === val ? 'bg-sky-600 text-white' : 'text-gray-600 hover:text-gray-900'}`}
+                  >{label}</button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       {activeTab === 'email' && Object.keys(emailMailboxCounts).length > 0 && (
         <div className="flex flex-wrap gap-2">
           {Object.entries(emailMailboxCounts)
@@ -446,17 +726,21 @@ export default function LiveFeedPage() {
           <MagnifyingGlassIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
-            placeholder={activeTab === 'highpaid'
-              ? 'Search company, role, location, skills...'
-              : activeTab === 'email'
-                ? 'Search title, company, location, skills, mailbox...'
-                : 'Search title, company, location, skills...'}
+            placeholder={activeTab === 'linkedin'
+              ? 'Search title, company, recruiter, location, skills...'
+              : activeTab === 'highpaid'
+                ? 'Search company, role, location, skills...'
+                : activeTab === 'email'
+                  ? 'Search title, company, location, skills, mailbox...'
+                  : 'Search title, company, location, skills...'}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
         </div>
-        {activeTab !== 'highpaid' ? (
+        {activeTab === 'linkedin' ? (
+          <span className="text-[11px] text-sky-600 font-medium">{filtered.length} of {linkedinJobs.length} jobs</span>
+        ) : activeTab !== 'highpaid' ? (
           <div className="flex rounded-lg border border-gray-300 bg-white p-0.5">
             {(['ALL', 'C2C', 'W2', 'CONTRACT', 'C2H'] as const).map((f) => (
               <button
@@ -495,14 +779,312 @@ export default function LiveFeedPage() {
       </div>
 
       {/* Loading */}
-      {((activeTab !== 'highpaid' && loading && !data) || (activeTab === 'highpaid' && highPaidLoading && !highPaidData)) && (
+      {((activeTab === 'linkedin' && linkedinLoading && !linkedinData) || (activeTab !== 'highpaid' && activeTab !== 'linkedin' && loading && !data) || (activeTab === 'highpaid' && highPaidLoading && !highPaidData)) && (
         <div className="flex items-center justify-center py-20">
           <ArrowPathIcon className="h-8 w-8 animate-spin text-indigo-500" />
         </div>
       )}
 
+      {/* Job Cards — LinkedIn Intelligence */}
+      {activeTab === 'linkedin' && (linkedinData || linkedinLoading) && (
+        <div className="space-y-2">
+          {!linkedinLoading && filtered.length === 0 ? (
+            <div className="rounded-xl border border-sky-200 bg-sky-50/50 p-12 text-center">
+              <BriefcaseIcon className="mx-auto h-10 w-10 text-sky-400 mb-3" />
+              <p className="text-sm font-medium text-sky-800">No LinkedIn jobs match your filters</p>
+              <p className="text-xs text-sky-600 mt-1">LinkedIn jobs are sourced via aggregators (JSearch indexes LinkedIn postings). Adjust filters or check back later.</p>
+            </div>
+          ) : (
+            filtered.slice(0, visibleCount).map((job: any) => {
+              const scoreBg = job.linkedinScore >= 80 ? 'bg-emerald-500' : job.linkedinScore >= 60 ? 'bg-sky-500' : job.linkedinScore >= 40 ? 'bg-amber-500' : 'bg-gray-400';
+              const tierColor = VENDOR_TIER_COLORS[job.vendorQualityTier] || VENDOR_TIER_COLORS.low_confidence;
+              return (
+                <div
+                  key={job.id}
+                  className={`rounded-xl border-2 bg-white hover:shadow-md transition-all ${
+                    job.linkedinScore >= 80 ? 'border-emerald-300' :
+                    job.linkedinScore >= 60 ? 'border-sky-200' :
+                    job.linkedinScore >= 40 ? 'border-amber-200' :
+                    'border-gray-200'
+                  }`}
+                >
+                  <div
+                    className="flex items-start gap-3 p-4 cursor-pointer"
+                    onClick={() => setExpandedId(expandedId === job.id ? null : job.id)}
+                  >
+                    {/* Left: Score + Vendor Tier */}
+                    <div className="shrink-0 mt-0.5 flex flex-col items-center gap-1.5 min-w-[76px]">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-10 h-2 rounded-full bg-gray-200 overflow-hidden">
+                          <div className={`h-full rounded-full ${scoreBg}`} style={{ width: `${job.linkedinScore}%` }} />
+                        </div>
+                        <span className="text-xs font-bold text-gray-700">{job.linkedinScore}</span>
+                      </div>
+                      <span className={`inline-flex items-center gap-0.5 rounded-md border px-2 py-0.5 text-[9px] font-bold ${tierColor}`}>
+                        <ShieldCheckIcon className="h-3 w-3" />
+                        {VENDOR_TIER_LABELS[job.vendorQualityTier] || 'Unverified'}
+                      </span>
+                      {job.submissionLikelihood && job.submissionLikelihood !== 'unlikely' && (
+                        <span className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${LIKELIHOOD_COLORS[job.submissionLikelihood] || ''}`}>
+                          {job.submissionLikelihood === 'high' ? 'High Submit' : job.submissionLikelihood === 'medium' ? 'Med Submit' : 'Low Submit'}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Main Content */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {job.employmentType && (
+                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${EMP_COLORS[job.employmentType] || 'bg-gray-100 text-gray-700'}`}>
+                            {job.employmentType}
+                          </span>
+                        )}
+                        <h3 className="font-semibold text-gray-900 text-sm truncate">{job.title}</h3>
+                      </div>
+                      <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 flex-wrap">
+                        <span className="flex items-center gap-1 font-semibold text-gray-800">
+                          <BuildingOffice2Icon className="h-3.5 w-3.5 text-gray-600" />
+                          {job.company}
+                        </span>
+                        {job.location && (
+                          <span className="flex items-center gap-0.5">
+                            <MapPinIcon className="h-3 w-3" />
+                            {job.location}
+                          </span>
+                        )}
+                        {job.locationType && (
+                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                            job.locationType === 'REMOTE' ? 'bg-teal-100 text-teal-700' :
+                            job.locationType === 'HYBRID' ? 'bg-blue-100 text-blue-700' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>
+                            {job.locationType}
+                          </span>
+                        )}
+                        {job.rateDisplay && (
+                          <span className="flex items-center gap-0.5 text-green-700 font-medium">
+                            <CurrencyDollarIcon className="h-3 w-3" />
+                            {job.rateDisplay}
+                          </span>
+                        )}
+                      </div>
+                      {/* Recruiter contact info */}
+                      {(job.recruiterName || job.recruiterEmail) && (
+                        <div className="flex items-center gap-3 mt-1 text-[11px]">
+                          {job.recruiterName && (
+                            <span className="flex items-center gap-1 text-gray-600">
+                              <UserIcon className="h-3 w-3" />
+                              {job.recruiterName}
+                            </span>
+                          )}
+                          {job.recruiterEmail && (
+                            <a href={`mailto:${job.recruiterEmail}`} onClick={(e) => e.stopPropagation()}
+                              className="flex items-center gap-0.5 text-indigo-600 hover:underline">
+                              <EnvelopeIcon className="h-3 w-3" />
+                              {job.recruiterEmail}
+                            </a>
+                          )}
+                          {job.recruiterPhone && (
+                            <a href={`tel:${job.recruiterPhone}`} onClick={(e) => e.stopPropagation()}
+                              className="flex items-center gap-0.5 text-indigo-600 hover:underline">
+                              <PhoneIcon className="h-3 w-3" />
+                              {job.recruiterPhone}
+                            </a>
+                          )}
+                        </div>
+                      )}
+                      {(job.applyUrl || job.sourceUrl) && (
+                        <div className="flex items-center gap-2 mt-1.5 text-[11px]">
+                          <a
+                            href={job.applyUrl || job.sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center gap-0.5 text-sky-600 hover:text-sky-800 hover:underline"
+                          >
+                            <ArrowTopRightOnSquareIcon className="h-3 w-3" />
+                            View on LinkedIn
+                          </a>
+                        </div>
+                      )}
+                      {job.skills && job.skills.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {job.skills.slice(0, 6).map((s: string) => (
+                            <span key={s} className="rounded bg-sky-50 border border-sky-200 px-1.5 py-0.5 text-[10px] text-sky-700 font-medium">{s}</span>
+                          ))}
+                          {job.skills.length > 6 && <span className="text-[10px] text-gray-400">+{job.skills.length - 6}</span>}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Right: time + rate */}
+                    <div className="shrink-0 text-right flex flex-col items-end gap-1">
+                      <span className="text-[10px] text-gray-400">{job.freshnessHours != null ? (job.freshnessHours < 1 ? 'just now' : job.freshnessHours < 24 ? `${job.freshnessHours}h ago` : `${Math.floor(job.freshnessHours / 24)}d ago`) : '—'}</span>
+                      {job.annualRate > 0 && (
+                        <p className="text-xs font-bold text-green-700">${Math.round(job.annualRate / 1000)}K/yr</p>
+                      )}
+                      {job.vendorConfidenceScore > 0 && (
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <span className="text-[9px] text-gray-400">Vendor</span>
+                          <span className="text-[10px] font-bold text-gray-600">{job.vendorConfidenceScore}%</span>
+                        </div>
+                      )}
+                      {expandedId === job.id ? <ChevronUpIcon className="h-4 w-4 text-gray-400" /> : <ChevronDownIcon className="h-4 w-4 text-gray-400" />}
+                    </div>
+                  </div>
+
+                  {/* Expanded Detail */}
+                  {expandedId === job.id && (
+                    <div className="border-t border-gray-100 px-4 py-3 bg-gradient-to-b from-sky-50/40 to-white text-xs space-y-3">
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                        <div>
+                          <p className="font-medium text-gray-700">Company</p>
+                          <p className="text-gray-900 font-semibold">{job.company}</p>
+                          {job.companyDomain && <p className="text-gray-400">{job.companyDomain}</p>}
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-700">Vendor Intelligence</p>
+                          <span className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-bold ${tierColor}`}>
+                            {VENDOR_TIER_LABELS[job.vendorQualityTier] || 'Unverified'}
+                          </span>
+                          <p className="text-[10px] text-gray-400 mt-0.5">Confidence: {job.vendorConfidenceScore}%</p>
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-700">Opportunity Score</p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <div className="w-16 h-2 rounded-full bg-gray-200 overflow-hidden">
+                              <div className={`h-full rounded-full ${scoreBg}`} style={{ width: `${job.linkedinScore}%` }} />
+                            </div>
+                            <span className="text-sm font-bold text-gray-700">{job.linkedinScore}/100</span>
+                          </div>
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-700">Recruiter Contact</p>
+                          <p className="text-gray-600">{job.recruiterName || '—'}</p>
+                          {job.recruiterEmail && <a href={`mailto:${job.recruiterEmail}`} className="text-indigo-600 hover:underline">{job.recruiterEmail}</a>}
+                          {job.recruiterPhone && <a href={`tel:${job.recruiterPhone}`} className="block text-indigo-600 hover:underline">{job.recruiterPhone}</a>}
+                          {job.recruiterLinkedIn && <a href={job.recruiterLinkedIn} target="_blank" rel="noopener noreferrer" className="block text-sky-600 hover:underline text-[10px]">LinkedIn Profile</a>}
+                          <p className="text-[10px] text-gray-400 mt-0.5">Contact strength: {job.recruiterContactStrength}%</p>
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-700">Submission Likelihood</p>
+                          <span className={`inline-block rounded px-2 py-0.5 text-[10px] font-bold ${LIKELIHOOD_COLORS[job.submissionLikelihood] || 'text-gray-500 bg-gray-50'}`}>
+                            {(job.submissionLikelihood || 'unknown').toUpperCase()}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Ranking reasons — explainability */}
+                      {job.rankingReasons && job.rankingReasons.length > 0 && (
+                        <div>
+                          <p className="font-medium text-gray-700 mb-1 flex items-center gap-1">
+                            <SparklesIcon className="h-3.5 w-3.5 text-sky-500" />
+                            Why this job scores {job.linkedinScore}/100
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {job.rankingReasons.map((r: string, i: number) => (
+                              <span key={i} className="rounded-md bg-sky-50 border border-sky-200 px-2 py-0.5 text-[10px] text-sky-700 font-medium">{r}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Vendor reason codes */}
+                      {job.vendorReasonCodes && job.vendorReasonCodes.length > 0 && (
+                        <div>
+                          <p className="font-medium text-gray-700 mb-1">Vendor Signals</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {job.vendorReasonCodes.map((r: string, i: number) => (
+                              <span key={i} className="rounded-md bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] text-emerald-700 font-medium">{r.replace(/_/g, ' ')}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Source Compliance & Lineage */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-gray-100">
+                        <div>
+                          <p className="font-medium text-gray-700">Source Compliance</p>
+                          <span className={`inline-block rounded px-2 py-0.5 text-[10px] font-bold mt-0.5 ${
+                            job.sourceComplianceClass === 'FIRST_PARTY_CAREER_SITE' ? 'bg-green-100 text-green-800' :
+                            job.sourceComplianceClass === 'LICENSED_PROVIDER' ? 'bg-blue-100 text-blue-800' :
+                            job.sourceComplianceClass === 'EMAIL_INTEL_DERIVED' ? 'bg-violet-100 text-violet-800' :
+                            job.sourceComplianceClass === 'MANUAL_IMPORT' ? 'bg-amber-100 text-amber-800' :
+                            'bg-gray-100 text-gray-700'
+                          }`}>
+                            {(job.sourceComplianceClass || 'LICENSED_PROVIDER').replace(/_/g, ' ')}
+                          </span>
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-700">Source Platform</p>
+                          <p className="text-gray-600 text-[11px]">{job.sourcePlatform || job.source}</p>
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-700">Source Confidence</p>
+                          <p className="text-gray-600">{job.sourceConfidenceLevel || '—'}%</p>
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-700">Eligibility</p>
+                          <p className="text-[10px] text-gray-500">{job.linkedInEligibilityReason || '—'}</p>
+                        </div>
+                      </div>
+                      {job.complianceNotes && (
+                        <p className="text-[10px] text-gray-400 italic">{job.complianceNotes}</p>
+                      )}
+
+                      {/* Action links */}
+                      <div className="flex gap-3 pt-2 border-t border-gray-100">
+                        {(job.applyUrl || job.sourceUrl) && (
+                          <a href={job.applyUrl || job.sourceUrl} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-1 rounded-lg bg-sky-600 px-4 py-2 text-white font-medium hover:bg-sky-700 transition-colors">
+                            <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" /> Open Job
+                          </a>
+                        )}
+                        {job.recruiterEmail && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(job.recruiterEmail); }}
+                            className="flex items-center gap-1 rounded-lg border border-gray-300 px-4 py-2 text-gray-700 font-medium hover:bg-gray-50 transition-colors"
+                          >
+                            <ClipboardDocumentIcon className="h-3.5 w-3.5" /> Copy Contact
+                          </button>
+                        )}
+                        {job.sourceUrl && job.sourceUrl !== job.applyUrl && (
+                          <a href={job.sourceUrl} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-1 rounded-lg border border-gray-300 px-4 py-2 text-gray-700 font-medium hover:bg-gray-50 transition-colors">
+                            <GlobeAltIcon className="h-3.5 w-3.5" /> View Source
+                          </a>
+                        )}
+                      </div>
+
+                      {job.skills && job.skills.length > 0 && (
+                        <div>
+                          <p className="font-medium text-gray-700 mb-1">Skills & Technologies</p>
+                          <div className="flex flex-wrap gap-1">
+                            {job.skills.map((s: string) => (
+                              <span key={s} className="rounded bg-sky-50 border border-sky-200 text-sky-700 px-2 py-0.5 text-[10px] font-medium">{s}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+          {filtered.length > visibleCount && (
+            <button
+              onClick={() => setVisibleCount(prev => prev + 50)}
+              className="mt-2 w-full rounded-lg border border-sky-200 bg-sky-50 py-2.5 text-sm font-medium text-sky-700 hover:bg-sky-100 transition-colors"
+            >
+              Show more ({filtered.length - visibleCount} remaining)
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Job Cards — Standard (Email Intel / Job Boards) */}
-      {activeTab !== 'highpaid' && data && (
+      {activeTab !== 'highpaid' && activeTab !== 'linkedin' && data && (
         <div className="space-y-2">
           {filtered.length === 0 ? (
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-12 text-center text-sm text-gray-500">
@@ -621,17 +1203,17 @@ export default function LiveFeedPage() {
                       {job.source === 'Email Intel' ? (
                         <>
                           <div><p className="font-medium text-gray-700">Received By</p><p className="text-violet-600 font-medium">{job.receivedByEmail || '—'}</p></div>
-                          <div><p className="font-medium text-gray-700">From</p><p className="text-gray-500">{job.fromName || '—'}</p><p className="text-indigo-600">{job.fromEmail || '—'}</p></div>
-                          <div><p className="font-medium text-gray-700">Vendor</p><p className="text-gray-500">{job.vendorDomain || '—'}</p></div>
+                          <div><p className="font-medium text-gray-700">From</p><p className="text-gray-500">{job.fromName || '—'}</p>{job.fromEmail ? <a href={`mailto:${job.fromEmail}`} className="text-indigo-600 hover:underline">{job.fromEmail}</a> : <p className="text-gray-400">—</p>}</div>
+                          <div><p className="font-medium text-gray-700">Vendor</p>{job.vendorDomain ? <a href={`https://${job.vendorDomain}`} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">{job.vendorDomain}</a> : <p className="text-gray-500">—</p>}</div>
                           <div><p className="font-medium text-gray-700">Vendor Trust</p><p className="text-gray-500">{job.vendorTrust || 0}/100</p></div>
-                          <div><p className="font-medium text-gray-700">Contact</p><p className="text-gray-500">{job.contactName || '—'}</p><p className="text-indigo-600">{job.contactEmail || '—'}</p></div>
+                          <div><p className="font-medium text-gray-700">Contact</p><p className="text-gray-500">{job.contactName || '—'}</p>{job.contactEmail ? <a href={job.contactEmail.startsWith('http') ? job.contactEmail : `mailto:${job.contactEmail}`} target={job.contactEmail.startsWith('http') ? '_blank' : undefined} rel={job.contactEmail.startsWith('http') ? 'noopener noreferrer' : undefined} className="text-indigo-600 hover:underline">{job.contactEmail.startsWith('http') ? 'View Posting' : job.contactEmail}</a> : <p className="text-gray-400">—</p>}</div>
                           <div><p className="font-medium text-gray-700">Engagement</p><p className="text-gray-500">{job.engagementModel || '—'}</p></div>
                         </>
                       ) : (
                         <>
                           <div><p className="font-medium text-gray-700">Source</p><p className="text-blue-600 font-medium">{job.source}</p></div>
-                          <div><p className="font-medium text-gray-700">Company</p><p className="text-gray-500">{job.vendorDomain || job.company || '—'}</p></div>
-                          <div><p className="font-medium text-gray-700">Recruiter</p><p className="text-gray-500">{job.contactName || '—'}</p><p className="text-indigo-600">{job.contactEmail || '—'}</p></div>
+                          <div><p className="font-medium text-gray-700">Company</p>{job.vendorDomain ? <a href={`https://${job.vendorDomain}`} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">{job.vendorDomain}</a> : <p className="text-gray-500">{job.company || '—'}</p>}</div>
+                          <div><p className="font-medium text-gray-700">Recruiter</p><p className="text-gray-500">{job.contactName || '—'}</p>{job.contactEmail ? <a href={`mailto:${job.contactEmail}`} className="text-indigo-600 hover:underline">{job.contactEmail}</a> : <p className="text-gray-400">—</p>}</div>
                           <div><p className="font-medium text-gray-700">Realness Score</p><p className="text-gray-500">{job.vendorTrust || 0}/100</p></div>
                           {(job.applyUrl || job.sourceUrl) && (
                             <div className="col-span-2">

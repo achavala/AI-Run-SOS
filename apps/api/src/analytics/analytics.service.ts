@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 
 interface CacheEntry { data: any; expiresAt: number; }
@@ -21,6 +22,25 @@ export class AnalyticsService {
 
   private setCache(key: string, data: any, ttlMs = 120_000) {
     this.cache.set(key, { data, expiresAt: Date.now() + ttlMs });
+  }
+
+  bustFeedCaches() {
+    for (const key of this.cache.keys()) {
+      if (key.startsWith('liveFeed:') || key.startsWith('highPaid:') || key.startsWith('linkedin:')) {
+        this.cache.delete(key);
+      }
+    }
+  }
+
+  @Cron('15,45 * * * *')
+  async scheduledFaangCrawl() {
+    this.logger.log('[Cron] FAANG/Tech career crawl starting (every 30m)...');
+    try {
+      const result = await this.crawlFaangCareers();
+      this.logger.log(`[Cron] FAANG crawl done: ${result.inserted} inserted, ${result.updated} updated from ${result.companies.length} companies`);
+    } catch (err: any) {
+      this.logger.error(`[Cron] FAANG crawl failed: ${err.message}`);
+    }
   }
 
   /* ═══════ 1. Recruiter Email Activity ═══════ */
@@ -1927,18 +1947,56 @@ export class AnalyticsService {
       LIMIT ${limit}
     ` as any[];
 
+    // Query 3: Jobs with $200K+ salary mentioned in rateText but not captured in structured fields
+    // Catches patterns like "$200K", "$200,000", "$250k/yr", "200000/year"
+    const rateTextJobs = await this.prisma.$queryRaw`
+      SELECT
+        id::text as id, title, company, location,
+        "rateText", "employmentType"::text as "employmentType",
+        skills, "actionabilityScore", "realnessScore",
+        "discoveredAt" as "postedAt",
+        source::text as source,
+        COALESCE("applyUrl", '') as "applyUrl",
+        COALESCE("sourceUrl", '') as "sourceUrl",
+        COALESCE("recruiterName", '') as "recruiterName",
+        COALESCE("recruiterEmail", '') as "recruiterEmail",
+        COALESCE("companyDomain", '') as "companyDomain",
+        "rateMin", "rateMax", "hourlyRateMin", "hourlyRateMax",
+        "compPeriod"::text as "compPeriod",
+        "rawPayload", "locationType"::text as "locationType"
+      FROM "MarketJob"
+      WHERE status = 'ACTIVE'
+        AND COALESCE("rateMax", "rateMin", 0) < ${minSalary}
+        AND "rateText" IS NOT NULL
+        AND (
+          "rateText" ~* '\\$\\s*[2-9]\\d{2}\\s*,?\\s*\\d{3}'
+          OR "rateText" ~* '\\$\\s*[2-9]\\d{2}[kK]'
+          OR "rateText" ~* '[2-9]\\d{2}\\s*,?\\s*\\d{3}\\s*/\\s*(year|yr|annual)'
+        )
+      ORDER BY "discoveredAt" DESC
+      LIMIT ${limit}
+    ` as any[];
+
     const seen = new Set<string>();
     const merged: any[] = [];
-    for (const job of [...annualJobs, ...faangJobs]) {
+    for (const job of [...annualJobs, ...faangJobs, ...rateTextJobs]) {
       if (seen.has(job.id)) continue;
       seen.add(job.id);
 
       const payload = typeof job.rawPayload === 'string' ? JSON.parse(job.rawPayload) : job.rawPayload;
       const compIntel = payload?.compIntel;
 
-      // Use compIntel from provider if available, else fallback to raw rates
-      const baseMin = compIntel?.baseMin ?? this.toAnnual(job.rateMin, job.hourlyRateMin, job.compPeriod);
-      const baseMax = compIntel?.baseMax ?? this.toAnnual(job.rateMax, job.hourlyRateMax, job.compPeriod);
+      // Use compIntel from provider if available, else fallback to raw rates, then rateText parsing
+      let baseMin = compIntel?.baseMin ?? this.toAnnual(job.rateMin, job.hourlyRateMin, job.compPeriod);
+      let baseMax = compIntel?.baseMax ?? this.toAnnual(job.rateMax, job.hourlyRateMax, job.compPeriod);
+      // Parse salary from rateText if structured fields yielded nothing useful
+      if (baseMax < minSalary && job.rateText) {
+        const parsed = this.parseSalaryFromText(job.rateText);
+        if (parsed.max >= minSalary) {
+          baseMin = parsed.min || baseMin;
+          baseMax = parsed.max;
+        }
+      }
       const totalMin = compIntel?.totalMin ?? Math.round(baseMin * 1.4);
       const totalMax = compIntel?.totalMax ?? Math.round(baseMax * 1.4);
       const compType: string = compIntel?.compType ?? 'UNSPECIFIED';
@@ -2013,7 +2071,7 @@ export class AnalyticsService {
       generatedAt: new Date().toISOString(),
     };
 
-    this.setCache(cacheKey, result, 300_000);
+    this.setCache(cacheKey, result, 600_000);
     return result;
   }
 
@@ -2028,6 +2086,21 @@ export class AnalyticsService {
     const label = compType === 'BASE' ? ' base' : compType === 'TOTAL' ? ' est. base' : '';
     if (baseMin === baseMax || !baseMin) return `${this.fmtK(baseMax || baseMin)}${label}/yr`;
     return `${this.fmtK(baseMin)} – ${this.fmtK(baseMax)}${label}/yr`;
+  }
+
+  private parseSalaryFromText(text: string): { min: number; max: number } {
+    const nums: number[] = [];
+    // Match $200K, $200k, $200,000, 200000
+    const kMatch = text.matchAll(/\$?\s*(\d{2,4})\s*[kK]/g);
+    for (const m of kMatch) { if (m[1]) nums.push(parseFloat(m[1]) * 1_000); }
+    const fullMatch = text.matchAll(/\$?\s*(\d{1,3}(?:,\d{3})+)/g);
+    for (const m of fullMatch) { if (m[1]) nums.push(parseFloat(m[1].replace(/,/g, ''))); }
+    const plainMatch = text.matchAll(/(\d{6,})/g);
+    for (const m of plainMatch) { if (m[1]) nums.push(parseFloat(m[1])); }
+    // Filter out unreasonable values (hourly rates, etc.)
+    const annual = nums.filter(n => n >= 100_000 && n <= 5_000_000);
+    if (annual.length === 0) return { min: 0, max: 0 };
+    return { min: Math.min(...annual), max: Math.max(...annual) };
   }
 
   private toAnnual(rate: number | null, hourlyRate: number | null, compPeriod: string | null): number {
@@ -2198,7 +2271,7 @@ export class AnalyticsService {
       }
     }
 
-    this.cache.delete('highPaid:200000:300');
+    this.bustFeedCaches();
     this.logger.log(`FAANG crawl complete: ${inserted} inserted, ${updated} updated, ${skipped} skipped from ${companiesCrawled.length} companies`);
     return { inserted, updated, skipped, companies: companiesCrawled };
   }
@@ -2406,5 +2479,415 @@ export class AnalyticsService {
     } catch {
       return 'skipped';
     }
+  }
+
+  /* ═══════ LinkedIn Intelligence Feed ═══════ */
+  // Sources LinkedIn-tagged jobs from MarketJob and enriches them with vendor intelligence.
+  // Currently, LinkedIn jobs arrive via JSearch aggregation (which indexes LinkedIn postings)
+  // or can be manually imported with source=LINKEDIN. No direct LinkedIn API is used —
+  // LinkedIn does not provide a public job listing API for third-party ingestion.
+  // This feed applies a composite LinkedInOpportunityScore to surface the highest-value
+  // staffing opportunities and predict vendor quality.
+
+  async getLinkedInFeed(limit = 500) {
+    const cacheKey = `linkedin:${limit}`;
+    const cached = this.getCached(cacheKey);
+    if (cached) return cached;
+
+    // Pull all ACTIVE LinkedIn-source jobs + any job whose sourceUrl contains linkedin.com
+    const jobs = await this.prisma.$queryRaw`
+      SELECT
+        mj.id::text as id, mj.title, mj.company, mj.description,
+        mj.location, mj."locationType"::text as "locationType",
+        mj."employmentType"::text as "employmentType",
+        mj."rateText", mj."rateMin", mj."rateMax",
+        mj."hourlyRateMin", mj."hourlyRateMax",
+        mj."compPeriod"::text as "compPeriod",
+        mj."recruiterName", mj."recruiterEmail", mj."recruiterPhone",
+        mj."recruiterLinkedIn",
+        mj."realnessScore", mj."actionabilityScore",
+        mj."realnessReasons", mj."actionabilityReasons",
+        mj."classificationConfidence",
+        mj.skills, mj."negativeSignals",
+        mj."applyUrl", mj."sourceUrl", mj."companyDomain",
+        mj."discoveredAt", mj."postedAt", mj."sourcePostedAt", mj."lastSeenAt",
+        mj.source::text as source,
+        mj."urlStatus"::text as "urlStatus",
+        mj."matchedVendorId",
+        mj."rawPayload",
+        mj."fingerprint",
+        -- Vendor join: get tier + trust if matched
+        v.tier::text as "vendorTier",
+        v."trustScore" as "vendorTrustScore",
+        v."companyName" as "vendorCompanyName",
+        v."responseRate" as "vendorResponseRate",
+        v."interviewGrantRate" as "vendorInterviewRate",
+        v."placementCount" as "vendorPlacementCount"
+      FROM "MarketJob" mj
+      LEFT JOIN "Vendor" v ON mj."matchedVendorId" = v.id
+      WHERE mj.status = 'ACTIVE'
+        AND (
+          mj.source::text = 'LINKEDIN'
+          OR mj."sourceUrl" ILIKE '%linkedin.com%'
+          OR mj."applyUrl" ILIKE '%linkedin.com%'
+        )
+      ORDER BY mj."discoveredAt" DESC
+      LIMIT ${limit}
+    ` as any[];
+
+    // Build vendor intelligence lookup from our known vendor database
+    const knownVendors = await this.prisma.$queryRaw`
+      SELECT id, "companyName", domain, "trustScore", tier::text as tier,
+             "responseRate", "interviewGrantRate", "placementCount",
+             "avgBillRateMin", "avgBillRateMax"
+      FROM "Vendor"
+      WHERE "trustScore" IS NOT NULL AND "trustScore" > 0
+    ` as any[];
+
+    const vendorByDomain = new Map<string, any>();
+    const vendorByName = new Map<string, any>();
+    for (const v of knownVendors) {
+      if (v.domain) vendorByDomain.set(v.domain.toLowerCase(), v);
+      if (v.companyName) vendorByName.set(v.companyName.toLowerCase(), v);
+    }
+
+    const now = Date.now();
+    const scored: any[] = [];
+
+    for (const job of jobs) {
+      const intel = this.computeLinkedInOpportunityScore(job, vendorByDomain, vendorByName, now);
+
+      // Extract compliance metadata from rawPayload (set by enrichment worker)
+      const payload = typeof job.rawPayload === 'string' ? JSON.parse(job.rawPayload) : (job.rawPayload || {});
+      const compliance = payload?.linkedInCompliance || null;
+      const vendorEnrichment = payload?.vendorIntelligence || null;
+
+      scored.push({
+        ...job,
+        ...intel,
+        // Compliance fields for the UI
+        sourceComplianceClass: compliance?.sourceComplianceClass || 'LICENSED_PROVIDER',
+        sourcePlatform: compliance?.sourcePlatform || job.source?.toLowerCase() || 'unknown',
+        sourceIngestionMethod: compliance?.sourceIngestionMethod || 'api_aggregator',
+        sourceLicenseBasis: compliance?.sourceLicenseBasis || null,
+        sourceConfidenceLevel: compliance?.sourceConfidence || (job.source === 'LINKEDIN' ? 75 : 60),
+        complianceNotes: compliance?.complianceNotes || null,
+        linkedInEligibilityReason: compliance?.linkedInEligibilityReason || 'LinkedIn URL or source detected',
+        lineageRunId: compliance?.lineageRunId || null,
+        // Enhanced vendor intel from enrichment worker (if available)
+        primeVendorLikelihood: vendorEnrichment?.primeVendorLikelihood ?? null,
+        directVendorLikelihood: vendorEnrichment?.directVendorLikelihood ?? null,
+        staffingVendorLikelihood: vendorEnrichment?.staffingVendorLikelihood ?? null,
+        historicalSignalCount: vendorEnrichment?.historicalSignalCount ?? 0,
+      });
+    }
+
+    // Sort by composite score descending
+    scored.sort((a, b) => b.linkedinScore - a.linkedinScore);
+
+    // Compute summary stats
+    const totalJobs = scored.length;
+    const highConfidence = scored.filter(j => j.linkedinScore >= 70).length;
+    const primeVendorLikely = scored.filter(j => j.vendorQualityTier === 'prime_like').length;
+    const directVendorLikely = scored.filter(j => j.vendorQualityTier === 'direct_like').length;
+    const withContact = scored.filter(j => j.contactAvailable).length;
+    const freshUnder24h = scored.filter(j => j.freshnessHours < 24).length;
+    const freshUnder72h = scored.filter(j => j.freshnessHours < 72).length;
+
+    // Employment type breakdown
+    const empBreakdown: Record<string, number> = {};
+    for (const j of scored) {
+      const t = j.employmentType || 'UNKNOWN';
+      empBreakdown[t] = (empBreakdown[t] || 0) + 1;
+    }
+
+    // Top companies by count
+    const companyCounts: Record<string, number> = {};
+    for (const j of scored) {
+      const c = j.company || 'Unknown';
+      companyCounts[c] = (companyCounts[c] || 0) + 1;
+    }
+    const topCompanies = Object.entries(companyCounts)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 20)
+      .map(([company, count]) => ({ company, count }));
+
+    // Vendor tier distribution
+    const vendorTierDist: Record<string, number> = {};
+    for (const j of scored) {
+      const t = j.vendorQualityTier || 'low_confidence';
+      vendorTierDist[t] = (vendorTierDist[t] || 0) + 1;
+    }
+
+    // Compliance class distribution
+    const complianceDist: Record<string, number> = {};
+    for (const j of scored) {
+      const c = j.sourceComplianceClass || 'LICENSED_PROVIDER';
+      complianceDist[c] = (complianceDist[c] || 0) + 1;
+    }
+
+    const result = {
+      jobs: scored,
+      total: totalJobs,
+      summary: {
+        totalJobs,
+        highConfidence,
+        primeVendorLikely,
+        directVendorLikely,
+        withContact,
+        freshUnder24h,
+        freshUnder72h,
+      },
+      empBreakdown,
+      topCompanies,
+      vendorTierDist,
+      complianceDist,
+      generatedAt: new Date().toISOString(),
+    };
+
+    this.setCache(cacheKey, result, 300_000); // 5 min cache
+    return result;
+  }
+
+  /**
+   * Composite scoring model for LinkedIn jobs.
+   * Transparent, explainable, and honest about confidence levels.
+   * Returns vendor intelligence + opportunity scoring + reason codes.
+   */
+  private computeLinkedInOpportunityScore(
+    job: any,
+    vendorByDomain: Map<string, any>,
+    vendorByName: Map<string, any>,
+    now: number,
+  ) {
+    let score = 50; // baseline
+    const reasons: string[] = [];
+
+    // ── 1. Freshness (max +15) ──
+    const discoveredAt = job.discoveredAt ? new Date(job.discoveredAt).getTime() : 0;
+    const postedAt = job.sourcePostedAt ? new Date(job.sourcePostedAt).getTime() :
+                     job.postedAt ? new Date(job.postedAt).getTime() : discoveredAt;
+    const freshnessHours = (now - (postedAt || discoveredAt)) / 3_600_000;
+
+    if (freshnessHours < 6) { score += 15; reasons.push('Posted within 6 hours'); }
+    else if (freshnessHours < 12) { score += 12; reasons.push('Posted within 12 hours'); }
+    else if (freshnessHours < 24) { score += 10; reasons.push('Posted within 24 hours'); }
+    else if (freshnessHours < 72) { score += 5; reasons.push('Posted within 3 days'); }
+    else if (freshnessHours > 168) { score -= 5; reasons.push('Posting older than 7 days'); }
+
+    // ── 2. Realness / Authenticity (max +15) ──
+    const realness = job.realnessScore || 0;
+    if (realness >= 80) { score += 15; reasons.push(`High realness score (${realness})`); }
+    else if (realness >= 60) { score += 10; reasons.push(`Good realness (${realness})`); }
+    else if (realness >= 40) { score += 3; }
+    else if (realness > 0 && realness < 30) { score -= 10; reasons.push(`Low realness (${realness}) — suspicious`); }
+
+    // ── 3. Contact availability (max +12) ──
+    const hasEmail = !!job.recruiterEmail;
+    const hasPhone = !!job.recruiterPhone;
+    const hasName = !!job.recruiterName;
+    const hasLinkedIn = !!job.recruiterLinkedIn;
+    const contactAvailable = hasEmail || hasPhone || hasLinkedIn;
+
+    if (hasEmail && hasName) { score += 12; reasons.push('Strong contact: recruiter name + email'); }
+    else if (hasEmail) { score += 8; reasons.push('Recruiter email available'); }
+    else if (hasPhone) { score += 6; reasons.push('Recruiter phone available'); }
+    else if (hasLinkedIn) { score += 5; reasons.push('Recruiter LinkedIn available'); }
+    else { score -= 3; }
+
+    // ── 4. Vendor intelligence (max +18) ──
+    let vendorMatch: any = null;
+    let vendorQualityTier: string = 'low_confidence';
+    let vendorConfidenceScore = 0;
+    const vendorReasonCodes: string[] = [];
+
+    // Try matching by matchedVendorId first, then companyDomain, then company name
+    if (job.vendorTier) {
+      // Already matched via the LEFT JOIN
+      vendorMatch = {
+        tier: job.vendorTier,
+        trustScore: job.vendorTrustScore,
+        companyName: job.vendorCompanyName,
+        responseRate: job.vendorResponseRate,
+        interviewGrantRate: job.vendorInterviewRate,
+        placementCount: job.vendorPlacementCount,
+      };
+    } else if (job.companyDomain) {
+      vendorMatch = vendorByDomain.get(job.companyDomain.toLowerCase());
+    }
+    if (!vendorMatch && job.company) {
+      vendorMatch = vendorByName.get(job.company.toLowerCase());
+    }
+
+    if (vendorMatch) {
+      const vTier = vendorMatch.tier;
+      const vTrust = vendorMatch.trustScore || 0;
+
+      if (vTier === 'PRIME') {
+        vendorQualityTier = 'prime_like';
+        vendorConfidenceScore = Math.min(100, vTrust + 15);
+        score += 18;
+        reasons.push(`Matched to PRIME vendor: ${vendorMatch.companyName || job.company}`);
+        vendorReasonCodes.push('VENDOR_PRIME_MATCH', 'HIGH_TRUST');
+      } else if (vTier === 'DIRECT') {
+        vendorQualityTier = 'direct_like';
+        vendorConfidenceScore = Math.min(100, vTrust + 10);
+        score += 14;
+        reasons.push(`Matched to DIRECT vendor: ${vendorMatch.companyName || job.company}`);
+        vendorReasonCodes.push('VENDOR_DIRECT_MATCH');
+      } else if (vTier === 'SUB') {
+        vendorQualityTier = 'reputable_staffing';
+        vendorConfidenceScore = vTrust;
+        score += 8;
+        reasons.push('Matched to known staffing vendor');
+        vendorReasonCodes.push('VENDOR_SUB_MATCH');
+      } else if (vTier === 'BROKER') {
+        vendorQualityTier = 'generic';
+        vendorConfidenceScore = Math.max(20, vTrust);
+        score += 2;
+        vendorReasonCodes.push('VENDOR_BROKER');
+      } else {
+        vendorQualityTier = 'generic';
+        vendorConfidenceScore = vTrust;
+      }
+
+      if (vendorMatch.placementCount > 0) {
+        score += 3;
+        reasons.push(`Vendor has ${vendorMatch.placementCount} past placements`);
+        vendorReasonCodes.push('HAS_PLACEMENTS');
+      }
+      if (vendorMatch.interviewGrantRate && vendorMatch.interviewGrantRate > 0.3) {
+        score += 2;
+        vendorReasonCodes.push('HIGH_INTERVIEW_RATE');
+      }
+    } else {
+      // No vendor match — use heuristics from company name
+      vendorQualityTier = this.inferVendorType(job.company, job.description);
+      vendorConfidenceScore = vendorQualityTier === 'prime_like' ? 40 :
+                              vendorQualityTier === 'reputable_staffing' ? 35 : 15;
+      if (vendorQualityTier === 'prime_like') {
+        score += 6;
+        reasons.push('Company name suggests implementation/consulting partner');
+        vendorReasonCodes.push('NAME_HEURISTIC_PRIME');
+      } else if (vendorQualityTier === 'reputable_staffing') {
+        score += 3;
+        reasons.push('Company name suggests staffing vendor');
+        vendorReasonCodes.push('NAME_HEURISTIC_STAFFING');
+      }
+    }
+
+    // ── 5. Rate attractiveness (max +10) ──
+    const annualRate = this.toAnnual(job.rateMin, job.hourlyRateMin, job.compPeriod);
+    const annualRateMax = this.toAnnual(job.rateMax, job.hourlyRateMax, job.compPeriod);
+    const bestRate = annualRateMax || annualRate;
+
+    if (bestRate >= 200_000) { score += 10; reasons.push('$200K+ compensation'); }
+    else if (bestRate >= 150_000) { score += 7; reasons.push('$150K+ compensation'); }
+    else if (bestRate >= 100_000) { score += 4; }
+    else if (job.rateText) { score += 2; }
+    // No rate disclosed at all
+    else { score -= 2; }
+
+    // ── 6. C2C / staffing suitability (max +8) ──
+    const empType = (job.employmentType || '').toUpperCase();
+    if (empType === 'C2C') { score += 8; reasons.push('C2C — direct staffing opportunity'); }
+    else if (empType === 'W2_1099' || empType === 'CONTRACT') { score += 6; reasons.push(`${empType} — staffing friendly`); }
+    else if (empType === 'W2') { score += 4; }
+    else if (empType === 'FULLTIME') { score -= 2; }
+
+    // ── 7. Tech relevance / description quality (max +8) ──
+    const desc = job.description || '';
+    const skills: string[] = job.skills || [];
+
+    if (desc.length > 1000 && skills.length >= 3) {
+      score += 8; reasons.push('Detailed description with enterprise tech stack');
+    } else if (desc.length > 500 || skills.length >= 2) {
+      score += 4;
+    } else if (desc.length < 100) {
+      score -= 5; reasons.push('Thin description — possible low-quality listing');
+    }
+
+    // ── 8. URL health (max +3 / -8) ──
+    if (job.urlStatus === 'ALIVE') { score += 3; }
+    else if (job.urlStatus === 'DEAD') { score -= 8; reasons.push('Apply URL is dead'); }
+    else if (job.urlStatus === 'REDIRECT') { score -= 2; }
+
+    // ── 9. Negative signal suppression ──
+    const negSignals: string[] = job.negativeSignals || [];
+    if (negSignals.length > 0) {
+      score -= Math.min(15, negSignals.length * 4);
+      if (negSignals.length >= 2) reasons.push(`${negSignals.length} negative signals detected`);
+    }
+
+    // ── 10. Duplicate suppression ──
+    // (Fingerprint-based dedup is handled at ingestion; we just penalize stale repeats here)
+    if (job.lastSeenAt && job.discoveredAt) {
+      const seenDiff = new Date(job.lastSeenAt).getTime() - new Date(job.discoveredAt).getTime();
+      if (seenDiff > 14 * 86400000) { // repost for 14+ days
+        score -= 3;
+        reasons.push('Long-running repost');
+      }
+    }
+
+    const linkedinScore = Math.max(0, Math.min(100, score));
+
+    // Format rate display
+    const rateDisplay = job.rateText || (bestRate > 0 ? this.formatComp(annualRate, annualRateMax) : null);
+
+    return {
+      linkedinScore,
+      rankingReasons: reasons,
+      vendorQualityTier,
+      vendorConfidenceScore,
+      vendorReasonCodes,
+      contactAvailable,
+      freshnessHours: Math.round(freshnessHours),
+      rateDisplay,
+      annualRate: bestRate,
+      // Recruiter contact strength: 0-100
+      recruiterContactStrength: hasEmail && hasName && hasPhone ? 100 :
+                                hasEmail && hasName ? 80 :
+                                hasEmail ? 60 :
+                                hasPhone ? 40 :
+                                hasLinkedIn ? 30 : 0,
+      // Submission likelihood estimate based on composite signals
+      submissionLikelihood: linkedinScore >= 80 ? 'high' :
+                            linkedinScore >= 60 ? 'medium' :
+                            linkedinScore >= 40 ? 'low' : 'unlikely',
+    };
+  }
+
+  /**
+   * Name-based heuristic for vendor type when no database match exists.
+   * Conservative — does NOT claim certainty, just pattern matching.
+   */
+  private inferVendorType(company: string | null, description: string | null): string {
+    if (!company) return 'low_confidence';
+    const lower = company.toLowerCase();
+    const desc = (description || '').toLowerCase();
+
+    // Known large implementation/consulting partners (prime-like patterns)
+    const primePatterns = [
+      'accenture', 'deloitte', 'cognizant', 'infosys', 'wipro', 'tcs ',
+      'capgemini', 'hcl', 'tech mahindra', 'ibm consulting', 'kpmg',
+      'ey ', 'ernst', 'pwc', 'mckinsey', 'bain', 'bcg',
+    ];
+    if (primePatterns.some(p => lower.includes(p))) return 'prime_like';
+
+    // Known staffing/IT consulting patterns
+    const staffingPatterns = [
+      'staffing', 'consulting', 'solutions', 'technologies', 'infotech',
+      'tek', 'systems', 'global', 'talent', 'workforce', 'manpower',
+      'adecco', 'randstad', 'robert half', 'kelly services', 'insight global',
+      'teksystems', 'apex systems', 'modis', 'cyient', 'mphasis',
+    ];
+    if (staffingPatterns.some(p => lower.includes(p))) return 'reputable_staffing';
+
+    // Description-level signals for staffing
+    if (desc.includes('c2c') || desc.includes('corp to corp') || desc.includes('corp-to-corp')) {
+      return 'reputable_staffing';
+    }
+
+    return 'generic';
   }
 }

@@ -200,7 +200,7 @@ function OverviewTab({ onNavigate }: { onNavigate: (tab: Tab) => void }) {
               </div>
               <div className="ml-4 text-right text-xs text-gray-400">
                 {r.vendorName && <p className="font-medium text-gray-600">{r.vendorName}</p>}
-                {r.contactEmail && <p>{r.contactEmail}</p>}
+                {r.contactEmail && <a href={r.contactEmail.startsWith('http') ? r.contactEmail : `mailto:${r.contactEmail}`} target={r.contactEmail.startsWith('http') ? '_blank' : undefined} rel={r.contactEmail.startsWith('http') ? 'noopener noreferrer' : undefined} className="text-indigo-600 hover:underline block">{r.contactEmail.startsWith('http') ? 'View Posting' : r.contactEmail}</a>}
                 <p className="mt-1">{fmtDate(r.createdAt)}</p>
               </div>
             </div>
@@ -383,7 +383,7 @@ function VendorsTab() {
                   <div key={c.id} className="flex items-center justify-between rounded-lg border px-4 py-3">
                     <div>
                       <p className="font-medium">{c.name || '—'}</p>
-                      <p className="text-xs text-indigo-600">{c.email}</p>
+                      <a href={`mailto:${c.email}`} className="text-xs text-indigo-600 hover:underline">{c.email}</a>
                     </div>
                     <div className="text-right text-xs text-gray-500">
                       <p>{fmtNum(c.emailCount)} emails</p>
@@ -508,8 +508,8 @@ function ConsultantsTab() {
             <div>
               <h2 className="text-2xl font-bold text-gray-900">{detail.fullName || 'Unknown'}</h2>
               <div className="mt-2 space-y-1">
-                {detail.email && <p className="flex items-center gap-2 text-sm"><EnvelopeIcon className="h-4 w-4 text-gray-400" /> {detail.email}</p>}
-                {detail.phone && <p className="flex items-center gap-2 text-sm"><PhoneIcon className="h-4 w-4 text-gray-400" /> {detail.phone}</p>}
+                {detail.email && <a href={`mailto:${detail.email}`} className="flex items-center gap-2 text-sm text-indigo-600 hover:underline"><EnvelopeIcon className="h-4 w-4 text-gray-400" /> {detail.email}</a>}
+                {detail.phone && <a href={`tel:${detail.phone}`} className="flex items-center gap-2 text-sm text-indigo-600 hover:underline"><PhoneIcon className="h-4 w-4 text-gray-400" /> {detail.phone}</a>}
               </div>
               <div className="mt-3 flex gap-6 text-sm">
                 <div><span className="text-gray-500">First seen:</span> <strong>{fmtDate(detail.firstSeen)}</strong></div>
@@ -753,7 +753,7 @@ function ReqSignalsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
                   </div>
                   <div className="ml-4 text-right">
                     {r.vendorName && <p className="text-xs font-medium text-indigo-600">{r.vendorName}</p>}
-                    {r.contactEmail && <p className="text-xs text-gray-400">{r.contactEmail}</p>}
+                    {r.contactEmail && <a href={r.contactEmail.startsWith('http') ? r.contactEmail : `mailto:${r.contactEmail}`} target={r.contactEmail.startsWith('http') ? '_blank' : undefined} rel={r.contactEmail.startsWith('http') ? 'noopener noreferrer' : undefined} className="text-xs text-indigo-600 hover:underline block">{r.contactEmail.startsWith('http') ? 'View Posting' : r.contactEmail}</a>}
                     {r.contactName && <p className="text-xs text-gray-500">{r.contactName}</p>}
                   </div>
                 </div>
@@ -783,7 +783,7 @@ function ReqSignalsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
               )}
               <div className="mt-2 text-xs text-gray-500">
                 {matchPanel.vendorName && <span>Vendor: <strong>{matchPanel.vendorName}</strong></span>}
-                {matchPanel.contactEmail && <span className="ml-3">{matchPanel.contactEmail}</span>}
+                {matchPanel.contactEmail && <a href={matchPanel.contactEmail.startsWith('http') ? matchPanel.contactEmail : `mailto:${matchPanel.contactEmail}`} target={matchPanel.contactEmail.startsWith('http') ? '_blank' : undefined} rel={matchPanel.contactEmail.startsWith('http') ? 'noopener noreferrer' : undefined} className="ml-3 text-indigo-600 hover:underline">{matchPanel.contactEmail.startsWith('http') ? 'View Posting' : matchPanel.contactEmail}</a>}
               </div>
             </div>
 
@@ -801,7 +801,7 @@ function ReqSignalsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
                         }`}>{c.matchScore}</div>
                         <div>
                           <p className="font-medium">{c.fullName}</p>
-                          <p className="text-xs text-indigo-600">{c.email}</p>
+                          <a href={`mailto:${c.email}`} className="text-xs text-indigo-600 hover:underline">{c.email}</a>
                           {c.phone && <p className="text-xs text-gray-400">{c.phone}</p>}
                         </div>
                       </div>

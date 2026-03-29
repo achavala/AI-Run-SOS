@@ -492,6 +492,8 @@ model Submission {
   interviews    Interview[]
   offers        Offer[]
   emailThreads  SubmissionEmailThread[]
+  followups     SubmissionFollowup[]
+  events        SubmissionEvent[]
 
   @@unique([tenantId, jobId, consultantId])
   @@index([tenantId])
@@ -574,6 +576,56 @@ model AutoSubmitQueueItem {
   @@index([consultantId])
   @@index([status, expiresAt])
   @@index([tenantId, sourcingLane])
+}
+
+// ─── Submission Follow-up Schedule ────────────────────────────────
+
+model SubmissionFollowup {
+  id              String   @id @default(cuid())
+  submissionId    String   @map("submission_id")
+  followupNumber  Int      @map("followup_number")
+  scheduledAt     DateTime @map("scheduled_at")
+  sentAt          DateTime? @map("sent_at")
+  status          String   @default("PENDING") // PENDING | SENT | CANCELLED | ESCALATED
+  graphMessageId  String?
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@unique([submissionId, followupNumber])
+  @@index([status, scheduledAt])
+  @@index([submissionId])
+  @@map("submission_followup")
+}
+
+// ─── Submission Event Log ────────────────────────────────────────
+
+model SubmissionEvent {
+  id            String   @id @default(cuid())
+  submissionId  String   @map("submission_id")
+  eventType     String   @map("event_type")
+  actor         String   @default("system")
+  details       Json     @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId])
+  @@index([eventType])
+  @@map("submission_event")
+}
+
+// ─── Vendor Feedback Event (from response detection) ─────────────
+
+model VendorFeedbackEvent {
+  id            String   @id @default(cuid())
+  vendorDomain  String   @map("vendor_domain")
+  feedbackType  String   @map("feedback_type")
+  details       Json     @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([vendorDomain])
+  @@index([feedbackType])
+  @@map("vendor_feedback_event")
 }
 
 // ─── Consent Ledger ──────────────────────────────────────────────
@@ -1453,20 +1505,24 @@ model EmailSyncState {
 // ── PST / Email Archive Ingestion ────────────────────────────────
 
 model RawEmailMessage {
-  id          String    @id @default(cuid())
-  pstBatch    String
-  sourcePath  String
-  messageId   String?
-  threadHint  String?
-  subject     String?
-  fromEmail   String?
-  fromName    String?
-  toEmails    String[]
-  ccEmails    String[]
-  sentAt      DateTime?
-  bodyText    String?   @db.Text
-  bodyHtml    String?   @db.Text
-  processed   Boolean   @default(false)
+  id                 String    @id @default(cuid())
+  pstBatch           String
+  sourcePath         String
+  messageId          String?
+  threadHint         String?
+  conversationId     String?   @map("conversation_id")
+  internetMessageId  String?   @map("internet_message_id")
+  category           String?   // vendor_req | vendor_reply | consultant | general
+  subject            String?
+  fromEmail          String?
+  fromName           String?
+  toEmails           String[]
+  ccEmails           String[]
+  sentAt             DateTime?
+  bodyText           String?   @db.Text
+  bodyHtml           String?   @db.Text
+  processed          Boolean   @default(false)
+  responseProcessed  Boolean   @default(false)
 
   attachments RawEmailAttachment[]
 
@@ -1476,6 +1532,8 @@ model RawEmailMessage {
   @@index([sentAt])
   @@index([pstBatch])
   @@index([processed])
+  @@index([conversationId])
+  @@index([responseProcessed])
 }
 
 model RawEmailAttachment {
@@ -1661,4 +1719,136 @@ model ExtractionFact {
 
   @@index([entityType, entityId])
   @@index([sourceEmailId])
+}
+
+// ─── Job Match & Scoring ──────────────────────────────────────────
+
+model JobMatch {
+  id             String   @id @default(cuid())
+  tenantId       String
+  jobId          String?          // Internal Job id (nullable — can match MarketJob too)
+  marketJobId    String?          // MarketJob id
+  consultantId   String
+  overallScore   Float    @default(0)
+  scoreBreakdown Json     @default("{}")  // { mustHaveSkills: 28, niceToHaveSkills: 12, ... }
+  matchReasons   Json     @default("[]")  // string[] of human-readable reasons
+  gaps           Json     @default("[]")  // string[] of missing skills / gaps
+  visaEligible   Boolean  @default(true)
+  visaNote       String?
+  empTypeMatch   Boolean  @default(true)
+  billRateEstimate Float?
+  status         String   @default("computed")  // computed | reviewed | submitted | expired
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId, jobId])
+  @@index([tenantId, marketJobId])
+  @@index([tenantId, consultantId])
+  @@index([tenantId, overallScore])
+  @@unique([tenantId, jobId, consultantId])
+}
+
+// ─── Resume Artifact (tailored resumes stored in DB) ──────────────
+
+model ResumeArtifact {
+  id               String   @id @default(cuid())
+  tenantId         String
+  consultantId     String
+  consultantName   String
+  primaryTech      String
+  jobId            String?          // Internal Job id
+  marketJobId      String?          // MarketJob id
+  jobTitle         String
+  jobSource        String?          // GREENHOUSE, LEVER, JSEARCH, VENDOR, etc.
+  vendorOrClient   String?
+  matchScore       Float    @default(0)
+  resumeType       String   @default("tailored")  // master | tailored
+  htmlContent      String?  @db.Text
+  htmlPath         String?
+  pdfPath          String?
+  metadataPath     String?
+  fileChecksum     String?
+  resumeJson       Json     @default("{}")  // structured resume payload
+  generatedAt      DateTime @default(now())
+  version          Int      @default(1)
+  isSubmissionReady Boolean @default(false)
+
+  @@index([tenantId, consultantId])
+  @@index([tenantId, jobId])
+  @@index([tenantId, marketJobId])
+}
+
+// ─── Queryable Audit Log (all mutations) ──────────────────────────
+
+model AuditLog {
+  id              String   @id @default(cuid())
+  tenantId        String
+  userId          String?
+  action          String
+  entityType      String
+  entityId        String?
+  metadata        Json     @default("{}")
+  ipAddress       String?
+  userAgent       String?
+  createdAt       DateTime @default(now())
+
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, action])
+  @@index([createdAt])
+}
+
+// ─── Submission Approval (duplicate vendor/client resubmission) ───
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+model SubmissionApproval {
+  id                String         @id @default(cuid())
+  tenantId          String
+  consultantId      String
+  jobId             String?
+  marketJobId       String?
+  vendorOrClient    String
+  previousSubmissionId String?
+  previousSubmissionDate DateTime?
+  jobTitle          String
+  approvalToken     String         @unique @default(cuid())
+  status            ApprovalStatus @default(PENDING)
+  requestedAt       DateTime       @default(now())
+  respondedAt       DateTime?
+  expiresAt         DateTime
+  consultantEmail   String
+  requestReason     String?
+  responseNote      String?
+  resumeArtifactId  String?
+
+  @@index([tenantId, consultantId])
+  @@index([approvalToken])
+  @@index([tenantId, status])
+}
+
+// ─── Email Audit Log ──────────────────────────────────────────────
+
+model EmailAudit {
+  id            String   @id @default(cuid())
+  tenantId      String
+  templateName  String           // submission_confirmation, duplicate_approval_request, etc.
+  toEmail       String
+  fromEmail     String
+  subject       String
+  bodyPreview   String?  @db.Text
+  graphMessageId String?
+  relatedEntityType String?      // submission, approval, resume
+  relatedEntityId   String?
+  status        String   @default("sent")  // sent | failed | bounced
+  errorMessage  String?
+  sentAt        DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, toEmail])
+  @@index([relatedEntityType, relatedEntityId])
 }

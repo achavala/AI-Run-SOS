@@ -9,6 +9,10 @@ import { handleMarketJobSync } from "./market-sync";
 import { handleUrlHealthCheck } from "./url-health-check";
 import { handleQaTruthSampler } from "./qa-truth-sampler";
 import { handleVendorEmailSync } from "./vendor-email-sync";
+import { handleLinkedInEnrichment } from "./linkedin-enrichment";
+import { handleRecruiterDigest } from "./recruiter-digest";
+import { handleInterviewDetection } from "./interview-detection";
+import { handleLlmExtraction } from "./llm-extraction";
 
 export const JOB_NAMES = {
   DAILY_SCOREBOARD: "daily-scoreboard",
@@ -20,6 +24,10 @@ export const JOB_NAMES = {
   URL_HEALTH_CHECK: "url-health-check",
   QA_TRUTH_SAMPLER: "qa-truth-sampler",
   VENDOR_EMAIL_SYNC: "vendor-email-sync",
+  LINKEDIN_ENRICHMENT: "linkedin-enrichment",
+  RECRUITER_DIGEST: "recruiter-digest",
+  INTERVIEW_DETECTION: "interview-detection",
+  LLM_EXTRACTION: "llm-extraction",
 } as const;
 
 export async function registerJobHandlers(
@@ -79,6 +87,30 @@ export async function registerJobHandlers(
   boss.work(JOB_NAMES.VENDOR_EMAIL_SYNC, async (jobs) => {
     for (const job of jobs) {
       await handleVendorEmailSync(prisma, (job.data ?? {}) as Record<string, unknown>);
+    }
+  });
+
+  boss.work(JOB_NAMES.LINKEDIN_ENRICHMENT, async (jobs) => {
+    for (const job of jobs) {
+      await handleLinkedInEnrichment(prisma, (job.data ?? {}) as Record<string, unknown>);
+    }
+  });
+
+  boss.work(JOB_NAMES.RECRUITER_DIGEST, async (jobs) => {
+    for (const job of jobs) {
+      await handleRecruiterDigest(prisma, (job.data ?? {}) as Record<string, unknown>);
+    }
+  });
+
+  boss.work(JOB_NAMES.INTERVIEW_DETECTION, async (jobs) => {
+    for (const job of jobs) {
+      await handleInterviewDetection(prisma, (job.data ?? {}) as Record<string, unknown>);
+    }
+  });
+
+  boss.work(JOB_NAMES.LLM_EXTRACTION, async (jobs) => {
+    for (const job of jobs) {
+      await handleLlmExtraction(prisma, (job.data ?? {}) as Record<string, unknown>);
     }
   });
 }

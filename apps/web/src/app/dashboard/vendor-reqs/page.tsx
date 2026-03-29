@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import {
@@ -550,6 +551,12 @@ function DetailPanel({
         {req.status === 'CONVERTED' && (
           <div className="rounded-lg border border-green-200 bg-green-50 p-2.5 text-center">
             <p className="text-xs font-semibold text-green-700">Converted to internal req</p>
+            {req.convertedToJobId && (
+              <Link href={`/dashboard/jobs/${req.convertedToJobId}`}
+                className="text-[10px] text-indigo-600 hover:underline font-medium">
+                View Job →
+              </Link>
+            )}
             {req.convertedAt && (
               <p className="text-[10px] text-green-600">{timeAgo(req.convertedAt)}</p>
             )}

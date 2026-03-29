@@ -73,23 +73,15 @@ export class SubmissionsService {
 
     if (!submission) throw new NotFoundException('Submission not found');
 
-    const events = await this.prisma.$queryRaw`
-      SELECT id, event_type as "eventType", actor, details, created_at as "createdAt"
-      FROM submission_event WHERE submission_id = ${id}
-      ORDER BY created_at ASC
-    ` as any[];
+    const events = await this.prisma.submissionEvent.findMany({
+      where: { submissionId: id },
+      orderBy: { createdAt: 'asc' },
+    });
 
-    let followups: any[] = [];
-    try {
-      followups = await this.prisma.$queryRaw`
-        SELECT id, followup_number as "number", scheduled_at as "scheduledAt",
-               sent_at as "sentAt", status
-        FROM submission_followup WHERE submission_id = ${id}
-        ORDER BY followup_number ASC
-      ` as any[];
-    } catch {
-      // submission_followup table may not exist
-    }
+    const followups = await this.prisma.submissionFollowup.findMany({
+      where: { submissionId: id },
+      orderBy: { followupNumber: 'asc' },
+    });
 
     return { ...submission, events, followups };
   }
@@ -364,22 +356,26 @@ export class SubmissionsService {
     });
 
     // Schedule follow-ups: T+4h, T+24h, T+48h
-    const followups = [
+    const followupSchedule = [
       { number: 1, hours: 4 },
       { number: 2, hours: 24 },
       { number: 3, hours: 48 },
     ];
 
-    for (const fu of followups) {
+    for (const fu of followupSchedule) {
       const scheduledAt = new Date(now.getTime() + fu.hours * 3600000);
-      try {
-        await this.prisma.$executeRaw`
-          INSERT INTO submission_followup (submission_id, followup_number, scheduled_at, status)
-          VALUES (${id}, ${fu.number}, ${scheduledAt}, 'PENDING')
-          ON CONFLICT DO NOTHING
-        `;
-      } catch {
-        // submission_followup table may not exist
+      const exists = await this.prisma.submissionFollowup.findUnique({
+        where: { submissionId_followupNumber: { submissionId: id, followupNumber: fu.number } },
+      });
+      if (!exists) {
+        await this.prisma.submissionFollowup.create({
+          data: {
+            submissionId: id,
+            followupNumber: fu.number,
+            scheduledAt,
+            status: 'PENDING',
+          },
+        });
       }
     }
 
@@ -414,16 +410,11 @@ export class SubmissionsService {
       feedback: data.vendorFeedback,
     });
 
-    // Cancel pending follow-ups if terminal status
     if (['REJECTED', 'WITHDRAWN', 'CLOSED', 'ACCEPTED'].includes(data.status)) {
-      try {
-        await this.prisma.$executeRaw`
-          UPDATE submission_followup SET status = 'CANCELLED'
-          WHERE submission_id = ${id} AND status = 'PENDING'
-        `;
-      } catch {
-        // submission_followup table may not exist
-      }
+      await this.prisma.submissionFollowup.updateMany({
+        where: { submissionId: id, status: 'PENDING' },
+        data: { status: 'CANCELLED' },
+      });
     }
 
     return this.prisma.submission.update({ where: { id }, data: updateData });
@@ -536,36 +527,25 @@ Best regards`;
   /* ═══════ Follow-up Engine ═══════ */
 
   async getDueFollowups() {
-    try {
-      return await this.prisma.$queryRaw`
-        SELECT sf.id, sf.submission_id as "submissionId", sf.followup_number as "number",
-               sf.scheduled_at as "scheduledAt",
-               s.status as "submissionStatus",
-               s.notes,
-               s."jobId",
-               s."consultantId"
-        FROM submission_followup sf
-        JOIN "Submission" s ON s.id = sf.submission_id
-        WHERE sf.status = 'PENDING'
-          AND sf.scheduled_at <= NOW()
-          AND s.status IN ('SUBMITTED', 'CONSENT_PENDING')
-        ORDER BY sf.scheduled_at ASC
-        LIMIT 50
-      ` as any[];
-    } catch {
-      return [];
-    }
+    return this.prisma.submissionFollowup.findMany({
+      where: {
+        status: 'PENDING',
+        scheduledAt: { lte: new Date() },
+        submission: { status: { in: ['SUBMITTED', 'CONSENT_PENDING'] } },
+      },
+      include: {
+        submission: { select: { id: true, status: true, notes: true, jobId: true, consultantId: true } },
+      },
+      orderBy: { scheduledAt: 'asc' },
+      take: 50,
+    });
   }
 
   async markFollowupSent(followupId: string) {
-    try {
-      await this.prisma.$executeRaw`
-        UPDATE submission_followup SET status = 'SENT', sent_at = NOW()
-        WHERE id = ${followupId}::uuid
-      `;
-    } catch {
-      // submission_followup table may not exist
-    }
+    await this.prisma.submissionFollowup.update({
+      where: { id: followupId },
+      data: { status: 'SENT', sentAt: new Date() },
+    });
   }
 
   /* ═══════ Dashboard Stats ═══════ */
@@ -602,10 +582,14 @@ Best regards`;
   /* ═══════ Helpers ═══════ */
 
   private async logEvent(submissionId: string, eventType: string, actor: string | null, details: any) {
-    await this.prisma.$executeRaw`
-      INSERT INTO submission_event (submission_id, event_type, actor, details)
-      VALUES (${submissionId}, ${eventType}, ${actor || 'system'}, ${JSON.stringify(details)}::jsonb)
-    `;
+    await this.prisma.submissionEvent.create({
+      data: {
+        submissionId,
+        eventType,
+        actor: actor || 'system',
+        details,
+      },
+    });
   }
 
   private evaluateConsent(

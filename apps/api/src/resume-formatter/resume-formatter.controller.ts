@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Body, Param, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Req, Res, UseGuards } from '@nestjs/common';
+import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -21,6 +22,20 @@ export class ResumeFormatterController {
       body.rawContent,
       body.pod,
     );
+  }
+
+  @Get(':consultantId/pdf/:versionType')
+  @Roles('MANAGEMENT', 'RECRUITMENT', 'SALES')
+  async downloadPdf(
+    @Req() req: any,
+    @Param('consultantId') consultantId: string,
+    @Param('versionType') versionType: string,
+    @Res() res: Response,
+  ) {
+    const pdfBuffer = await this.resumeFormatterService.generatePdf(req.tenantId, consultantId, versionType);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="resume_${versionType}.pdf"`);
+    res.send(pdfBuffer);
   }
 
   @Get(':consultantId/versions')

@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
+import { ArrowTopRightOnSquareIcon } from '@heroicons/react/24/solid';
 import {
   RocketLaunchIcon,
   BoltIcon,
@@ -23,6 +25,8 @@ import {
   CalendarIcon,
   GlobeAltIcon,
   ClipboardDocumentIcon,
+  FunnelIcon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline';
 
 function fmtDate(d: string | null) {
@@ -65,6 +69,11 @@ export default function CommandCenterPage() {
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState<'morning' | 'midday' | 'evening'>('morning');
   const [expandedReqId, setExpandedReqId] = useState<string | null>(null);
+  const [filterLocation, setFilterLocation] = useState('');
+  const [filterEmpType, setFilterEmpType] = useState('');
+  const [filterRole, setFilterRole] = useState('');
+  const [filterMinRate, setFilterMinRate] = useState('');
+  const [filterMaxRate, setFilterMaxRate] = useState('');
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -154,17 +163,124 @@ export default function CommandCenterPage() {
             </div>
           </div>
 
-          {/* Actionable Reqs */}
-          <div className="rounded-xl border border-gray-200 bg-white">
-            <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
-              <div className="flex items-center gap-2">
-                <BoltIcon className="h-5 w-5 text-amber-500" />
-                <h3 className="font-semibold text-gray-900">Top Actionable Reqs</h3>
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">{morning.actionableReqs?.length || 0}</span>
-              </div>
-            </div>
-            <div className="divide-y divide-gray-50">
-              {(morning.actionableReqs || []).slice(0, 50).map((req: any) => {
+          {/* Filters */}
+          {(() => {
+            const allReqs: any[] = morning.actionableReqs || [];
+            // Extract unique locations and employment types
+            const uniqueLocations = [...new Set(allReqs.map((r: any) => r.location).filter(Boolean))].sort() as string[];
+            const uniqueEmpTypes = [...new Set(allReqs.map((r: any) => r.employmentType).filter(Boolean))].sort() as string[];
+
+            // Parse numeric rate from rateText (e.g. "$60-$65" → 60)
+            const parseRate = (rateText: string | null): number | null => {
+              if (!rateText) return null;
+              const match = rateText.match(/\$?([\d,.]+)/);
+              return match && match[1] ? parseFloat(match[1].replace(',', '')) : null;
+            };
+
+            // Apply filters
+            const filteredReqs = allReqs.filter((req: any) => {
+              if (filterLocation && req.location !== filterLocation) return false;
+              if (filterEmpType && req.employmentType !== filterEmpType) return false;
+              if (filterRole && !req.title?.toLowerCase().includes(filterRole.toLowerCase())) return false;
+              if (filterMinRate) {
+                const rate = parseRate(req.rateText);
+                if (rate == null || rate < parseFloat(filterMinRate)) return false;
+              }
+              if (filterMaxRate) {
+                const rate = parseRate(req.rateText);
+                if (rate == null || rate > parseFloat(filterMaxRate)) return false;
+              }
+              return true;
+            });
+
+            const hasFilters = filterLocation || filterEmpType || filterRole || filterMinRate || filterMaxRate;
+            const clearAll = () => { setFilterLocation(''); setFilterEmpType(''); setFilterRole(''); setFilterMinRate(''); setFilterMaxRate(''); };
+
+            return (
+              <>
+                <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <FunnelIcon className="h-4 w-4 text-gray-500" />
+                    <span className="text-sm font-medium text-gray-700">Filter Reqs</span>
+                    {hasFilters && (
+                      <button onClick={clearAll} className="ml-auto flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-600 hover:bg-gray-200">
+                        <XMarkIcon className="h-3 w-3" /> Clear all
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                    <div>
+                      <label className="block text-[11px] font-medium uppercase tracking-wide text-gray-400 mb-1">Job Role</label>
+                      <input
+                        type="text"
+                        placeholder="Search title..."
+                        value={filterRole}
+                        onChange={(e) => setFilterRole(e.target.value)}
+                        className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:border-indigo-300 focus:ring-1 focus:ring-indigo-300 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-medium uppercase tracking-wide text-gray-400 mb-1">Location</label>
+                      <select
+                        value={filterLocation}
+                        onChange={(e) => setFilterLocation(e.target.value)}
+                        className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm text-gray-900 focus:border-indigo-300 focus:ring-1 focus:ring-indigo-300 focus:outline-none"
+                      >
+                        <option value="">All Locations</option>
+                        {uniqueLocations.map((loc) => (
+                          <option key={loc} value={loc}>{loc}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-medium uppercase tracking-wide text-gray-400 mb-1">Employment</label>
+                      <select
+                        value={filterEmpType}
+                        onChange={(e) => setFilterEmpType(e.target.value)}
+                        className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm text-gray-900 focus:border-indigo-300 focus:ring-1 focus:ring-indigo-300 focus:outline-none"
+                      >
+                        <option value="">All Types</option>
+                        {uniqueEmpTypes.map((t) => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-medium uppercase tracking-wide text-gray-400 mb-1">Min Rate ($)</label>
+                      <input
+                        type="number"
+                        placeholder="e.g. 50"
+                        value={filterMinRate}
+                        onChange={(e) => setFilterMinRate(e.target.value)}
+                        className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:border-indigo-300 focus:ring-1 focus:ring-indigo-300 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-medium uppercase tracking-wide text-gray-400 mb-1">Max Rate ($)</label>
+                      <input
+                        type="number"
+                        placeholder="e.g. 100"
+                        value={filterMaxRate}
+                        onChange={(e) => setFilterMaxRate(e.target.value)}
+                        className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:border-indigo-300 focus:ring-1 focus:ring-indigo-300 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Actionable Reqs */}
+                <div className="rounded-xl border border-gray-200 bg-white">
+                  <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+                    <div className="flex items-center gap-2">
+                      <BoltIcon className="h-5 w-5 text-amber-500" />
+                      <h3 className="font-semibold text-gray-900">Top Actionable Reqs</h3>
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                        {hasFilters ? `${filteredReqs.length} / ${allReqs.length}` : allReqs.length}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="divide-y divide-gray-50">
+                    {filteredReqs.slice(0, 50).map((req: any) => {
                 const isOpen = expandedReqId === req.id;
                 return (
                   <div key={req.id}>
@@ -175,7 +291,20 @@ export default function CommandCenterPage() {
                     >
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-medium text-gray-900 truncate">{req.title}</span>
+                          {req.contactEmail?.startsWith('http') ? (
+                            <a
+                              href={req.contactEmail}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-medium text-indigo-600 hover:text-indigo-800 hover:underline truncate flex items-center gap-1"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {req.title}
+                              <ArrowTopRightOnSquareIcon className="h-3 w-3 shrink-0" />
+                            </a>
+                          ) : (
+                            <span className="font-medium text-gray-900 truncate">{req.title}</span>
+                          )}
                           <EmpBadge type={req.employmentType} />
                           <ScoreBadge score={req.actionabilityScore} label={`${req.actionabilityScore}pts`} />
                           {req.source === 'JSEARCH' && (
@@ -192,7 +321,17 @@ export default function CommandCenterPage() {
                           {req.vendorName && (
                             <span className="flex items-center gap-1">
                               <ShieldCheckIcon className="h-3 w-3" />
-                              {req.vendorName}
+                              {req.vendorDomain ? (
+                                <a
+                                  href={`https://${req.vendorDomain}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-indigo-600 hover:underline"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {req.vendorName}
+                                </a>
+                              ) : req.vendorName}
                               {req.vendorTier && <TierBadge tier={req.vendorTier} />}
                             </span>
                           )}
@@ -209,10 +348,16 @@ export default function CommandCenterPage() {
                             </span>
                           )}
                           {req.contactEmail && (
-                            <span className="flex items-center gap-1">
+                            <a
+                              href={req.contactEmail.startsWith('http') ? req.contactEmail : `mailto:${req.contactEmail}`}
+                              target={req.contactEmail.startsWith('http') ? '_blank' : undefined}
+                              rel={req.contactEmail.startsWith('http') ? 'noopener noreferrer' : undefined}
+                              className="flex items-center gap-1 text-indigo-600 hover:underline"
+                              onClick={(e) => e.stopPropagation()}
+                            >
                               <EnvelopeIcon className="h-3 w-3" />
-                              {req.contactEmail}
-                            </span>
+                              {req.contactEmail.startsWith('http') ? 'View Posting' : req.contactEmail}
+                            </a>
                           )}
                         </div>
                       </div>
@@ -257,9 +402,14 @@ export default function CommandCenterPage() {
                           </div>
                           <div>
                             <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Vendor Domain</p>
-                            <p className="mt-0.5 flex items-center gap-1 text-gray-700">
+                            <p className="mt-0.5 flex items-center gap-1">
                               <GlobeAltIcon className="h-3.5 w-3.5 text-gray-400" />
-                              {req.vendorDomain || '—'}
+                              {req.vendorDomain ? (
+                                <a href={`https://${req.vendorDomain}`} target="_blank" rel="noopener noreferrer"
+                                  className="text-indigo-600 hover:underline" onClick={(e) => e.stopPropagation()}>
+                                  {req.vendorDomain}
+                                </a>
+                              ) : '—'}
                             </p>
                           </div>
                           <div>
@@ -360,8 +510,17 @@ export default function CommandCenterPage() {
                           <span className="font-medium text-purple-700">{m.consultantName}</span>
                           <span>({m.skill_overlap} skill overlap)</span>
                         </span>
-                        {m.vendorName && <span>{m.vendorName}</span>}
-                        {m.contactEmail && <span>{m.contactEmail}</span>}
+                        {m.vendorName && <span className="text-gray-600">{m.vendorName}</span>}
+                        {m.contactEmail && (
+                          <a
+                            href={m.contactEmail.startsWith('http') ? m.contactEmail : `mailto:${m.contactEmail}`}
+                            target={m.contactEmail.startsWith('http') ? '_blank' : undefined}
+                            rel={m.contactEmail.startsWith('http') ? 'noopener noreferrer' : undefined}
+                            className="text-indigo-600 hover:underline"
+                          >
+                            {m.contactEmail.startsWith('http') ? 'View Posting' : m.contactEmail}
+                          </a>
+                        )}
                       </div>
                     </div>
                     <button className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700">
@@ -372,6 +531,9 @@ export default function CommandCenterPage() {
               </div>
             </div>
           )}
+              </>
+            );
+          })()}
         </div>
       )}
 
@@ -490,7 +652,12 @@ export default function CommandCenterPage() {
                       <tr key={v.id || i} className="hover:bg-gray-50">
                         <td className="px-6 py-3">
                           <div className="font-medium text-gray-900">{v.companyName || v.vendorName || v.vendor_name}</div>
-                          <div className="text-xs text-gray-400">{v.domain}</div>
+                          {v.domain ? (
+                            <a href={`https://${v.domain}`} target="_blank" rel="noopener noreferrer"
+                              className="text-xs text-indigo-500 hover:underline">{v.domain}</a>
+                          ) : (
+                            <div className="text-xs text-gray-400">—</div>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-right">
                           <ScoreBadge score={v.trustScore ?? v.trust_score} />

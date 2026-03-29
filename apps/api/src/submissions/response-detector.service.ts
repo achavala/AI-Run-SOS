@@ -106,11 +106,6 @@ export class ResponseDetectorService {
 
   constructor(private prisma: PrismaService) {}
 
-  /**
-   * Runs every 5 minutes: scans recent inbound emails, matches to active
-   * submissions by conversationId or subject+sender, classifies, and
-   * auto-updates submission status.
-   */
   @Cron(CronExpression.EVERY_5_MINUTES)
   async detectResponses() {
     if (this.running) return;
@@ -123,34 +118,25 @@ export class ResponseDetectorService {
   }
 
   async processInboundEmails() {
-    // Find recent inbound emails that haven't been processed for response detection
-    let unprocessed: any[] = [];
-    try {
-      unprocessed = await this.prisma.$queryRaw`
-        SELECT 
-          rem.id,
-          rem."fromEmail",
-          rem.subject,
-          rem."bodyText" as "bodyPreview",
-          rem."bodyText",
-          rem."sentAt",
-          rem.conversation_id as "conversationId",
-          rem.internet_message_id as "internetMessageId"
-        FROM "RawEmailMessage" rem
-        WHERE rem."sentAt" >= NOW() - interval '24 hours'
-          AND rem.category IN ('vendor_req', 'vendor_reply', 'general')
-          AND rem.processed = true
-          AND NOT EXISTS (
-            SELECT 1 FROM submission_event se
-            WHERE se.details->>'sourceEmailId' = rem.id::text
-              AND se.event_type LIKE 'RESPONSE_%'
-          )
-        ORDER BY rem."sentAt" DESC
-        LIMIT 100
-      ` as any[];
-    } catch {
-      // RawEmailMessage may lack category/conversation_id/internet_message_id columns
-    }
+    const unprocessed = await this.prisma.rawEmailMessage.findMany({
+      where: {
+        sentAt: { gte: new Date(Date.now() - 24 * 3600_000) },
+        processed: true,
+        responseProcessed: false,
+      },
+      select: {
+        id: true,
+        fromEmail: true,
+        subject: true,
+        bodyText: true,
+        sentAt: true,
+        conversationId: true,
+        internetMessageId: true,
+        category: true,
+      },
+      orderBy: { sentAt: 'desc' },
+      take: 100,
+    });
 
     if (unprocessed.length === 0) return;
 
@@ -160,12 +146,18 @@ export class ResponseDetectorService {
     let updated = 0;
 
     for (const email of unprocessed) {
-      // Try to match this email to an active submission
       const submission = await this.matchEmailToSubmission(email);
+
+      // Mark as response-processed regardless
+      await this.prisma.rawEmailMessage.update({
+        where: { id: email.id },
+        data: { responseProcessed: true },
+      });
+
       if (!submission) continue;
       matched++;
 
-      const bodyToClassify = (email.bodyText || email.bodyPreview || email.subject || '').slice(0, 3000);
+      const bodyToClassify = (email.bodyText || email.subject || '').slice(0, 3000);
       const classification = this.classifyResponse(bodyToClassify);
 
       if (classification.type === 'UNKNOWN') continue;
@@ -180,20 +172,28 @@ export class ResponseDetectorService {
   }
 
   private async matchEmailToSubmission(email: any): Promise<any | null> {
-    // Strategy 1: Match by conversationId (most reliable)
+    // Strategy 1: Match by conversationId
     if (email.conversationId) {
-      const byConversation = await this.prisma.$queryRaw`
-        SELECT s.id, s.status, s."tenantId", s."jobId", s."consultantId",
-               j."vendorId", v."companyName" as "vendorName", v.domain as "vendorDomain"
-        FROM "Submission" s
-        JOIN "Job" j ON j.id = s."jobId"
-        JOIN "Vendor" v ON v.id = j."vendorId"
-        WHERE s."sentConversationId" = ${email.conversationId}
-          AND s.status IN ('SUBMITTED', 'CONSENT_PENDING', 'INTERVIEWING')
-        LIMIT 1
-      ` as any[];
+      const byConversation = await this.prisma.submission.findFirst({
+        where: {
+          sentConversationId: email.conversationId,
+          status: { in: ['SUBMITTED', 'CONSENT_PENDING', 'INTERVIEWING'] },
+        },
+        include: { job: { include: { vendor: true } } },
+      });
 
-      if (byConversation.length > 0) return byConversation[0];
+      if (byConversation) {
+        return {
+          id: byConversation.id,
+          status: byConversation.status,
+          tenantId: byConversation.tenantId,
+          jobId: byConversation.jobId,
+          consultantId: byConversation.consultantId,
+          vendorId: byConversation.job.vendorId,
+          vendorName: byConversation.job.vendor.companyName,
+          vendorDomain: byConversation.job.vendor.domain,
+        };
+      }
     }
 
     // Strategy 2: Match by subject line + sender domain
@@ -201,7 +201,7 @@ export class ResponseDetectorService {
       const senderDomain = email.fromEmail.split('@')[1]?.toLowerCase();
       if (!senderDomain) return null;
 
-      const bySubjectDomain = await this.prisma.$queryRaw`
+      const bySubjectDomain = await this.prisma.$queryRaw<any[]>`
         SELECT s.id, s.status, s."tenantId", s."jobId", s."consultantId",
                j."vendorId", v."companyName" as "vendorName", v.domain as "vendorDomain"
         FROM "Submission" s
@@ -216,7 +216,7 @@ export class ResponseDetectorService {
           AND v.domain = ${senderDomain}
         ORDER BY s."sentAt" DESC
         LIMIT 1
-      ` as any[];
+      `;
 
       if (bySubjectDomain.length > 0) return bySubjectDomain[0];
     }
@@ -257,7 +257,6 @@ export class ResponseDetectorService {
 
     const newStatus = statusMap[classification.type];
 
-    // Record the email thread entry
     await this.prisma.submissionEmailThread.create({
       data: {
         submissionId: submission.id,
@@ -268,30 +267,27 @@ export class ResponseDetectorService {
         fromEmail: email.fromEmail,
         toEmails: [],
         subject: email.subject || '',
-        bodyPreview: (email.bodyPreview || '').slice(0, 500),
+        bodyPreview: (email.bodyText || '').slice(0, 500),
         sentAt: new Date(email.sentAt),
       },
     });
 
-    // Log the response detection event
-    await this.prisma.$executeRaw`
-      INSERT INTO submission_event (submission_id, event_type, actor, details)
-      VALUES (
-        ${submission.id},
-        ${'RESPONSE_' + classification.type},
-        'response-detector',
-        ${JSON.stringify({
+    await this.prisma.submissionEvent.create({
+      data: {
+        submissionId: submission.id,
+        eventType: `RESPONSE_${classification.type}`,
+        actor: 'response-detector',
+        details: {
           sourceEmailId: email.id,
           fromEmail: email.fromEmail,
           responseType: classification.type,
           confidence: classification.confidence,
           matchedPattern: classification.matchedPattern,
           automated: true,
-        })}::jsonb
-      )
-    `;
+        },
+      },
+    });
 
-    // Auto-update submission status for high-confidence terminal events
     if (newStatus && classification.confidence >= 0.8) {
       await this.prisma.submission.update({
         where: { id: submission.id },
@@ -302,16 +298,11 @@ export class ResponseDetectorService {
         },
       });
 
-      // Cancel pending follow-ups on terminal statuses
       if (['CLOSED', 'REJECTED'].includes(newStatus)) {
-        try {
-          await this.prisma.$executeRaw`
-            UPDATE submission_followup SET status = 'CANCELLED'
-            WHERE submission_id = ${submission.id} AND status = 'PENDING'
-          `;
-        } catch {
-          // submission_followup table may not exist
-        }
+        await this.prisma.submissionFollowup.updateMany({
+          where: { submissionId: submission.id, status: 'PENDING' },
+          data: { status: 'CANCELLED' },
+        });
       }
 
       this.logger.log(
@@ -319,7 +310,6 @@ export class ResponseDetectorService {
       );
     }
 
-    // Emit trust event for vendor
     await this.emitTrustEvent(submission, classification);
   }
 
@@ -337,23 +327,17 @@ export class ResponseDetectorService {
     const feedbackType = feedbackTypeMap[classification.type];
     if (!feedbackType || !submission.vendorDomain) return;
 
-    try {
-      await this.prisma.$executeRaw`
-        INSERT INTO vendor_feedback_event (vendor_domain, feedback_type, details, created_at)
-        VALUES (
-          ${submission.vendorDomain},
-          ${feedbackType},
-          ${JSON.stringify({
-            submissionId: submission.id,
-            responseType: classification.type,
-            confidence: classification.confidence,
-            autoDetected: true,
-          })}::jsonb,
-          NOW()
-        )
-      `;
-    } catch {
-      // vendor_feedback_event table does not exist
-    }
+    await this.prisma.vendorFeedbackEvent.create({
+      data: {
+        vendorDomain: submission.vendorDomain,
+        feedbackType,
+        details: {
+          submissionId: submission.id,
+          responseType: classification.type,
+          confidence: classification.confidence,
+          autoDetected: true,
+        },
+      },
+    });
   }
 }

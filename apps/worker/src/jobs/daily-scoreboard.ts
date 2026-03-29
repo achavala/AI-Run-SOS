@@ -183,44 +183,125 @@ export async function handleDailyScoreboard(
       _avg: { netMarginHr: true },
     });
 
+    // AutopilotGM: generate action plan based on pipeline analysis
+    const actionPlan = generateActionPlan({
+      qualifiedReqs,
+      highConfReqs,
+      submissions: submissionsCount,
+      interviews: interviewsCount,
+      offers: offersInMotion,
+      closures,
+      subToInterviewRate,
+      interviewToOfferRate,
+      podFocus,
+    });
+
+    const scoreboardData = {
+      actualQualifiedReqs: qualifiedReqs,
+      actualHighConfReqs: highConfReqs,
+      actualSubmissions: submissionsCount,
+      actualInterviews: interviewsCount,
+      actualActiveOffers: offersInMotion,
+      actualClosures: closures,
+      subToInterviewRate,
+      interviewToOfferRate,
+      offerToAcceptRate,
+      podFocus,
+      podRotationReason,
+      avgMarginHr: avgMargin._avg.netMarginHr,
+      marginSafeSubmissions: marginSafeCount,
+      marginOverrides,
+      actionPlan,
+      generatedByAgent: 'autopilot-gm',
+    };
+
     await prisma.dailyScoreboard.upsert({
       where: {
         tenantId_date: { tenantId, date: today },
       },
-      create: {
-        tenantId,
-        date: today,
-        actualQualifiedReqs: qualifiedReqs,
-        actualHighConfReqs: highConfReqs,
-        actualSubmissions: submissionsCount,
-        actualInterviews: interviewsCount,
-        actualActiveOffers: offersInMotion,
-        actualClosures: closures,
-        subToInterviewRate,
-        interviewToOfferRate,
-        offerToAcceptRate,
-        podFocus,
-        podRotationReason,
-        avgMarginHr: avgMargin._avg.netMarginHr,
-        marginSafeSubmissions: marginSafeCount,
-        marginOverrides,
-      },
-      update: {
-        actualQualifiedReqs: qualifiedReqs,
-        actualHighConfReqs: highConfReqs,
-        actualSubmissions: submissionsCount,
-        actualInterviews: interviewsCount,
-        actualActiveOffers: offersInMotion,
-        actualClosures: closures,
-        subToInterviewRate,
-        interviewToOfferRate,
-        offerToAcceptRate,
-        podFocus,
-        podRotationReason,
-        avgMarginHr: avgMargin._avg.netMarginHr,
-        marginSafeSubmissions: marginSafeCount,
-        marginOverrides,
-      },
+      create: { tenantId, date: today, ...scoreboardData },
+      update: scoreboardData,
     });
   }
+}
+
+function generateActionPlan(metrics: {
+  qualifiedReqs: number;
+  highConfReqs: number;
+  submissions: number;
+  interviews: number;
+  offers: number;
+  closures: number;
+  subToInterviewRate: number | null;
+  interviewToOfferRate: number | null;
+  podFocus: string | null;
+}): any[] {
+  const plan: any[] = [];
+  const TARGET_SUBS = 25;
+  const TARGET_INTERVIEWS = 4;
+
+  // Submission gap analysis
+  if (metrics.submissions < TARGET_SUBS) {
+    const deficit = TARGET_SUBS - metrics.submissions;
+    plan.push({
+      type: 'increase_submissions',
+      priority: deficit > 15 ? 'high' : 'medium',
+      description: `Need ${deficit} more submissions today. Focus on premium reqs from trusted vendors.`,
+      quantity: deficit,
+      pod: metrics.podFocus || 'ALL',
+    });
+  }
+
+  // Interview pipeline analysis
+  if (metrics.interviews < TARGET_INTERVIEWS) {
+    plan.push({
+      type: 'follow_up_interviews',
+      priority: 'high',
+      description: `Only ${metrics.interviews} interviews today vs target of ${TARGET_INTERVIEWS}. Trigger follow-ups on all submitted items older than 4 hours.`,
+      quantity: TARGET_INTERVIEWS - metrics.interviews,
+      pod: 'ALL',
+    });
+  }
+
+  // Conversion rate issues
+  if (metrics.subToInterviewRate !== null && metrics.subToInterviewRate < 0.05) {
+    plan.push({
+      type: 'quality_check',
+      priority: 'high',
+      description: `Sub→Interview rate is ${(metrics.subToInterviewRate * 100).toFixed(1)}% (target: 8-15%). Review submission quality: are we targeting trusted vendors? Are resumes formatted properly?`,
+      pod: 'ALL',
+    });
+  }
+
+  // Offer conversion
+  if (metrics.interviewToOfferRate !== null && metrics.interviewToOfferRate < 0.25) {
+    plan.push({
+      type: 'quality_check',
+      priority: 'medium',
+      description: `Interview→Offer rate is ${(metrics.interviewToOfferRate * 100).toFixed(1)}%. Review candidate-job fit and interview preparation.`,
+      pod: 'ALL',
+    });
+  }
+
+  // Req freshness
+  if (metrics.highConfReqs < 5) {
+    plan.push({
+      type: 'escalation',
+      priority: 'medium',
+      description: `Only ${metrics.highConfReqs} high-confidence reqs. Expand vendor outreach or refresh market job sync.`,
+      pod: 'ALL',
+    });
+  }
+
+  // Positive progress
+  if (metrics.closures >= 1) {
+    plan.push({
+      type: 'quality_check',
+      priority: 'low',
+      description: `Target met: ${metrics.closures} closure(s) today. Analyze what worked and replicate pattern.`,
+      pod: 'ALL',
+    });
+  }
+
+  return plan;
 }

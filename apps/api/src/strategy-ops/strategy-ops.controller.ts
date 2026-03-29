@@ -26,11 +26,23 @@ export class StrategyOpsController {
     @Query('family') family: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('location') location?: string,
+    @Query('engagementModel') engagementModel?: string,
+    @Query('search') search?: string,
+    @Query('minRate') minRate?: string,
+    @Query('maxRate') maxRate?: string,
   ) {
     return this.strategyOps.getReqsByFamily(
       family,
       page ? parseInt(page, 10) : 1,
       pageSize ? parseInt(pageSize, 10) : 25,
+      {
+        location: location || undefined,
+        engagementModel: engagementModel || undefined,
+        search: search || undefined,
+        minRate: minRate ? parseFloat(minRate) : undefined,
+        maxRate: maxRate ? parseFloat(maxRate) : undefined,
+      },
     );
   }
 

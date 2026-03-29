@@ -17,6 +17,7 @@ import { ArbeitnowProvider } from './providers/arbeitnow';
 import { CareerjetProvider } from './providers/careerjet';
 import { CorpToCorpProvider } from './providers/corptocorp';
 import { FaangTechProvider } from './providers/faang-tech';
+import { LinkedInSafeJobsProvider } from './providers/linkedin-safe';
 
 /** Default queries when no QueryPlan rows exist for a provider */
 const DEFAULT_QUERIES = [
@@ -51,6 +52,7 @@ export async function handleMarketJobSync(
     new AdzunaProvider(),
     new ArbeitnowProvider(),
     new CareerjetProvider(),
+    new LinkedInSafeJobsProvider(),
   ];
 
   const activeProviders = providers.filter((p) => {

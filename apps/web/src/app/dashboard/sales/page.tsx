@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { KpiCard } from '@/components/kpi-card';
 import { DataTable, type Column } from '@/components/data-table';
@@ -10,6 +10,11 @@ import {
   ClockIcon,
   ChartBarIcon,
   TrophyIcon,
+  ArrowPathIcon,
+  SparklesIcon,
+  CheckCircleIcon,
+  UserGroupIcon,
+  PhoneIcon,
 } from '@heroicons/react/24/outline';
 
 interface Vendor {
@@ -171,6 +176,10 @@ export default function SalesPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
+  const [enriching, setEnriching] = useState(false);
+  const [enrichProgress, setEnrichProgress] = useState<any>(null);
+  const pollRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -194,6 +203,35 @@ export default function SalesPage() {
 
     load();
     return () => { cancelled = true; };
+  }, []);
+
+  const startEnrichment = async () => {
+    setEnriching(true);
+    try {
+      const res = await api.post<any>('/analytics/apollo/bulk-enrich', {
+        vendorLimit: 200,
+        contactLimit: 500,
+        consultantLimit: 300,
+      });
+      setEnrichProgress(res.progress || res);
+      pollRef.current = setInterval(async () => {
+        try {
+          const p = await api.get<any>('/analytics/apollo/enrichment-progress');
+          setEnrichProgress(p);
+          if (!p.running) {
+            if (pollRef.current) clearInterval(pollRef.current);
+            setEnriching(false);
+          }
+        } catch { /* ignore polling errors */ }
+      }, 3000);
+    } catch (err: any) {
+      setEnriching(false);
+      setEnrichProgress({ phase: `error: ${err.message || 'Failed to start'}`, running: false });
+    }
+  };
+
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
   const filtered = search
@@ -259,12 +297,95 @@ export default function SalesPage() {
         title="Sales Dashboard"
         description="Vendor relationships, trust scores, and deal pipeline"
         actions={
-          <button className="btn-primary">
-            <BuildingOfficeIcon className="h-4 w-4" />
-            Add Vendor
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={startEnrichment}
+              disabled={enriching}
+              className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+            >
+              {enriching ? (
+                <ArrowPathIcon className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <SparklesIcon className="h-3.5 w-3.5" />
+              )}
+              {enriching ? 'Enriching...' : 'Enrich All Contacts (Apollo)'}
+            </button>
+            <button className="btn-primary">
+              <BuildingOfficeIcon className="h-4 w-4" />
+              Add Vendor
+            </button>
+          </div>
         }
       />
+
+      {/* Apollo Enrichment Progress */}
+      {enrichProgress && (
+        <div className={`rounded-xl border p-4 ${enrichProgress.running ? 'border-amber-200 bg-amber-50' : enrichProgress.phase === 'complete' ? 'border-green-200 bg-green-50' : enrichProgress.phase?.includes('error') || enrichProgress.phase?.includes('stopped') ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-gray-50'}`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {enrichProgress.running ? (
+                <ArrowPathIcon className="h-5 w-5 animate-spin text-amber-600" />
+              ) : enrichProgress.phase === 'complete' ? (
+                <CheckCircleIcon className="h-5 w-5 text-green-600" />
+              ) : (
+                <SparklesIcon className="h-5 w-5 text-gray-400" />
+              )}
+              <div>
+                <p className="text-sm font-semibold text-gray-900">
+                  Apollo Contact Enrichment — Full Database Scan
+                  {enrichProgress.running && <span className="ml-2 text-xs font-normal text-amber-600">Phase: {enrichProgress.phase === 'vendors' ? 'Vendors' : enrichProgress.phase === 'vendor_contacts' ? 'Vendor Contacts' : enrichProgress.phase === 'consultants' ? 'Consultants' : enrichProgress.phase}</span>}
+                  {enrichProgress.phase === 'complete' && <span className="ml-2 text-xs font-normal text-green-600">Complete</span>}
+                  {enrichProgress.phase === 'stopped_credits_exhausted' && <span className="ml-2 text-xs font-normal text-red-600">Stopped — Apollo credits exhausted</span>}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {enrichProgress.enriched} enriched, {enrichProgress.failed} failed
+                  {enrichProgress.startedAt && ` • Started ${new Date(enrichProgress.startedAt).toLocaleTimeString()}`}
+                </p>
+              </div>
+            </div>
+            {!enrichProgress.running && enrichProgress.phase !== 'idle' && (
+              <button onClick={() => setEnrichProgress(null)} className="text-xs text-gray-400 hover:text-gray-600">dismiss</button>
+            )}
+          </div>
+          {enrichProgress.running && (
+            <div className="mt-3 grid grid-cols-3 gap-3">
+              <div className="rounded-lg bg-white/80 p-2.5 text-center">
+                <div className="flex items-center justify-center gap-1 text-xs text-gray-500">
+                  <BuildingOfficeIcon className="h-3.5 w-3.5" /> Vendors
+                </div>
+                <p className="mt-1 text-sm font-bold text-gray-900">{enrichProgress.vendorsProcessed}/{enrichProgress.vendorsTotal}</p>
+                {enrichProgress.vendorsTotal > 0 && (
+                  <div className="mx-auto mt-1 h-1 w-full rounded-full bg-gray-200">
+                    <div className="h-1 rounded-full bg-indigo-500" style={{ width: `${(enrichProgress.vendorsProcessed / enrichProgress.vendorsTotal) * 100}%` }} />
+                  </div>
+                )}
+              </div>
+              <div className="rounded-lg bg-white/80 p-2.5 text-center">
+                <div className="flex items-center justify-center gap-1 text-xs text-gray-500">
+                  <PhoneIcon className="h-3.5 w-3.5" /> Vendor Contacts
+                </div>
+                <p className="mt-1 text-sm font-bold text-gray-900">{enrichProgress.vendorContactsProcessed}/{enrichProgress.vendorContactsTotal}</p>
+                {enrichProgress.vendorContactsTotal > 0 && (
+                  <div className="mx-auto mt-1 h-1 w-full rounded-full bg-gray-200">
+                    <div className="h-1 rounded-full bg-emerald-500" style={{ width: `${(enrichProgress.vendorContactsProcessed / enrichProgress.vendorContactsTotal) * 100}%` }} />
+                  </div>
+                )}
+              </div>
+              <div className="rounded-lg bg-white/80 p-2.5 text-center">
+                <div className="flex items-center justify-center gap-1 text-xs text-gray-500">
+                  <UserGroupIcon className="h-3.5 w-3.5" /> Consultants
+                </div>
+                <p className="mt-1 text-sm font-bold text-gray-900">{enrichProgress.consultantsProcessed}/{enrichProgress.consultantsTotal}</p>
+                {enrichProgress.consultantsTotal > 0 && (
+                  <div className="mx-auto mt-1 h-1 w-full rounded-full bg-gray-200">
+                    <div className="h-1 rounded-full bg-purple-500" style={{ width: `${(enrichProgress.consultantsProcessed / enrichProgress.consultantsTotal) * 100}%` }} />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* KPIs */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">

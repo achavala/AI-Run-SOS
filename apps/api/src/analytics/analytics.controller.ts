@@ -151,12 +151,24 @@ export class AnalyticsController {
     return { configured: this.apollo.isConfigured() };
   }
 
+  @Post('apollo/bulk-enrich')
+  bulkEnrich(@Body() body?: { vendorLimit?: number; contactLimit?: number; consultantLimit?: number }) {
+    return this.apollo.bulkEnrichAll(body);
+  }
+
+  @Get('apollo/enrichment-progress')
+  enrichmentProgress() {
+    return this.apollo.getEnrichmentProgress();
+  }
+
   @Get('live-feed')
   getLiveJobFeed(
     @Query('hours') hours?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
+    @Query('bustCache') bustCache?: string,
   ) {
+    if (bustCache === '1') this.svc.bustFeedCaches();
     return this.svc.getLiveJobFeed(
       hours ? parseInt(hours, 10) : 24,
       limit ? parseInt(limit, 10) : 500,
@@ -168,7 +180,9 @@ export class AnalyticsController {
   getHighPaidFeed(
     @Query('minSalary') minSalary?: string,
     @Query('limit') limit?: string,
+    @Query('bustCache') bustCache?: string,
   ) {
+    if (bustCache === '1') this.svc.bustFeedCaches();
     return this.svc.getHighPaidFeed(
       minSalary ? parseInt(minSalary, 10) : 200_000,
       limit ? parseInt(limit, 10) : 300,
@@ -179,5 +193,24 @@ export class AnalyticsController {
   async crawlFaang() {
     this.logger.log('Manual FAANG/Tech career crawl triggered');
     return this.svc.crawlFaangCareers();
+  }
+
+  @Get('linkedin-feed')
+  getLinkedInFeed(
+    @Query('limit') limit?: string,
+    @Query('bustCache') bustCache?: string,
+  ) {
+    if (bustCache === '1') this.svc.bustFeedCaches();
+    return this.svc.getLinkedInFeed(
+      limit ? parseInt(limit, 10) : 500,
+    );
+  }
+
+  @Post('refresh-all-feeds')
+  async refreshAllFeeds() {
+    this.logger.log('Manual full feed refresh: crawling FAANG + busting caches');
+    const crawlResult = await this.svc.crawlFaangCareers();
+    this.svc.bustFeedCaches();
+    return { ...crawlResult, cacheBusted: true };
   }
 }

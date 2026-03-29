@@ -27,6 +27,7 @@ import {
   SignalIcon,
   RocketLaunchIcon,
   AdjustmentsHorizontalIcon,
+  UserGroupIcon,
 } from '@heroicons/react/24/outline';
 import { useAuthStore, type UserRole } from '@/lib/auth';
 
@@ -51,6 +52,7 @@ const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { name: 'Market Jobs', href: '/dashboard/market-jobs', icon: GlobeAltIcon },
     { name: 'Email Intel', href: '/dashboard/mail-intel', icon: InboxStackIcon },
     { name: 'Consultants', href: '/dashboard/consultants', icon: UsersIcon },
+    { name: 'Bench Sales', href: '/dashboard/bench-sales', icon: UserGroupIcon },
     { name: 'Submissions', href: '/dashboard/submissions', icon: DocumentTextIcon },
     { name: 'Timesheets', href: '/dashboard/timesheets', icon: ClockIcon },
     { name: 'Vendors', href: '/dashboard/sales', icon: BuildingOfficeIcon },
@@ -70,6 +72,7 @@ const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { name: 'Market Jobs', href: '/dashboard/market-jobs', icon: GlobeAltIcon },
     { name: 'Email Intel', href: '/dashboard/mail-intel', icon: InboxStackIcon },
     { name: 'Consultants', href: '/dashboard/consultants', icon: UsersIcon },
+    { name: 'Bench Sales', href: '/dashboard/bench-sales', icon: UserGroupIcon },
     { name: 'Submissions', href: '/dashboard/submissions', icon: DocumentTextIcon },
     { name: 'Timesheets', href: '/dashboard/timesheets', icon: ClockIcon },
     { name: 'Vendors', href: '/dashboard/sales', icon: BuildingOfficeIcon },
@@ -86,6 +89,7 @@ const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { name: 'Market Jobs', href: '/dashboard/market-jobs', icon: GlobeAltIcon },
     { name: 'Email Intel', href: '/dashboard/mail-intel', icon: InboxStackIcon },
     { name: 'Consultants', href: '/dashboard/consultants', icon: UsersIcon },
+    { name: 'Bench Sales', href: '/dashboard/bench-sales', icon: UserGroupIcon },
     { name: 'Submissions', href: '/dashboard/submissions', icon: DocumentTextIcon },
   ],
   SALES: [
@@ -96,6 +100,7 @@ const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { name: 'Market Jobs', href: '/dashboard/market-jobs', icon: GlobeAltIcon },
     { name: 'Email Intel', href: '/dashboard/mail-intel', icon: InboxStackIcon },
     { name: 'Vendors', href: '/dashboard/sales', icon: BuildingOfficeIcon },
+    { name: 'Bench Sales', href: '/dashboard/bench-sales', icon: UserGroupIcon },
     { name: 'Submissions', href: '/dashboard/submissions', icon: DocumentTextIcon },
   ],
   ACCOUNTS: [

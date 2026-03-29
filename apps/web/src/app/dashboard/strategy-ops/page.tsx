@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { KpiCard } from '@/components/kpi-card';
+import { Modal } from '@/components/modal';
 import {
   ArrowPathIcon,
   SparklesIcon,
@@ -23,6 +24,10 @@ import {
   MapPinIcon,
   EnvelopeIcon,
   ClockIcon,
+  PaperAirplaneIcon,
+  UserIcon,
+  MagnifyingGlassIcon,
+  FunnelIcon,
 } from '@heroicons/react/24/outline';
 
 function ScoreBadge({ score, label }: { score: number | null; label?: string }) {
@@ -85,6 +90,27 @@ export default function StrategyOpsPage() {
   const [familyReqsPage, setFamilyReqsPage] = useState(1);
   const [familyReqsPagination, setFamilyReqsPagination] = useState<any>(null);
 
+  const [selectedReq, setSelectedReq] = useState<any>(null);
+  const [matchData, setMatchData] = useState<any>(null);
+  const [matchLoading, setMatchLoading] = useState(false);
+  const [submitting, setSubmitting] = useState<string | null>(null);
+  const [submitResult, setSubmitResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Auto-refresh
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  const [nextRefreshIn, setNextRefreshIn] = useState(60);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const countdownRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Filters for expanded req list
+  const [filterLocation, setFilterLocation] = useState('');
+  const [filterEngModel, setFilterEngModel] = useState('ALL');
+  const [filterSearch, setFilterSearch] = useState('');
+  const [filterMinRate, setFilterMinRate] = useState('');
+  const [filterMaxRate, setFilterMaxRate] = useState('');
+  const [filterLocations, setFilterLocations] = useState<string[]>([]);
+  const [filterEngModels, setFilterEngModels] = useState<{ model: string; count: number }[]>([]);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -98,6 +124,8 @@ export default function StrategyOpsPage() {
       if (sd.status === 'fulfilled') setSupplyDemand(sd.value);
       if (tt.status === 'fulfilled') setTechTiers(tt.value);
       if (lp.status === 'fulfilled') setLanePerf(lp.value);
+      setLastRefresh(new Date());
+      setNextRefreshIn(60);
     } catch (err) {
       console.error('Strategy ops fetch error:', err);
     } finally {
@@ -105,9 +133,23 @@ export default function StrategyOpsPage() {
     }
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    fetchData();
+    timerRef.current = setInterval(() => { fetchData(); }, 60 * 60 * 1000);
+    countdownRef.current = setInterval(() => {
+      setNextRefreshIn(prev => (prev <= 1 ? 60 : prev - 1));
+    }, 60 * 1000);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    };
+  }, [fetchData]);
 
-  const loadFamilyReqs = useCallback(async (family: string | null, page = 1) => {
+  const loadFamilyReqs = useCallback(async (
+    family: string | null,
+    page = 1,
+    filters?: { location?: string; engagementModel?: string; search?: string; minRate?: string; maxRate?: string },
+  ) => {
     if (!family) {
       setExpandedFamily(null);
       setFamilyReqs([]);
@@ -116,11 +158,26 @@ export default function StrategyOpsPage() {
     }
     setFamilyReqsLoading(true);
     try {
-      const r = await api.get<any>(`/strategy-ops/reqs-by-family?family=${encodeURIComponent(family)}&page=${page}&pageSize=15`);
+      const qs = new URLSearchParams({
+        family,
+        page: String(page),
+        pageSize: '15',
+      });
+      if (filters?.location) qs.set('location', filters.location);
+      if (filters?.engagementModel && filters.engagementModel !== 'ALL') qs.set('engagementModel', filters.engagementModel);
+      if (filters?.search) qs.set('search', filters.search);
+      if (filters?.minRate) qs.set('minRate', filters.minRate);
+      if (filters?.maxRate) qs.set('maxRate', filters.maxRate);
+
+      const r = await api.get<any>(`/strategy-ops/reqs-by-family?${qs}`);
       setFamilyReqs(r.data || []);
       setFamilyReqsPagination(r.pagination || null);
       setFamilyReqsPage(page);
       setExpandedFamily(family);
+      if (r.filterOptions) {
+        setFilterLocations(r.filterOptions.locations || []);
+        setFilterEngModels(r.filterOptions.engagementModels || []);
+      }
     } catch (err) {
       console.error('Failed to load reqs for family:', err);
     } finally {
@@ -133,7 +190,58 @@ export default function StrategyOpsPage() {
       setExpandedFamily(null);
       setFamilyReqs([]);
     } else {
+      setFilterLocation('');
+      setFilterEngModel('ALL');
+      setFilterSearch('');
+      setFilterMinRate('');
+      setFilterMaxRate('');
       loadFamilyReqs(family || 'OTHER');
+    }
+  };
+
+  const applyFilters = () => {
+    if (!expandedFamily) return;
+    loadFamilyReqs(expandedFamily, 1, {
+      location: filterLocation,
+      engagementModel: filterEngModel,
+      search: filterSearch,
+      minRate: filterMinRate,
+      maxRate: filterMaxRate,
+    });
+  };
+
+  const openReqDetail = async (req: any) => {
+    setSelectedReq(req);
+    setMatchData(null);
+    setSubmitResult(null);
+    setMatchLoading(true);
+    try {
+      const d = await api.get<any>(`/mail-intel/req-signals/${req.id}/matches`);
+      setMatchData(d);
+    } catch (err) {
+      console.error('Failed to load matches:', err);
+      setMatchData({ topMatches: [] });
+    } finally {
+      setMatchLoading(false);
+    }
+  };
+
+  const handleSubmitConsultant = async (consultantId: string, consultantName: string) => {
+    if (!selectedReq) return;
+    setSubmitting(consultantId);
+    setSubmitResult(null);
+    try {
+      await api.post('/submissions/from-req-signal', {
+        reqSignalId: selectedReq.id,
+        consultantId,
+        notes: `[Strategy Ops] Applied via Tech Tier drill-down for: ${selectedReq.title}`,
+      });
+      setSubmitResult({ success: true, message: `Submission created for ${consultantName} → ${selectedReq.title}` });
+    } catch (err: any) {
+      const msg = err?.data?.message || err?.message || 'Submission failed';
+      setSubmitResult({ success: false, message: msg });
+    } finally {
+      setSubmitting(null);
     }
   };
 
@@ -172,7 +280,13 @@ export default function StrategyOpsPage() {
         title="Strategy Operations"
         description="Supply-aware priority engine, four sourcing lanes, technology tiers, and pre-submission quality gates"
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 text-xs text-gray-500">
+              <ClockIcon className="h-3.5 w-3.5" />
+              <span>Refreshes in {nextRefreshIn}m</span>
+              <span className="text-gray-300">|</span>
+              <span>Last: {lastRefresh.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            </div>
             <button
               onClick={handleComputeQuality}
               disabled={computingQuality}
@@ -181,8 +295,8 @@ export default function StrategyOpsPage() {
               <BoltIcon className="h-4 w-4" />
               {computingQuality ? 'Computing...' : 'Compute Quality Scores'}
             </button>
-            <button onClick={fetchData} className="btn-primary flex items-center gap-2 text-sm">
-              <ArrowPathIcon className="h-4 w-4" />
+            <button onClick={fetchData} disabled={loading} className="btn-primary flex items-center gap-2 text-sm">
+              <ArrowPathIcon className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </button>
           </div>
@@ -463,13 +577,103 @@ export default function StrategyOpsPage() {
                           <tr>
                             <td colSpan={9} className="bg-gray-50/70 px-4 py-0">
                               <div className="py-4">
+                                {/* ── Filter Bar ── */}
+                                <div className="mb-4 rounded-lg border border-gray-200 bg-white p-3" onClick={(e) => e.stopPropagation()}>
+                                  <div className="flex flex-wrap items-end gap-2">
+                                    <div className="min-w-[160px] flex-1">
+                                      <label className="mb-1 block text-xs font-medium text-gray-500">Search Job Title / Company</label>
+                                      <div className="relative">
+                                        <MagnifyingGlassIcon className="absolute left-2.5 top-2 h-3.5 w-3.5 text-gray-400" />
+                                        <input
+                                          type="text"
+                                          value={filterSearch}
+                                          onChange={(e) => setFilterSearch(e.target.value)}
+                                          onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
+                                          placeholder="e.g. ML Engineer, Azure..."
+                                          className="w-full rounded-md border border-gray-200 py-1.5 pl-8 pr-3 text-xs focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="min-w-[140px]">
+                                      <label className="mb-1 block text-xs font-medium text-gray-500">Location</label>
+                                      <select
+                                        value={filterLocation}
+                                        onChange={(e) => setFilterLocation(e.target.value)}
+                                        className="w-full rounded-md border border-gray-200 py-1.5 pl-2 pr-6 text-xs focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                      >
+                                        <option value="">All Locations</option>
+                                        {filterLocations.slice(0, 100).map((loc) => (
+                                          <option key={loc} value={loc}>{loc.length > 40 ? loc.slice(0, 40) + '...' : loc}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                    <div className="min-w-[110px]">
+                                      <label className="mb-1 block text-xs font-medium text-gray-500">Contract Type</label>
+                                      <select
+                                        value={filterEngModel}
+                                        onChange={(e) => setFilterEngModel(e.target.value)}
+                                        className="w-full rounded-md border border-gray-200 py-1.5 pl-2 pr-6 text-xs focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                      >
+                                        <option value="ALL">All Types</option>
+                                        {filterEngModels.map((em) => (
+                                          <option key={em.model} value={em.model}>{em.model} ({em.count})</option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                    <div className="min-w-[80px]">
+                                      <label className="mb-1 block text-xs font-medium text-gray-500">Min Rate</label>
+                                      <input
+                                        type="number"
+                                        value={filterMinRate}
+                                        onChange={(e) => setFilterMinRate(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
+                                        placeholder="$0"
+                                        className="w-full rounded-md border border-gray-200 py-1.5 px-2 text-xs focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                      />
+                                    </div>
+                                    <div className="min-w-[80px]">
+                                      <label className="mb-1 block text-xs font-medium text-gray-500">Max Rate</label>
+                                      <input
+                                        type="number"
+                                        value={filterMaxRate}
+                                        onChange={(e) => setFilterMaxRate(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
+                                        placeholder="$999"
+                                        className="w-full rounded-md border border-gray-200 py-1.5 px-2 text-xs focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                      />
+                                    </div>
+                                    <button
+                                      onClick={applyFilters}
+                                      className="flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700"
+                                    >
+                                      <FunnelIcon className="h-3.5 w-3.5" />
+                                      Filter
+                                    </button>
+                                    {(filterLocation || filterEngModel !== 'ALL' || filterSearch || filterMinRate || filterMaxRate) && (
+                                      <button
+                                        onClick={() => {
+                                          setFilterLocation('');
+                                          setFilterEngModel('ALL');
+                                          setFilterSearch('');
+                                          setFilterMinRate('');
+                                          setFilterMaxRate('');
+                                          loadFamilyReqs(expandedFamily, 1);
+                                        }}
+                                        className="rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-500 hover:bg-gray-50"
+                                      >
+                                        Clear
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+
                                 {familyReqsLoading ? (
                                   <div className="flex items-center justify-center py-6">
                                     <ArrowPathIcon className="h-5 w-5 animate-spin text-indigo-400" />
                                     <span className="ml-2 text-sm text-gray-500">Loading requirements...</span>
                                   </div>
                                 ) : familyReqs.length === 0 ? (
-                                  <p className="py-4 text-center text-sm text-gray-400">No requirement signals found for this family.</p>
+                                  <p className="py-4 text-center text-sm text-gray-400">No requirement signals found{(filterSearch || filterLocation || filterEngModel !== 'ALL') ? ' for these filters' : ' for this family'}.</p>
                                 ) : (
                                   <>
                                     <div className="mb-3 flex items-center justify-between">
@@ -480,14 +684,26 @@ export default function StrategyOpsPage() {
                                       {familyReqsPagination?.totalPages > 1 && (
                                         <div className="flex gap-1">
                                           <button
-                                            onClick={(e) => { e.stopPropagation(); loadFamilyReqs(expandedFamily, familyReqsPage - 1); }}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              loadFamilyReqs(expandedFamily, familyReqsPage - 1, {
+                                                location: filterLocation, engagementModel: filterEngModel,
+                                                search: filterSearch, minRate: filterMinRate, maxRate: filterMaxRate,
+                                              });
+                                            }}
                                             disabled={familyReqsPage <= 1}
                                             className="rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
                                           >
                                             Prev
                                           </button>
                                           <button
-                                            onClick={(e) => { e.stopPropagation(); loadFamilyReqs(expandedFamily, familyReqsPage + 1); }}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              loadFamilyReqs(expandedFamily, familyReqsPage + 1, {
+                                                location: filterLocation, engagementModel: filterEngModel,
+                                                search: filterSearch, minRate: filterMinRate, maxRate: filterMaxRate,
+                                              });
+                                            }}
                                             disabled={familyReqsPage >= familyReqsPagination.totalPages}
                                             className="rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
                                           >
@@ -498,10 +714,14 @@ export default function StrategyOpsPage() {
                                     </div>
                                     <div className="space-y-2">
                                       {familyReqs.map((req: any) => (
-                                        <div key={req.id} className="rounded-lg border border-gray-200 bg-white p-3 transition-shadow hover:shadow-sm">
+                                        <div
+                                          key={req.id}
+                                          className="cursor-pointer rounded-lg border border-gray-200 bg-white p-3 transition-all hover:border-indigo-300 hover:shadow-md"
+                                          onClick={(e) => { e.stopPropagation(); openReqDetail(req); }}
+                                        >
                                           <div className="flex items-start justify-between gap-3">
                                             <div className="min-w-0 flex-1">
-                                              <p className="truncate font-medium text-gray-900">{req.title}</p>
+                                              <p className="truncate font-medium text-indigo-700 underline decoration-indigo-200 underline-offset-2">{req.title}</p>
                                               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
                                                 {req.vendorName && (
                                                   <span className="flex items-center gap-1">
@@ -522,10 +742,16 @@ export default function StrategyOpsPage() {
                                                   </span>
                                                 )}
                                                 {req.contactEmail && (
-                                                  <span className="flex items-center gap-1">
+                                                  <a
+                                                    href={req.contactEmail.startsWith('http') ? req.contactEmail : `mailto:${req.contactEmail}`}
+                                                    target={req.contactEmail.startsWith('http') ? '_blank' : undefined}
+                                                    rel={req.contactEmail.startsWith('http') ? 'noopener noreferrer' : undefined}
+                                                    className="flex items-center gap-1 text-indigo-600 hover:underline"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                  >
                                                     <EnvelopeIcon className="h-3 w-3" />
-                                                    {req.contactEmail}
-                                                  </span>
+                                                    {req.contactEmail.startsWith('http') ? 'View Posting' : req.contactEmail}
+                                                  </a>
                                                 )}
                                                 {req.createdAt && (
                                                   <span className="flex items-center gap-1">
@@ -669,6 +895,147 @@ export default function StrategyOpsPage() {
           )}
         </div>
       )}
+
+      {/* ═══ REQ DETAIL + APPLY MODAL ═══ */}
+      <Modal
+        open={!!selectedReq}
+        onClose={() => { setSelectedReq(null); setMatchData(null); setSubmitResult(null); }}
+        title="Requirement Details"
+        size="xl"
+      >
+        {selectedReq && (
+          <div className="space-y-5">
+            {/* Req header */}
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">{selectedReq.title}</h2>
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-gray-500">
+                {selectedReq.vendorName && (
+                  <span className="flex items-center gap-1">
+                    <BuildingOfficeIcon className="h-4 w-4 text-gray-400" />
+                    <span className="font-medium text-gray-700">{selectedReq.vendorName}</span>
+                    {selectedReq.vendorDomain && (
+                      <a href={`https://${selectedReq.vendorDomain}`} target="_blank" rel="noopener noreferrer"
+                        className="text-xs text-indigo-500 hover:underline">({selectedReq.vendorDomain})</a>
+                    )}
+                  </span>
+                )}
+                {selectedReq.location && (
+                  <span className="flex items-center gap-1">
+                    <MapPinIcon className="h-4 w-4 text-gray-400" />
+                    {selectedReq.location}
+                  </span>
+                )}
+                {selectedReq.rateText && (
+                  <span className="flex items-center gap-1 font-semibold text-green-600">
+                    <CurrencyDollarIcon className="h-4 w-4" />
+                    {selectedReq.rateText}
+                  </span>
+                )}
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                {selectedReq.contactName && <span>Contact: <strong>{selectedReq.contactName}</strong></span>}
+                {selectedReq.contactEmail && (
+                  <a
+                    href={selectedReq.contactEmail.startsWith('http') ? selectedReq.contactEmail : `mailto:${selectedReq.contactEmail}`}
+                    target={selectedReq.contactEmail.startsWith('http') ? '_blank' : undefined}
+                    rel={selectedReq.contactEmail.startsWith('http') ? 'noopener noreferrer' : undefined}
+                    className="text-indigo-600 underline"
+                  >
+                    {selectedReq.contactEmail.startsWith('http') ? 'View Job Posting' : selectedReq.contactEmail}
+                  </a>
+                )}
+                {selectedReq.engagementModel && selectedReq.engagementModel !== 'UNKNOWN' && (
+                  <span className={`rounded-full px-2 py-0.5 font-medium ${
+                    selectedReq.engagementModel === 'C2C' ? 'bg-emerald-100 text-emerald-700' :
+                    selectedReq.engagementModel === 'W2' ? 'bg-blue-100 text-blue-700' :
+                    'bg-gray-100 text-gray-600'
+                  }`}>{selectedReq.engagementModel}</span>
+                )}
+                {selectedReq.actionabilityScore && <ScoreBadge score={selectedReq.actionabilityScore} label={`Actionability: ${selectedReq.actionabilityScore}`} />}
+                {selectedReq.premiumSkillBonus > 0 && (
+                  <span className="rounded-full bg-indigo-100 px-2 py-0.5 font-medium text-indigo-700">+{selectedReq.premiumSkillBonus} premium</span>
+                )}
+              </div>
+              {selectedReq.skills?.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {(selectedReq.skills as string[]).map((sk: string, i: number) => (
+                    <span key={i} className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">{sk}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Submit result banner */}
+            {submitResult && (
+              <div className={`rounded-lg border p-3 text-sm ${submitResult.success ? 'border-green-200 bg-green-50 text-green-800' : 'border-red-200 bg-red-50 text-red-800'}`}>
+                {submitResult.success ? <CheckCircleIcon className="mr-1 inline h-4 w-4" /> : <ExclamationTriangleIcon className="mr-1 inline h-4 w-4" />}
+                {submitResult.message}
+              </div>
+            )}
+
+            {/* Matching consultants */}
+            <div>
+              <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-700">
+                <SparklesIcon className="h-5 w-5 text-indigo-500" />
+                AI-Matched Consultants
+                {matchData?.topMatches && <span className="text-gray-400">({matchData.topMatches.length})</span>}
+              </h3>
+
+              {matchLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <ArrowPathIcon className="h-6 w-6 animate-spin text-indigo-400" />
+                  <span className="ml-2 text-sm text-gray-500">Finding matching consultants...</span>
+                </div>
+              ) : matchData?.topMatches?.length > 0 ? (
+                <div className="space-y-2">
+                  {matchData.topMatches.map((c: any) => (
+                    <div key={c.id} className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3 transition-colors hover:bg-gray-50">
+                      <div className="flex items-center gap-3">
+                        <div className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold text-white ${
+                          c.matchScore >= 70 ? 'bg-green-500' : c.matchScore >= 40 ? 'bg-amber-500' : 'bg-gray-400'
+                        }`}>{c.matchScore}</div>
+                        <div>
+                          <p className="font-medium text-gray-900">{c.fullName}</p>
+                          <div className="flex items-center gap-2 text-xs text-gray-500">
+                            {c.email && <span className="text-indigo-600">{c.email}</span>}
+                            {c.phone && <span>{c.phone}</span>}
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {c.matchingSkills?.map((s: string) => (
+                              <span key={s} className="rounded bg-green-50 px-1.5 py-0.5 text-xs text-green-700">{s}</span>
+                            ))}
+                            {c.partialSkills?.map((s: string) => (
+                              <span key={s} className="rounded bg-yellow-50 px-1.5 py-0.5 text-xs text-yellow-700">{s}</span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleSubmitConsultant(c.id, c.fullName)}
+                        disabled={submitting === c.id || submitResult?.success === true}
+                        className="flex shrink-0 items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        {submitting === c.id ? (
+                          <ArrowPathIcon className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <PaperAirplaneIcon className="h-3.5 w-3.5" />
+                        )}
+                        {submitting === c.id ? 'Submitting...' : 'Apply'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-gray-200 py-8 text-center">
+                  <UserIcon className="mx-auto h-8 w-8 text-gray-300" />
+                  <p className="mt-2 text-sm text-gray-400">No matching consultants found for this requirement.</p>
+                  <p className="mt-1 text-xs text-gray-400">Add consultants with matching skills to enable submissions.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

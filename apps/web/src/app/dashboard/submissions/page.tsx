@@ -2,6 +2,7 @@
 
 import { PageHeader } from '@/components/page-header';
 import { api } from '@/lib/api';
+import Link from 'next/link';
 import {
   DocumentPlusIcon,
   ArrowPathIcon,
@@ -57,11 +58,14 @@ function SubmissionCard({ submission }: { submission: Submission }) {
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-3.5 shadow-sm transition-shadow hover:shadow-md">
-      <p className="text-sm font-semibold text-gray-900 truncate">{name}</p>
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-gray-900 truncate">{name}</p>
+        <a href={`mailto:${consultant.email}`} className="text-[10px] text-indigo-600 hover:underline shrink-0 ml-2">{consultant.email}</a>
+      </div>
 
       <div className="mt-2 flex items-start gap-1.5 text-xs text-gray-600">
         <BriefcaseIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-400" />
-        <span className="truncate">{jobReq.title}</span>
+        <Link href={`/dashboard/jobs/${jobReq.id}`} className="truncate text-indigo-600 hover:underline">{jobReq.title}</Link>
       </div>
       <p className="mt-0.5 pl-5 text-xs text-gray-400 truncate">{jobReq.vendor?.name ?? '—'}</p>
 

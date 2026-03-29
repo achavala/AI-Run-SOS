@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import {
@@ -190,6 +191,7 @@ function urlStatusBadge(status: string | null) {
 }
 
 export default function MarketJobsPage() {
+  const router = useRouter();
   const [jobs, setJobs] = useState<MarketJob[]>([]);
   const [pagination, setPagination] = useState<Pagination>({ page: 1, pageSize: 25, total: 0, totalPages: 0 });
   const [stats, setStats] = useState<Stats | null>(null);
@@ -250,7 +252,7 @@ export default function MarketJobsPage() {
   if (loading && jobs.length === 0) {
     return (
       <>
-        <PageHeader title="Market Jobs" description="C2C & W2 openings aggregated hourly from job APIs" />
+        <PageHeader title="Market Jobs" description="C2C & W2 openings aggregated every 30 minutes from job APIs" />
         <div className="flex items-center justify-center py-20">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-indigo-500 border-t-transparent" />
         </div>
@@ -262,7 +264,7 @@ export default function MarketJobsPage() {
     <>
       <PageHeader
         title="Market Jobs"
-        description="Tier B — C2C & W2 openings aggregated hourly — freshness-verified"
+        description="Tier B — C2C & W2 openings aggregated every 30 min — freshness-verified"
         actions={
           <button
             onClick={handleRefresh}
@@ -778,6 +780,13 @@ export default function MarketJobsPage() {
                     </a>
                   )}
                 </div>
+
+                <button
+                  onClick={() => router.push(`/dashboard/market-jobs/match/${selectedJob.id}`)}
+                  className="w-full rounded-lg border-2 border-dashed border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 hover:border-indigo-400 transition"
+                >
+                  Find Matching Consultants
+                </button>
 
                 {selectedJob.status !== 'CONVERTED' ? (
                   <ConvertToReqButton

@@ -127,7 +127,7 @@ export default function RecruiterAnalyticsPage() {
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900 capitalize">{r.name}</h3>
-                    <p className="text-xs text-gray-500">{r.email}</p>
+                    <a href={`mailto:${r.email}`} className="text-xs text-indigo-600 hover:underline">{r.email}</a>
                   </div>
                   <div className="text-right">
                     <p className="text-2xl font-bold text-indigo-600">{fmt(r.totalEmails)}</p>
@@ -221,7 +221,7 @@ export default function RecruiterAnalyticsPage() {
             {pipeline.pipeline?.map((p: any) => (
               <div key={p.email} className="rounded-xl border bg-white p-5 shadow-sm">
                 <h3 className="text-lg font-semibold capitalize mb-1">{p.name}</h3>
-                <p className="text-xs text-gray-500 mb-4">{p.email}</p>
+                <a href={`mailto:${p.email}`} className="text-xs text-indigo-600 hover:underline block mb-4">{p.email}</a>
 
                 {/* Funnel visualization */}
                 <div className="space-y-2">

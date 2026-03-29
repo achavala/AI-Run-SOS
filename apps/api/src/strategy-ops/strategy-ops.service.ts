@@ -487,14 +487,51 @@ export class StrategyOpsService {
    *  Drill-down: return actual req signals for a given tech tier.
    * ═══════════════════════════════════════════════════════════════ */
 
-  async getReqsByFamily(family: string, page = 1, pageSize = 25) {
+  async getReqsByFamily(
+    family: string,
+    page = 1,
+    pageSize = 25,
+    filters?: { location?: string; engagementModel?: string; search?: string; minRate?: number; maxRate?: number },
+  ) {
     const offset = (page - 1) * pageSize;
+    const conditions: string[] = [`vrs.title IS NOT NULL`, `vrs.title != ''`];
 
-    const whereClause = family === 'OTHER' || family === 'null' || !family
-      ? `WHERE vrs."premiumSkillFamily" IS NULL AND vrs.title IS NOT NULL AND vrs.title != ''`
-      : `WHERE vrs."premiumSkillFamily" = '${family}' AND vrs.title IS NOT NULL AND vrs.title != ''`;
+    if (family === 'OTHER' || family === 'null' || !family) {
+      conditions.push(`vrs."premiumSkillFamily" IS NULL`);
+    } else {
+      conditions.push(`vrs."premiumSkillFamily" = '${family.replace(/'/g, "''")}'`);
+    }
 
-    const [rows, countResult] = await Promise.all([
+    if (filters?.location) {
+      conditions.push(`vrs.location ILIKE '%${filters.location.replace(/'/g, "''")}%'`);
+    }
+    if (filters?.engagementModel && filters.engagementModel !== 'ALL') {
+      conditions.push(`vrs."engagementModel" = '${filters.engagementModel.replace(/'/g, "''")}'`);
+    }
+    if (filters?.search) {
+      const q = filters.search.replace(/'/g, "''");
+      conditions.push(`(vrs.title ILIKE '%${q}%' OR vrs.location ILIKE '%${q}%' OR vrs."rateText" ILIKE '%${q}%' OR vrs."clientHint" ILIKE '%${q}%' OR vc.name ILIKE '%${q}%')`);
+    }
+    if (filters?.minRate != null) {
+      conditions.push(`vrs."rateText" ~ '\\$[0-9]' AND (
+        COALESCE(
+          NULLIF(regexp_replace(split_part(vrs."rateText", '/', 1), '[^0-9.]', '', 'g'), '')::numeric,
+          0
+        ) >= ${filters.minRate}
+      )`);
+    }
+    if (filters?.maxRate != null) {
+      conditions.push(`vrs."rateText" ~ '\\$[0-9]' AND (
+        COALESCE(
+          NULLIF(regexp_replace(split_part(vrs."rateText", '/', 1), '[^0-9.]', '', 'g'), '')::numeric,
+          9999
+        ) <= ${filters.maxRate}
+      )`);
+    }
+
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
+
+    const [rows, countResult, locationAgg, modelAgg] = await Promise.all([
       this.prisma.$queryRawUnsafe(`
         SELECT
           vrs.id::text,
@@ -523,15 +560,39 @@ export class StrategyOpsService {
       this.prisma.$queryRawUnsafe(`
         SELECT COUNT(*)::int as total
         FROM "VendorReqSignal" vrs
+        LEFT JOIN "ExtractedVendorCompany" vc ON vc.id = vrs."vendorCompanyId"
         ${whereClause}
+      `) as Promise<any[]>,
+      this.prisma.$queryRawUnsafe(`
+        SELECT DISTINCT vrs.location
+        FROM "VendorReqSignal" vrs
+        WHERE vrs.location IS NOT NULL AND vrs.location != ''
+          AND ${family === 'OTHER' || family === 'null' || !family
+            ? `vrs."premiumSkillFamily" IS NULL`
+            : `vrs."premiumSkillFamily" = '${family.replace(/'/g, "''")}'`}
+        ORDER BY vrs.location
+        LIMIT 200
+      `) as Promise<any[]>,
+      this.prisma.$queryRawUnsafe(`
+        SELECT vrs."engagementModel" as model, COUNT(*)::int as cnt
+        FROM "VendorReqSignal" vrs
+        WHERE vrs."engagementModel" IS NOT NULL
+          AND ${family === 'OTHER' || family === 'null' || !family
+            ? `vrs."premiumSkillFamily" IS NULL`
+            : `vrs."premiumSkillFamily" = '${family.replace(/'/g, "''")}'`}
+        GROUP BY vrs."engagementModel"
+        ORDER BY cnt DESC
       `) as Promise<any[]>,
     ]);
 
     const total = countResult[0]?.total || 0;
+    const locations = (locationAgg as any[]).map((r: any) => r.location).filter(Boolean);
+    const engagementModels = (modelAgg as any[]).map((r: any) => ({ model: r.model, count: r.cnt }));
 
     return {
       data: rows,
       pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
+      filterOptions: { locations, engagementModels },
     };
   }
 

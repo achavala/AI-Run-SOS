@@ -258,7 +258,7 @@ export default function ConsultantsPage() {
                           </span>
                         )}
                       </div>
-                      <p className="mt-0.5 truncate text-xs text-gray-500">{c.email}</p>
+                      <a href={`mailto:${c.email}`} className="mt-0.5 truncate text-xs text-indigo-600 hover:underline block">{c.email}</a>
                     </div>
 
                     <div className="flex shrink-0 items-center gap-3 text-right">
@@ -302,7 +302,7 @@ export default function ConsultantsPage() {
 
                   {/* Meta row */}
                   <div className="mt-2 flex items-center gap-4 text-[11px] text-gray-400">
-                    {c.phone && <span>{c.phone}</span>}
+                    {c.phone && <a href={`tel:${c.phone}`} className="text-indigo-600 hover:underline">{c.phone}</a>}
                     {c.trustScore != null && (
                       <span>Trust: {c.trustScore.toFixed(0)}%</span>
                     )}
