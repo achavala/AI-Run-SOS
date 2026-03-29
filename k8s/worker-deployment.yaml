@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: ai-run-sos
+  labels:
+    app: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+        - name: worker
+          image: ${ECR_REPO}/ai-run-sos-worker:latest
+          envFrom:
+            - secretRef:
+                name: ai-run-sos-secrets
+          env:
+            - name: NODE_ENV
+              value: "production"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi

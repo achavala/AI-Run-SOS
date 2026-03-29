@@ -1,0 +1,23 @@
+FROM node:20-alpine AS base
+RUN apk add --no-cache chromium nss freetype harfbuzz ca-certificates ttf-freefont
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/
+COPY packages/db/package.json packages/db/
+
+RUN npm ci --omit=dev
+
+COPY packages/db ./packages/db
+RUN npx prisma generate --schema packages/db/prisma/schema.prisma
+
+COPY apps/api ./apps/api
+
+EXPOSE 4000
+ENV NODE_ENV=production
+ENV PORT=4000
+
+CMD ["node", "-r", "ts-node/register", "apps/api/src/main.ts"]
