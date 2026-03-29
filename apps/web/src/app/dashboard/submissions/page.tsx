@@ -11,6 +11,7 @@ import {
   CalendarIcon,
 } from '@heroicons/react/24/outline';
 import { useEffect, useState } from 'react';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 
 interface Submission {
   id: string;
@@ -116,6 +117,7 @@ export default function SubmissionsPage() {
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -204,24 +206,35 @@ export default function SubmissionsPage() {
       <div className="flex gap-4 overflow-x-auto pb-4">
         {grouped.map((stage) => (
           <div key={stage.key} className="flex w-72 shrink-0 flex-col">
-            <div className={`mb-3 flex items-center gap-2 rounded-lg px-3 py-2 ${stage.bg}`}>
-              <div className={`h-2.5 w-2.5 rounded-full ${stage.color}`} />
-              <span className="text-sm font-semibold text-gray-700">{stage.label}</span>
-              <span className={`ml-auto rounded-full px-2 py-0.5 text-xs font-bold ring-1 ${stage.ring} text-gray-600 bg-white`}>
-                {stage.items.length}
-              </span>
-            </div>
+            <ClickableMetric metric="submissions">
+              <div className={`mb-3 flex items-center gap-2 rounded-lg px-3 py-2 ${stage.bg}`}>
+                <div className={`h-2.5 w-2.5 rounded-full ${stage.color}`} />
+                <span className="text-sm font-semibold text-gray-700">{stage.label}</span>
+                <span className={`ml-auto rounded-full px-2 py-0.5 text-xs font-bold ring-1 ${stage.ring} text-gray-600 bg-white`}>
+                  {stage.items.length}
+                </span>
+              </div>
+            </ClickableMetric>
             <div className="flex flex-1 flex-col gap-2.5 rounded-xl border border-gray-100 bg-gray-50/50 p-2.5 min-h-[120px]">
               {stage.items.length === 0 && (
                 <p className="py-6 text-center text-xs text-gray-400">No submissions</p>
               )}
               {stage.items.map((sub) => (
-                <SubmissionCard key={sub.id} submission={sub} />
+                <div key={sub.id} onClick={() => setSelectedRow(sub)} className="cursor-pointer">
+                  <SubmissionCard submission={sub} />
+                </div>
               ))}
             </div>
           </div>
         ))}
       </div>
+      {selectedRow && (
+        <StaticDrillDownModal
+          title="Submission Details"
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
+      )}
     </>
   );
 }

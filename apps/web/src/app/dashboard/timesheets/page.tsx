@@ -13,6 +13,7 @@ import {
   MagnifyingGlassIcon,
 } from '@heroicons/react/24/outline';
 import { useState, useEffect, useCallback } from 'react';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 
 interface Timesheet {
   id: string;
@@ -171,6 +172,7 @@ export default function TimesheetsPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   const fetchTimesheets = useCallback(async () => {
     try {
@@ -238,37 +240,45 @@ export default function TimesheetsPage() {
 
       {/* KPIs */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard
-          title="Total Hours (This Period)"
-          value={loading ? '—' : totalHours.toString()}
-          subtitle="across all placements"
-          icon={ClockIcon}
-        />
-        <KpiCard
-          title="Total Billed"
-          value={loading ? '—' : `$${(totalBilled / 1000).toFixed(1)}K`}
-          change={billedChange.text}
-          changeType={billedChange.type}
-          subtitle="vs prior week"
-          icon={CheckCircleIcon}
-        />
-        <KpiCard
-          title="Total Margin"
-          value={loading ? '—' : `$${(totalMargin / 1000).toFixed(1)}K`}
-          change={
-            totalBilled > 0
-              ? `${((totalMargin / totalBilled) * 100).toFixed(1)}% avg`
-              : '0.0% avg'
-          }
-          changeType="positive"
-          icon={CheckCircleIcon}
-        />
-        <KpiCard
-          title="Pending Approval"
-          value={loading ? '—' : pendingApproval.toString()}
-          subtitle="timesheets awaiting review"
-          icon={ExclamationCircleIcon}
-        />
+        <ClickableMetric metric="timesheets">
+          <KpiCard
+            title="Total Hours (This Period)"
+            value={loading ? '—' : totalHours.toString()}
+            subtitle="across all placements"
+            icon={ClockIcon}
+          />
+        </ClickableMetric>
+        <ClickableMetric metric="timesheets">
+          <KpiCard
+            title="Total Billed"
+            value={loading ? '—' : `$${(totalBilled / 1000).toFixed(1)}K`}
+            change={billedChange.text}
+            changeType={billedChange.type}
+            subtitle="vs prior week"
+            icon={CheckCircleIcon}
+          />
+        </ClickableMetric>
+        <ClickableMetric metric="timesheets">
+          <KpiCard
+            title="Total Margin"
+            value={loading ? '—' : `$${(totalMargin / 1000).toFixed(1)}K`}
+            change={
+              totalBilled > 0
+                ? `${((totalMargin / totalBilled) * 100).toFixed(1)}% avg`
+                : '0.0% avg'
+            }
+            changeType="positive"
+            icon={CheckCircleIcon}
+          />
+        </ClickableMetric>
+        <ClickableMetric metric="timesheets">
+          <KpiCard
+            title="Pending Approval"
+            value={loading ? '—' : pendingApproval.toString()}
+            subtitle="timesheets awaiting review"
+            icon={ExclamationCircleIcon}
+          />
+        </ClickableMetric>
       </div>
 
       {/* Filters */}
@@ -334,6 +344,14 @@ export default function TimesheetsPage() {
           data={filtered}
           keyField="id"
           emptyMessage="No timesheets match your filters"
+          onRowClick={(row) => setSelectedRow(row)}
+        />
+      )}
+      {selectedRow && (
+        <StaticDrillDownModal
+          title="Timesheet Details"
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
         />
       )}
     </>

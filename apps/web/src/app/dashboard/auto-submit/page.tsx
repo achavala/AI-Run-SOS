@@ -17,6 +17,7 @@ import {
   ChevronRightIcon,
   BoltIcon,
 } from '@heroicons/react/24/outline';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 
 interface QueueItem {
   id: string;
@@ -88,6 +89,7 @@ export default function AutoSubmitPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [filter, setFilter] = useState<string>('QUEUED');
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -182,14 +184,15 @@ export default function AutoSubmitPage() {
             { label: 'Rejected', value: stats.rejected, color: 'text-red-600 bg-red-50', filterVal: 'REJECTED' },
             { label: 'Expired', value: stats.expired, color: 'text-gray-500 bg-gray-50', filterVal: 'EXPIRED' },
           ].map((s) => (
-            <button
-              key={s.label}
-              onClick={() => setFilter(s.filterVal)}
-              className={`rounded-xl p-4 text-left transition-all ${filter === s.filterVal ? 'ring-2 ring-indigo-500 shadow-md' : 'hover:shadow-sm'} ${s.color}`}
-            >
-              <p className="text-2xl font-bold">{s.value}</p>
-              <p className="text-xs font-medium uppercase tracking-wide opacity-70">{s.label}</p>
-            </button>
+            <ClickableMetric key={s.label} metric="autoSubmitQueue" title={`Auto-Submit: ${s.label}`}>
+              <button
+                onClick={(e) => { e.stopPropagation(); setFilter(s.filterVal); }}
+                className={`rounded-xl p-4 text-left transition-all ${filter === s.filterVal ? 'ring-2 ring-indigo-500 shadow-md' : 'hover:shadow-sm'} ${s.color}`}
+              >
+                <p className="text-2xl font-bold">{s.value}</p>
+                <p className="text-xs font-medium uppercase tracking-wide opacity-70">{s.label}</p>
+              </button>
+            </ClickableMetric>
           ))}
         </div>
       )}
@@ -252,29 +255,34 @@ export default function AutoSubmitPage() {
             return (
               <div
                 key={item.id}
-                className={`rounded-xl bg-white border transition-all ${isSelected ? 'border-indigo-300 ring-1 ring-indigo-200 shadow-sm' : 'border-gray-100 hover:border-gray-200'}`}
+                onClick={() => setSelectedRow(item)}
+                className={`rounded-xl bg-white border transition-all cursor-pointer hover:bg-indigo-50/30 ${isSelected ? 'border-indigo-300 ring-1 ring-indigo-200 shadow-sm' : 'border-gray-100 hover:border-gray-200'}`}
               >
                 {/* Main row */}
                 <div className="flex items-center gap-3 px-4 py-3">
                   {filter === 'QUEUED' && (
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => toggleSelect(item.id)}
-                      className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                    />
+                    <span onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelect(item.id)}
+                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                    </span>
                   )}
 
-                  <button
-                    onClick={() => setExpandedId(isExpanded ? null : item.id)}
-                    className="shrink-0"
-                  >
-                    {isExpanded ? (
-                      <ChevronDownIcon className="h-4 w-4 text-gray-400" />
-                    ) : (
-                      <ChevronRightIcon className="h-4 w-4 text-gray-400" />
-                    )}
-                  </button>
+                  <span onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => setExpandedId(isExpanded ? null : item.id)}
+                      className="shrink-0"
+                    >
+                      {isExpanded ? (
+                        <ChevronDownIcon className="h-4 w-4 text-gray-400" />
+                      ) : (
+                        <ChevronRightIcon className="h-4 w-4 text-gray-400" />
+                      )}
+                    </button>
+                  </span>
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
@@ -319,7 +327,7 @@ export default function AutoSubmitPage() {
 
                 {/* Expanded detail */}
                 {isExpanded && (
-                  <div className="border-t border-gray-50 bg-gray-50/50 px-4 py-3 space-y-3">
+                  <div className="border-t border-gray-50 bg-gray-50/50 px-4 py-3 space-y-3" onClick={(e) => e.stopPropagation()}>
                     {/* Match reasons */}
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Match Reasons</p>
@@ -377,6 +385,14 @@ export default function AutoSubmitPage() {
             );
           })}
         </div>
+      )}
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title={selectedRow.reqTitle || 'Queue Item Details'}
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
       )}
     </div>
   );

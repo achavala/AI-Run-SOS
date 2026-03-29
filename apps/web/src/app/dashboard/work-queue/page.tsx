@@ -20,6 +20,7 @@ import {
   CurrencyDollarIcon,
   ShieldCheckIcon,
 } from '@heroicons/react/24/outline';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 
 function fmt(n: number | null | undefined): string {
   if (n == null) return '—';
@@ -65,6 +66,7 @@ export default function WorkQueuePage() {
   const [efficiency, setEfficiency] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [selectedReq, setSelectedReq] = useState<any>(null);
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -102,26 +104,34 @@ export default function WorkQueuePage() {
 
       {/* Quick Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="rounded-xl border bg-white p-4 text-center">
-          <FireIcon className="h-6 w-6 text-emerald-600 mx-auto" />
-          <p className="text-2xl font-bold text-emerald-700 mt-1">{fmt(stats.premium)}</p>
-          <p className="text-xs text-gray-500">Premium (3d)</p>
-        </div>
-        <div className="rounded-xl border bg-white p-4 text-center">
-          <SparklesIcon className="h-6 w-6 text-blue-600 mx-auto" />
-          <p className="text-2xl font-bold text-blue-700 mt-1">{fmt(stats.quality)}</p>
-          <p className="text-xs text-gray-500">Quality (3d)</p>
-        </div>
-        <div className="rounded-xl border bg-white p-4 text-center">
-          <BoltIcon className="h-6 w-6 text-yellow-600 mx-auto" />
-          <p className="text-2xl font-bold text-yellow-700 mt-1">{fmt(stats.moderate)}</p>
-          <p className="text-xs text-gray-500">Moderate (3d)</p>
-        </div>
-        <div className="rounded-xl border bg-white p-4 text-center">
-          <ExclamationTriangleIcon className="h-6 w-6 text-gray-400 mx-auto" />
-          <p className="text-2xl font-bold text-gray-500 mt-1">{fmt(stats.lowValue)}</p>
-          <p className="text-xs text-gray-500">Low Value (hidden)</p>
-        </div>
+        <ClickableMetric metric="qualityReqs" title="Premium Reqs">
+          <div className="rounded-xl border bg-white p-4 text-center">
+            <FireIcon className="h-6 w-6 text-emerald-600 mx-auto" />
+            <p className="text-2xl font-bold text-emerald-700 mt-1">{fmt(stats.premium)}</p>
+            <p className="text-xs text-gray-500">Premium (3d)</p>
+          </div>
+        </ClickableMetric>
+        <ClickableMetric metric="matchQuality" title="Quality Reqs">
+          <div className="rounded-xl border bg-white p-4 text-center">
+            <SparklesIcon className="h-6 w-6 text-blue-600 mx-auto" />
+            <p className="text-2xl font-bold text-blue-700 mt-1">{fmt(stats.quality)}</p>
+            <p className="text-xs text-gray-500">Quality (3d)</p>
+          </div>
+        </ClickableMetric>
+        <ClickableMetric metric="submissions" title="Moderate Reqs">
+          <div className="rounded-xl border bg-white p-4 text-center">
+            <BoltIcon className="h-6 w-6 text-yellow-600 mx-auto" />
+            <p className="text-2xl font-bold text-yellow-700 mt-1">{fmt(stats.moderate)}</p>
+            <p className="text-xs text-gray-500">Moderate (3d)</p>
+          </div>
+        </ClickableMetric>
+        <ClickableMetric metric="allConsultants" title="Low Value Reqs">
+          <div className="rounded-xl border bg-white p-4 text-center">
+            <ExclamationTriangleIcon className="h-6 w-6 text-gray-400 mx-auto" />
+            <p className="text-2xl font-bold text-gray-500 mt-1">{fmt(stats.lowValue)}</p>
+            <p className="text-xs text-gray-500">Low Value (hidden)</p>
+          </div>
+        </ClickableMetric>
       </div>
 
       {/* Tab Navigation */}
@@ -295,7 +305,7 @@ export default function WorkQueuePage() {
                 </thead>
                 <tbody>
                   {efficiency.allTime?.map((r: any) => (
-                    <tr key={r.email} className="border-b border-gray-50">
+                    <tr key={r.email} onClick={() => setSelectedRow(r)} className="border-b border-gray-50 cursor-pointer hover:bg-indigo-50">
                       <td className="py-3 pr-4 font-medium capitalize">{r.name}</td>
                       <td className="py-3 pr-4 text-right">{fmt(r.totalReqs)}</td>
                       <td className="py-3 pr-4 text-right font-medium text-indigo-600">{fmt(r.totalVerifiedSubmissions)}</td>
@@ -332,7 +342,7 @@ export default function WorkQueuePage() {
                 </thead>
                 <tbody>
                   {efficiency.daily?.slice(0, 60).map((d: any, i: number) => (
-                    <tr key={i} className="border-b border-gray-50">
+                    <tr key={i} onClick={() => setSelectedRow(d)} className="border-b border-gray-50 cursor-pointer hover:bg-indigo-50">
                       <td className="py-2 pr-4 text-gray-500">{new Date(d.day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
                       <td className="py-2 pr-4 capitalize font-medium">{d.name}</td>
                       <td className="py-2 pr-4 text-right">{fmt(d.reqsReceived)}</td>
@@ -347,6 +357,14 @@ export default function WorkQueuePage() {
             </div>
           </div>
         </div>
+      )}
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title={selectedRow.name || selectedRow.email || 'Work Queue Details'}
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
       )}
     </div>
   );

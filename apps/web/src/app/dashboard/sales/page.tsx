@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { KpiCard } from '@/components/kpi-card';
 import { DataTable, type Column } from '@/components/data-table';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 import { api } from '@/lib/api';
 import {
   BuildingOfficeIcon,
@@ -176,6 +177,7 @@ export default function SalesPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
+  const [selectedRow, setSelectedRow] = useState<any>(null);
   const [enriching, setEnriching] = useState(false);
   const [enrichProgress, setEnrichProgress] = useState<any>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
@@ -389,30 +391,38 @@ export default function SalesPage() {
 
       {/* KPIs */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard
-          title="Active Vendors"
-          value={String(activeVendors.length)}
-          subtitle={`of ${vendors.length} total`}
-          icon={BuildingOfficeIcon}
-        />
-        <KpiCard
-          title="Avg Trust Score"
-          value={String(avgTrust)}
-          subtitle="across vendors"
-          icon={TrophyIcon}
-        />
-        <KpiCard
-          title="Avg Pay Speed"
-          value={avgPayDays ? `${avgPayDays}d` : 'N/A'}
-          subtitle="days to payment"
-          icon={ClockIcon}
-        />
-        <KpiCard
-          title="Total Revenue"
-          value={totalRevenue >= 1000 ? `$${(totalRevenue / 1000).toFixed(0)}K` : `$${totalRevenue}`}
-          subtitle="all vendors"
-          icon={ChartBarIcon}
-        />
+        <ClickableMetric metric="allVendors">
+          <KpiCard
+            title="Active Vendors"
+            value={String(activeVendors.length)}
+            subtitle={`of ${vendors.length} total`}
+            icon={BuildingOfficeIcon}
+          />
+        </ClickableMetric>
+        <ClickableMetric metric="submissions">
+          <KpiCard
+            title="Avg Trust Score"
+            value={String(avgTrust)}
+            subtitle="across vendors"
+            icon={TrophyIcon}
+          />
+        </ClickableMetric>
+        <ClickableMetric metric="activeJobs">
+          <KpiCard
+            title="Avg Pay Speed"
+            value={avgPayDays ? `${avgPayDays}d` : 'N/A'}
+            subtitle="days to payment"
+            icon={ClockIcon}
+          />
+        </ClickableMetric>
+        <ClickableMetric metric="placements">
+          <KpiCard
+            title="Total Revenue"
+            value={totalRevenue >= 1000 ? `$${(totalRevenue / 1000).toFixed(0)}K` : `$${totalRevenue}`}
+            subtitle="all vendors"
+            icon={ChartBarIcon}
+          />
+        </ClickableMetric>
       </div>
 
       {/* Vendor Table */}
@@ -437,6 +447,7 @@ export default function SalesPage() {
           data={filtered as VendorRow[]}
           keyField="id"
           emptyMessage="No vendors found"
+          onRowClick={(row) => setSelectedRow(row)}
         />
       </div>
 
@@ -487,6 +498,14 @@ export default function SalesPage() {
           </div>
         )}
       </div>
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title="Vendor Details"
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
+      )}
     </>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useState, lazy, Suspense } from 'react';
 import { PageHeader } from '@/components/page-header';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 import {
   UsersIcon,
   BriefcaseIcon,
@@ -34,6 +35,7 @@ function TabSpinner() {
 
 export default function BenchSalesPage() {
   const [activeTab, setActiveTab] = useState<TabKey>('current-bench');
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   return (
     <>
@@ -75,6 +77,14 @@ export default function BenchSalesPage() {
         {activeTab === 'consultants' && <ConsultantsPanel />}
         {activeTab === 'jobs' && <JobsPanel />}
       </Suspense>
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title={selectedRow.name || selectedRow.title || 'Details'}
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
+      )}
     </>
   );
 }

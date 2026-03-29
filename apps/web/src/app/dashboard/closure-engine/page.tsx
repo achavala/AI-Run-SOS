@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 import {
   ArrowPathIcon,
   BoltIcon,
@@ -90,6 +91,10 @@ export default function ClosureEnginePage() {
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [consultants, setConsultants] = useState<any[]>([]);
   const [showConsultantPicker, setShowConsultantPicker] = useState<string | null>(null);
+  const [selectedVendor, setSelectedVendor] = useState<any>(null);
+  const [selectedConsultant, setSelectedConsultant] = useState<any>(null);
+  const [selectedRepVendor, setSelectedRepVendor] = useState<any>(null);
+  const [selectedRate, setSelectedRate] = useState<any>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -166,31 +171,41 @@ export default function ClosureEnginePage() {
 
       {/* Distribution Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <div className="rounded-xl border-2 border-red-200 bg-red-50 p-4 text-center">
-          <FireIcon className="h-5 w-5 text-red-600 mx-auto" />
-          <p className="text-2xl font-bold text-red-700 mt-1">{fmt(dist.hot)}</p>
-          <p className="text-[10px] text-red-600 font-medium">HOT (70+)</p>
-        </div>
-        <div className="rounded-xl border border-orange-200 bg-orange-50 p-4 text-center">
-          <BoltIcon className="h-5 w-5 text-orange-600 mx-auto" />
-          <p className="text-2xl font-bold text-orange-700 mt-1">{fmt(dist.warm)}</p>
-          <p className="text-[10px] text-orange-600 font-medium">WARM (50-69)</p>
-        </div>
-        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-center">
-          <SparklesIcon className="h-5 w-5 text-blue-600 mx-auto" />
-          <p className="text-2xl font-bold text-blue-700 mt-1">{fmt(dist.cool)}</p>
-          <p className="text-[10px] text-blue-600 font-medium">COOL (30-49)</p>
-        </div>
-        <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-center">
-          <ExclamationTriangleIcon className="h-5 w-5 text-gray-400 mx-auto" />
-          <p className="text-2xl font-bold text-gray-500 mt-1">{fmt(dist.cold)}</p>
-          <p className="text-[10px] text-gray-500 font-medium">COLD (&lt;30)</p>
-        </div>
-        <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-center">
-          <ChartBarIcon className="h-5 w-5 text-indigo-600 mx-auto" />
-          <p className="text-2xl font-bold text-indigo-700 mt-1">{dist.avgScore || '—'}</p>
-          <p className="text-[10px] text-indigo-600 font-medium">AVG SCORE</p>
-        </div>
+        <ClickableMetric metric="closures">
+          <div className="rounded-xl border-2 border-red-200 bg-red-50 p-4 text-center">
+            <FireIcon className="h-5 w-5 text-red-600 mx-auto" />
+            <p className="text-2xl font-bold text-red-700 mt-1">{fmt(dist.hot)}</p>
+            <p className="text-[10px] text-red-600 font-medium">HOT (70+)</p>
+          </div>
+        </ClickableMetric>
+        <ClickableMetric metric="submissions">
+          <div className="rounded-xl border border-orange-200 bg-orange-50 p-4 text-center">
+            <BoltIcon className="h-5 w-5 text-orange-600 mx-auto" />
+            <p className="text-2xl font-bold text-orange-700 mt-1">{fmt(dist.warm)}</p>
+            <p className="text-[10px] text-orange-600 font-medium">WARM (50-69)</p>
+          </div>
+        </ClickableMetric>
+        <ClickableMetric metric="vendorReqSignals">
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-center">
+            <SparklesIcon className="h-5 w-5 text-blue-600 mx-auto" />
+            <p className="text-2xl font-bold text-blue-700 mt-1">{fmt(dist.cool)}</p>
+            <p className="text-[10px] text-blue-600 font-medium">COOL (30-49)</p>
+          </div>
+        </ClickableMetric>
+        <ClickableMetric metric="activeJobs">
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-center">
+            <ExclamationTriangleIcon className="h-5 w-5 text-gray-400 mx-auto" />
+            <p className="text-2xl font-bold text-gray-500 mt-1">{fmt(dist.cold)}</p>
+            <p className="text-[10px] text-gray-500 font-medium">COLD (&lt;30)</p>
+          </div>
+        </ClickableMetric>
+        <ClickableMetric metric="matchQuality">
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-center">
+            <ChartBarIcon className="h-5 w-5 text-indigo-600 mx-auto" />
+            <p className="text-2xl font-bold text-indigo-700 mt-1">{dist.avgScore || '—'}</p>
+            <p className="text-[10px] text-indigo-600 font-medium">AVG SCORE</p>
+          </div>
+        </ClickableMetric>
       </div>
 
       {/* Tab Nav */}
@@ -397,7 +412,8 @@ export default function ClosureEnginePage() {
               const barColor = capPct >= 90 ? 'bg-red-500' : capPct >= 60 ? 'bg-orange-500' : 'bg-green-500';
 
               return (
-                <div key={r.recruiterEmail} className="rounded-xl border bg-white p-5 shadow-sm">
+                <ClickableMetric metric="todaySubmissions" key={r.recruiterEmail}>
+                <div className="rounded-xl border bg-white p-5 shadow-sm">
                   <div className="flex items-center justify-between mb-3">
                     <div>
                       <h3 className="text-base font-semibold capitalize">{r.name}</h3>
@@ -431,6 +447,7 @@ export default function ClosureEnginePage() {
                     </div>
                   </div>
                 </div>
+                </ClickableMetric>
               );
             })}
           </div>
@@ -442,22 +459,30 @@ export default function ClosureEnginePage() {
         <div className="space-y-4">
           {/* Summary Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="rounded-xl border bg-white p-4 text-center">
-              <p className="text-2xl font-bold text-indigo-700">{fmt(feedbackData.summary?.totalSubmissions90d)}</p>
-              <p className="text-xs text-gray-500">Submissions (90d)</p>
-            </div>
-            <div className="rounded-xl border bg-white p-4 text-center">
-              <p className="text-2xl font-bold text-blue-700">{fmt(feedbackData.summary?.totalReplies90d)}</p>
-              <p className="text-xs text-gray-500">Replies (90d)</p>
-            </div>
-            <div className="rounded-xl border bg-white p-4 text-center">
-              <p className="text-2xl font-bold text-green-700">{fmt(feedbackData.summary?.interviewSignals90d)}</p>
-              <p className="text-xs text-gray-500">Interview Signals</p>
-            </div>
-            <div className="rounded-xl border bg-white p-4 text-center">
-              <p className="text-2xl font-bold text-emerald-700">{fmt(feedbackData.summary?.offerSignals90d)}</p>
-              <p className="text-xs text-gray-500">Offer Signals</p>
-            </div>
+            <ClickableMetric metric="submissions">
+              <div className="rounded-xl border bg-white p-4 text-center">
+                <p className="text-2xl font-bold text-indigo-700">{fmt(feedbackData.summary?.totalSubmissions90d)}</p>
+                <p className="text-xs text-gray-500">Submissions (90d)</p>
+              </div>
+            </ClickableMetric>
+            <ClickableMetric metric="vendorReqSignals">
+              <div className="rounded-xl border bg-white p-4 text-center">
+                <p className="text-2xl font-bold text-blue-700">{fmt(feedbackData.summary?.totalReplies90d)}</p>
+                <p className="text-xs text-gray-500">Replies (90d)</p>
+              </div>
+            </ClickableMetric>
+            <ClickableMetric metric="interviews">
+              <div className="rounded-xl border bg-white p-4 text-center">
+                <p className="text-2xl font-bold text-green-700">{fmt(feedbackData.summary?.interviewSignals90d)}</p>
+                <p className="text-xs text-gray-500">Interview Signals</p>
+              </div>
+            </ClickableMetric>
+            <ClickableMetric metric="offers">
+              <div className="rounded-xl border bg-white p-4 text-center">
+                <p className="text-2xl font-bold text-emerald-700">{fmt(feedbackData.summary?.offerSignals90d)}</p>
+                <p className="text-xs text-gray-500">Offer Signals</p>
+              </div>
+            </ClickableMetric>
           </div>
 
           <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
@@ -481,10 +506,11 @@ export default function ClosureEnginePage() {
                 </thead>
                 <tbody>
                   {feedbackData.vendors?.map((v: any) => (
-                    <tr key={v.vendorDomain} className="border-b border-gray-50 hover:bg-gray-50">
+                    <tr key={v.vendorDomain} className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer"
+                      onClick={() => setSelectedVendor(selectedVendor?.vendorDomain === v.vendorDomain ? null : v)}>
                       <td className="py-3 px-4 font-medium">
                         <a href={`https://${v.vendorDomain}`} target="_blank" rel="noopener noreferrer"
-                          className="text-indigo-600 hover:underline">{v.vendorDomain}</a>
+                          className="text-indigo-600 hover:underline" onClick={(e) => e.stopPropagation()}>{v.vendorDomain}</a>
                       </td>
                       <td className="py-3 px-4 text-right">{fmt(v.submissionsSent)}</td>
                       <td className="py-3 px-4 text-right">{fmt(v.totalReplies)}</td>
@@ -507,6 +533,15 @@ export default function ClosureEnginePage() {
               </table>
             </div>
           </div>
+
+          {selectedVendor && (
+            <StaticDrillDownModal
+              title={`Vendor Details: ${selectedVendor.vendorDomain}`}
+              description="Full vendor conversion funnel data"
+              rows={[selectedVendor]}
+              onClose={() => setSelectedVendor(null)}
+            />
+          )}
         </div>
       )}
 
@@ -515,33 +550,44 @@ export default function ClosureEnginePage() {
         <div className="space-y-4">
           {/* Tier Summary */}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-            <div className="rounded-xl border-2 border-red-200 bg-red-50 p-4 text-center">
-              <p className="text-2xl font-bold text-red-700">{benchData.summary?.hot || 0}</p>
-              <p className="text-[10px] text-red-600 font-medium">HOT</p>
-            </div>
-            <div className="rounded-xl border border-orange-200 bg-orange-50 p-4 text-center">
-              <p className="text-2xl font-bold text-orange-700">{benchData.summary?.warm || 0}</p>
-              <p className="text-[10px] text-orange-600 font-medium">WARM</p>
-            </div>
-            <div className="rounded-xl border border-teal-200 bg-teal-50 p-4 text-center">
-              <p className="text-2xl font-bold text-teal-700">{benchData.summary?.ready || 0}</p>
-              <p className="text-[10px] text-teal-600 font-medium">READY</p>
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-center">
-              <p className="text-2xl font-bold text-gray-500">{benchData.summary?.cold || 0}</p>
-              <p className="text-[10px] text-gray-500 font-medium">COLD</p>
-            </div>
-            <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-center">
-              <p className="text-2xl font-bold text-indigo-700">{benchData.summary?.total || 0}</p>
-              <p className="text-[10px] text-indigo-600 font-medium">TOTAL</p>
-            </div>
+            <ClickableMetric metric="qualityReqs">
+              <div className="rounded-xl border-2 border-red-200 bg-red-50 p-4 text-center">
+                <p className="text-2xl font-bold text-red-700">{benchData.summary?.hot || 0}</p>
+                <p className="text-[10px] text-red-600 font-medium">HOT</p>
+              </div>
+            </ClickableMetric>
+            <ClickableMetric metric="autoSubmitQueue">
+              <div className="rounded-xl border border-orange-200 bg-orange-50 p-4 text-center">
+                <p className="text-2xl font-bold text-orange-700">{benchData.summary?.warm || 0}</p>
+                <p className="text-[10px] text-orange-600 font-medium">WARM</p>
+              </div>
+            </ClickableMetric>
+            <ClickableMetric metric="allConsultants">
+              <div className="rounded-xl border border-teal-200 bg-teal-50 p-4 text-center">
+                <p className="text-2xl font-bold text-teal-700">{benchData.summary?.ready || 0}</p>
+                <p className="text-[10px] text-teal-600 font-medium">READY</p>
+              </div>
+            </ClickableMetric>
+            <ClickableMetric metric="benchSize">
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-center">
+                <p className="text-2xl font-bold text-gray-500">{benchData.summary?.cold || 0}</p>
+                <p className="text-[10px] text-gray-500 font-medium">COLD</p>
+              </div>
+            </ClickableMetric>
+            <ClickableMetric metric="benchSize">
+              <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-center">
+                <p className="text-2xl font-bold text-indigo-700">{benchData.summary?.total || 0}</p>
+                <p className="text-[10px] text-indigo-600 font-medium">TOTAL</p>
+              </div>
+            </ClickableMetric>
           </div>
 
           <div className="space-y-3">
             {benchData.consultants?.map((c: any) => (
-              <div key={c.consultantId} className={`rounded-xl border bg-white p-5 shadow-sm ${
+              <div key={c.consultantId} className={`rounded-xl border bg-white p-5 shadow-sm cursor-pointer ${
                 c.tier === 'HOT' ? 'border-red-200' : c.tier === 'WARM' ? 'border-orange-200' : ''
-              }`}>
+              }`}
+                onClick={() => setSelectedConsultant(selectedConsultant?.consultantId === c.consultantId ? null : c)}>
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
                     <div className={`flex items-center justify-center h-10 w-10 rounded-full text-xs font-bold ${
@@ -602,6 +648,15 @@ export default function ClosureEnginePage() {
               </div>
             ))}
           </div>
+
+          {selectedConsultant && (
+            <StaticDrillDownModal
+              title={`Bench Details: ${selectedConsultant.name}`}
+              description={`Tier: ${selectedConsultant.tier} · Score: ${selectedConsultant.overallScore} · Readiness: ${selectedConsultant.readiness}`}
+              rows={[selectedConsultant]}
+              onClose={() => setSelectedConsultant(null)}
+            />
+          )}
         </div>
       )}
 
@@ -610,14 +665,16 @@ export default function ClosureEnginePage() {
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-4">
             {(reputationData.summary || []).map((s: any) => (
-              <div key={s.status} className={`rounded-xl border p-4 text-center ${
-                s.status === 'WHITELIST' ? 'border-green-200 bg-green-50' :
-                s.status === 'BLACKLIST' ? 'border-red-200 bg-red-50' :
-                'border-gray-200 bg-gray-50'
-              }`}>
-                <p className="text-2xl font-bold">{fmt(s.count)}</p>
-                <p className="text-xs font-medium">{s.status}</p>
-              </div>
+              <ClickableMetric metric={s.status === 'WHITELIST' ? 'trustedVendors' : s.status === 'BLACKLIST' ? 'allVendors' : 'allVendors'} key={s.status}>
+                <div className={`rounded-xl border p-4 text-center ${
+                  s.status === 'WHITELIST' ? 'border-green-200 bg-green-50' :
+                  s.status === 'BLACKLIST' ? 'border-red-200 bg-red-50' :
+                  'border-gray-200 bg-gray-50'
+                }`}>
+                  <p className="text-2xl font-bold">{fmt(s.count)}</p>
+                  <p className="text-xs font-medium">{s.status}</p>
+                </div>
+              </ClickableMetric>
             ))}
           </div>
           <div className="rounded-xl border bg-white p-4">
@@ -635,7 +692,8 @@ export default function ClosureEnginePage() {
                 </thead>
                 <tbody>
                   {(reputationData.topWhitelist || []).map((v: any) => (
-                    <tr key={v.vendorDomain} className="border-b border-gray-50 hover:bg-gray-50">
+                    <tr key={v.vendorDomain} className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer"
+                      onClick={() => setSelectedRepVendor(selectedRepVendor?.vendorDomain === v.vendorDomain ? null : v)}>
                       <td className="py-2 px-2">
                         <p className="font-medium text-gray-900">{v.vendorName}</p>
                         <p className="text-gray-400">{v.vendorDomain}</p>
@@ -657,7 +715,8 @@ export default function ClosureEnginePage() {
               <h3 className="font-semibold text-red-700 mb-3">Blacklisted Vendors (High Ghost Rate)</h3>
               <div className="space-y-2">
                 {(reputationData.topBlacklist || []).map((v: any) => (
-                  <div key={v.vendorDomain} className="flex items-center justify-between rounded-lg bg-red-50 px-3 py-2">
+                  <div key={v.vendorDomain} className="flex items-center justify-between rounded-lg bg-red-50 px-3 py-2 cursor-pointer hover:bg-red-100 transition-colors"
+                    onClick={() => setSelectedRepVendor(selectedRepVendor?.vendorDomain === v.vendorDomain ? null : v)}>
                     <div>
                       <p className="text-sm font-medium text-red-800">{v.vendorName}</p>
                       <p className="text-xs text-red-500">{v.vendorDomain}</p>
@@ -671,17 +730,28 @@ export default function ClosureEnginePage() {
               </div>
             </div>
           )}
+
+          {selectedRepVendor && (
+            <StaticDrillDownModal
+              title={`Vendor Reputation: ${selectedRepVendor.vendorName || selectedRepVendor.vendorDomain}`}
+              description={`Domain: ${selectedRepVendor.vendorDomain}`}
+              rows={[selectedRepVendor]}
+              onClose={() => setSelectedRepVendor(null)}
+            />
+          )}
         </div>
       )}
 
       {/* ═══ Rate Intelligence Tab ═══ */}
       {tab === 'rates' && rateData && (
         <div className="space-y-4">
-          <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-center">
-            <CurrencyDollarIcon className="h-6 w-6 text-indigo-600 mx-auto" />
-            <p className="text-3xl font-bold text-indigo-700 mt-1">{fmt(rateData.totalRateCards)}</p>
-            <p className="text-xs text-indigo-600">Rate cards across skill / location / employment type</p>
-          </div>
+          <ClickableMetric metric="rateCards">
+            <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-center">
+              <CurrencyDollarIcon className="h-6 w-6 text-indigo-600 mx-auto" />
+              <p className="text-3xl font-bold text-indigo-700 mt-1">{fmt(rateData.totalRateCards)}</p>
+              <p className="text-xs text-indigo-600">Rate cards across skill / location / employment type</p>
+            </div>
+          </ClickableMetric>
           <div className="rounded-xl border bg-white overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
@@ -701,7 +771,8 @@ export default function ClosureEnginePage() {
                 </thead>
                 <tbody>
                   {(rateData.topRates || []).map((r: any, i: number) => (
-                    <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
+                    <tr key={i} className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer"
+                      onClick={() => setSelectedRate(selectedRate === i ? null : i)}>
                       <td className="py-2 px-3 font-medium text-gray-900">{r.skill}</td>
                       <td className="py-2 px-3 text-gray-500 truncate max-w-[120px]">{r.location}</td>
                       <td className="py-2 px-3"><span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
@@ -722,6 +793,15 @@ export default function ClosureEnginePage() {
               </table>
             </div>
           </div>
+
+          {selectedRate !== null && rateData.topRates?.[selectedRate] && (
+            <StaticDrillDownModal
+              title={`Rate Card: ${rateData.topRates[selectedRate].skill}`}
+              description={`${rateData.topRates[selectedRate].location} · ${rateData.topRates[selectedRate].employment_type}`}
+              rows={[rateData.topRates[selectedRate]]}
+              onClose={() => setSelectedRate(null)}
+            />
+          )}
         </div>
       )}
 
@@ -767,22 +847,30 @@ export default function ClosureEnginePage() {
             <div className="rounded-xl border bg-white p-4">
               <h3 className="font-semibold text-gray-900 mb-3">Submission Stats (Training Data)</h3>
               <div className="grid grid-cols-4 gap-4 text-center">
-                <div className="rounded-lg bg-gray-50 p-3">
-                  <p className="text-xl font-bold">{fmt(modelData.submissionStats.total)}</p>
-                  <p className="text-[10px] text-gray-500">Total</p>
-                </div>
-                <div className="rounded-lg bg-blue-50 p-3">
-                  <p className="text-xl font-bold text-blue-700">{fmt(modelData.submissionStats.interviews)}</p>
-                  <p className="text-[10px] text-blue-500">Interviews</p>
-                </div>
-                <div className="rounded-lg bg-green-50 p-3">
-                  <p className="text-xl font-bold text-green-700">{fmt(modelData.submissionStats.offers)}</p>
-                  <p className="text-[10px] text-green-500">Offers</p>
-                </div>
-                <div className="rounded-lg bg-red-50 p-3">
-                  <p className="text-xl font-bold text-red-700">{fmt(modelData.submissionStats.rejections)}</p>
-                  <p className="text-[10px] text-red-500">Rejections</p>
-                </div>
+                <ClickableMetric metric="submissions">
+                  <div className="rounded-lg bg-gray-50 p-3">
+                    <p className="text-xl font-bold">{fmt(modelData.submissionStats.total)}</p>
+                    <p className="text-[10px] text-gray-500">Total</p>
+                  </div>
+                </ClickableMetric>
+                <ClickableMetric metric="todayInterviews">
+                  <div className="rounded-lg bg-blue-50 p-3">
+                    <p className="text-xl font-bold text-blue-700">{fmt(modelData.submissionStats.interviews)}</p>
+                    <p className="text-[10px] text-blue-500">Interviews</p>
+                  </div>
+                </ClickableMetric>
+                <ClickableMetric metric="placements">
+                  <div className="rounded-lg bg-green-50 p-3">
+                    <p className="text-xl font-bold text-green-700">{fmt(modelData.submissionStats.offers)}</p>
+                    <p className="text-[10px] text-green-500">Offers</p>
+                  </div>
+                </ClickableMetric>
+                <ClickableMetric metric="closures">
+                  <div className="rounded-lg bg-red-50 p-3">
+                    <p className="text-xl font-bold text-red-700">{fmt(modelData.submissionStats.rejections)}</p>
+                    <p className="text-[10px] text-red-500">Rejections</p>
+                  </div>
+                </ClickableMetric>
               </div>
             </div>
           )}

@@ -981,6 +981,288 @@ export class AiAgentsService {
           }),
         };
 
+      // ── Command Center & Closure Engine metrics ──
+      case 'activeJobs':
+      case 'openJobs':
+        return {
+          title: 'Active Job Openings',
+          description: 'All currently active job requisitions',
+          rows: await this.prisma.job.findMany({
+            where: { tenantId, status: 'ACTIVE' },
+            select: { id: true, title: true, location: true, status: true, skills: true, createdAt: true,
+              vendor: { select: { companyName: true, trustScore: true } } },
+            orderBy: { createdAt: 'desc' },
+            take,
+          }),
+        };
+
+      case 'allVendors':
+      case 'vendorList':
+        return {
+          title: 'All Vendors',
+          description: 'Complete vendor list with trust scores',
+          rows: await this.prisma.vendor.findMany({
+            where: { tenantId },
+            select: { id: true, companyName: true, domain: true, trustScore: true, contactName: true, contactEmail: true, createdAt: true },
+            orderBy: { trustScore: 'desc' },
+            take,
+          }),
+        };
+
+      case 'allConsultants':
+      case 'consultantList':
+        return {
+          title: 'All Consultants',
+          description: 'Complete consultant roster',
+          rows: await this.prisma.consultant.findMany({
+            where: { tenantId },
+            select: { id: true, firstName: true, lastName: true, email: true, phone: true, skills: true, readiness: true, desiredRate: true, qualityScore: true, createdAt: true },
+            orderBy: [{ readiness: 'asc' }, { qualityScore: 'desc' }],
+            take,
+          }),
+        };
+
+      case 'submissionsByStatus':
+        return {
+          title: 'Submissions by Status',
+          description: 'Grouped submission counts',
+          rows: await this.prisma.$queryRaw`
+            SELECT status, COUNT(*)::int as count,
+              MAX("createdAt") as "lastCreated"
+            FROM "Submission" WHERE "tenantId" = ${tenantId}
+            GROUP BY status ORDER BY count DESC
+          `,
+        };
+
+      case 'todaySubmissions':
+        return {
+          title: "Today's Submissions",
+          description: 'Submissions created today',
+          rows: await this.prisma.submission.findMany({
+            where: { tenantId, createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) } },
+            select: { id: true, status: true, createdAt: true, sentAt: true,
+              consultant: { select: { firstName: true, lastName: true } },
+              job: { select: { title: true, vendor: { select: { companyName: true } } } } },
+            orderBy: { createdAt: 'desc' },
+            take,
+          }),
+        };
+
+      case 'todayInterviews':
+        return {
+          title: "Today's Interviews",
+          description: 'Interviews scheduled for today',
+          rows: await this.prisma.interview.findMany({
+            where: { tenantId, scheduledAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)), lt: new Date(new Date().setHours(23, 59, 59)) } },
+            select: { id: true, status: true, scheduledAt: true, interviewType: true,
+              submission: { select: { consultant: { select: { firstName: true, lastName: true } }, job: { select: { title: true } } } } },
+            orderBy: { scheduledAt: 'asc' },
+            take,
+          }),
+        };
+
+      case 'placements':
+        return {
+          title: 'All Placements',
+          description: 'Active and past placements',
+          rows: await this.prisma.placement.findMany({
+            where: { tenantId },
+            select: { id: true, startDate: true, endDate: true, billRate: true, payRate: true, status: true,
+              consultant: { select: { firstName: true, lastName: true } },
+              job: { select: { title: true } } },
+            orderBy: { startDate: 'desc' },
+            take,
+          }),
+        };
+
+      case 'accounts':
+        return {
+          title: 'Client Accounts (Vendors)',
+          description: 'Vendor accounts acting as client relationships',
+          rows: await this.prisma.vendor.findMany({
+            where: { tenantId },
+            select: { id: true, companyName: true, domain: true, trustScore: true, contactName: true, contactEmail: true, createdAt: true },
+            orderBy: { companyName: 'asc' },
+            take,
+          }),
+        };
+
+      case 'timesheets':
+        return {
+          title: 'Timesheets',
+          description: 'All submitted timesheets',
+          rows: await this.prisma.timesheet.findMany({
+            where: { tenantId },
+            select: { id: true, weekEnding: true, hoursRegular: true, hoursOvertime: true, status: true,
+              consultant: { select: { firstName: true, lastName: true } } },
+            orderBy: { weekEnding: 'desc' },
+            take,
+          }),
+        };
+
+      case 'rateCards':
+        return {
+          title: 'Rate Cards',
+          description: 'Active rate cards and margin analysis',
+          rows: await this.prisma.rateCard.findMany({
+            where: { tenantId },
+            select: { id: true, billRate: true, payRate: true, netMarginHr: true, marginSafe: true, createdAt: true },
+            orderBy: { createdAt: 'desc' },
+            take,
+          }),
+        };
+
+      case 'autoSubmitQueue':
+      case 'queueItems':
+        return {
+          title: 'Auto-Submit Queue',
+          description: 'Current auto-submit queue items',
+          rows: await this.prisma.autoSubmitQueueItem.findMany({
+            where: { tenantId },
+            select: { id: true, reqTitle: true, reqLocation: true, reqRate: true, vendorName: true, consultantName: true, matchScore: true, status: true, sourcingLane: true, createdAt: true },
+            orderBy: { createdAt: 'desc' },
+            take,
+          }),
+        };
+
+      case 'vendorReqSignals':
+      case 'emailReqs':
+        return {
+          title: 'Vendor Req Signals (Email)',
+          description: 'Job requirements extracted from emails',
+          rows: await this.prisma.$queryRaw`
+            SELECT vrs.id, vrs.title, vrs.location, vrs."rateText" as rate, vrs."employmentType" as employment,
+              vrs."actionabilityScore" as score, vc.name as vendor, vrs."createdAt" as posted
+            FROM "VendorReqSignal" vrs
+            LEFT JOIN "ExtractedVendorCompany" vc ON vc.id = vrs."vendorCompanyId"
+            WHERE vrs.title IS NOT NULL
+            ORDER BY vrs."createdAt" DESC LIMIT ${take}
+          `,
+        };
+
+      case 'marketJobs':
+        return {
+          title: 'Market Jobs',
+          description: 'Jobs from external market sources',
+          rows: await this.prisma.marketJob.findMany({
+            select: { id: true, title: true, company: true, location: true, rateMin: true, rateMax: true, source: true, postedAt: true, applyUrl: true },
+            orderBy: { postedAt: 'desc' },
+            take,
+          }),
+        };
+
+      case 'emailMessages':
+        return {
+          title: 'Recent Email Messages',
+          description: 'Latest synced email messages',
+          rows: await this.prisma.rawEmailMessage.findMany({
+            select: { id: true, fromEmail: true, subject: true, sentAt: true, category: true, processed: true },
+            orderBy: { sentAt: 'desc' },
+            take,
+          }),
+        };
+
+      case 'vendorContacts':
+        return {
+          title: 'Vendor Contacts',
+          description: 'Extracted vendor contact information',
+          rows: await this.prisma.$queryRaw`
+            SELECT vct.id, vct.name, vct.email, vct.phone, vct.title as "jobTitle",
+              vc.name as "company", vc.domain
+            FROM "ExtractedVendorContact" vct
+            LEFT JOIN "ExtractedVendorCompany" vc ON vc.id = vct."vendorCompanyId"
+            ORDER BY vct."createdAt" DESC LIMIT ${take}
+          `,
+        };
+
+      case 'vendorCompanies':
+        return {
+          title: 'Extracted Vendor Companies',
+          description: 'Companies discovered from email patterns',
+          rows: await this.prisma.$queryRaw`
+            SELECT vc.id, vc.name, vc.domain,
+              (SELECT COUNT(*)::int FROM "ExtractedVendorContact" vct WHERE vct."vendorCompanyId" = vc.id) as "contacts",
+              (SELECT COUNT(*)::int FROM "VendorReqSignal" vrs WHERE vrs."vendorCompanyId" = vc.id) as "reqs",
+              COALESCE(v."trustScore", 0) as "trustScore"
+            FROM "ExtractedVendorCompany" vc
+            LEFT JOIN "Vendor" v ON v.domain = vc.domain
+            WHERE vc.name NOT LIKE '[SYSTEM]%'
+            ORDER BY (SELECT COUNT(*) FROM "VendorReqSignal" vrs WHERE vrs."vendorCompanyId" = vc.id) DESC
+            LIMIT ${take}
+          `,
+        };
+
+      case 'consentRecords':
+        return {
+          title: 'Consent Records',
+          description: 'Submission consent ledger',
+          rows: await this.prisma.consentRecord.findMany({
+            where: { tenantId },
+            select: { id: true, consentType: true, vendorName: true, jobTitle: true, rateSubmitted: true, consentGivenAt: true,
+              consultant: { select: { firstName: true, lastName: true } } },
+            orderBy: { consentGivenAt: 'desc' },
+            take,
+          }),
+        };
+
+      case 'matchQuality':
+        return {
+          title: 'Match Quality Analysis',
+          description: 'Recent auto-submit match scores',
+          rows: await this.prisma.autoSubmitQueueItem.findMany({
+            where: { tenantId },
+            select: { id: true, reqTitle: true, consultantName: true, matchScore: true, matchReasons: true, vendorName: true, vendorTrustScore: true, status: true },
+            orderBy: { matchScore: 'desc' },
+            take,
+          }),
+        };
+
+      case 'followups':
+        return {
+          title: 'All Follow-ups',
+          description: 'Submission follow-up schedule and status',
+          rows: await this.prisma.submissionFollowup.findMany({
+            include: { submission: { select: { id: true, sentSubject: true, sentTo: true, consultant: { select: { firstName: true, lastName: true } } } } },
+            orderBy: { scheduledAt: 'desc' },
+            take,
+          }),
+        };
+
+      case 'submissionEvents':
+        return {
+          title: 'Submission Events',
+          description: 'Activity log across all submissions',
+          rows: await this.prisma.submissionEvent.findMany({
+            select: { id: true, eventType: true, actor: true, details: true, createdAt: true,
+              submission: { select: { id: true, consultant: { select: { firstName: true, lastName: true } } } } },
+            orderBy: { createdAt: 'desc' },
+            take,
+          }),
+        };
+
+      case 'vendorFeedback':
+        return {
+          title: 'Vendor Feedback Events',
+          description: 'Response patterns from vendors',
+          rows: await this.prisma.vendorFeedbackEvent.findMany({
+            select: { id: true, vendorDomain: true, feedbackType: true, details: true, createdAt: true },
+            orderBy: { createdAt: 'desc' },
+            take,
+          }),
+        };
+
+      case 'dailyScoreboard':
+        return {
+          title: 'Daily Scoreboard History',
+          description: 'Historical daily scoreboard data',
+          rows: await this.prisma.dailyScoreboard.findMany({
+            where: { tenantId },
+            select: { id: true, date: true, actualQualifiedReqs: true, actualSubmissions: true, actualInterviews: true, actualClosures: true, subToInterviewRate: true, podFocus: true, actionPlan: true },
+            orderBy: { date: 'desc' },
+            take,
+          }),
+        };
+
       default:
         return { title: metric, description: 'No drill-down data available for this metric', columns: [], rows: [] };
     }

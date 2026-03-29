@@ -22,6 +22,7 @@ import {
   SparklesIcon,
   ArrowPathIcon,
 } from '@heroicons/react/24/outline';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 
 type Tab = 'overview' | 'vendors' | 'consultants' | 'clients' | 'reqs' | 'skills';
 
@@ -152,6 +153,7 @@ function DetailPanel({ open, onClose, children }: {
 function OverviewTab({ onNavigate }: { onNavigate: (tab: Tab) => void }) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   useEffect(() => {
     api.get('/mail-intel/overview').then(setData).finally(() => setLoading(false));
@@ -163,11 +165,17 @@ function OverviewTab({ onNavigate }: { onNavigate: (tab: Tab) => void }) {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
-        <StatCard label="Total Emails" value={data.totalEmails} icon={EnvelopeIcon} color="indigo" />
-        <StatCard label="Unique Senders" value={data.uniqueSenders} icon={UserGroupIcon} color="blue" />
+        <ClickableMetric metric="emailMessages">
+          <StatCard label="Total Emails" value={data.totalEmails} icon={EnvelopeIcon} color="indigo" />
+        </ClickableMetric>
+        <ClickableMetric metric="vendorContacts">
+          <StatCard label="Unique Senders" value={data.uniqueSenders} icon={UserGroupIcon} color="blue" />
+        </ClickableMetric>
         <StatCard label="Vendor Companies" value={data.vendorCompanies} icon={BuildingOfficeIcon} color="green"
           onClick={() => onNavigate('vendors')} />
-        <StatCard label="Vendor Contacts" value={data.vendorContacts} icon={UserIcon} color="purple" />
+        <ClickableMetric metric="vendorContacts">
+          <StatCard label="Vendor Contacts" value={data.vendorContacts} icon={UserIcon} color="purple" />
+        </ClickableMetric>
         <StatCard label="Consultants" value={data.consultants} icon={UserGroupIcon} color="amber"
           onClick={() => onNavigate('consultants')} />
         <StatCard label="Req Signals" value={data.reqSignals} icon={BriefcaseIcon} color="rose"
@@ -184,7 +192,7 @@ function OverviewTab({ onNavigate }: { onNavigate: (tab: Tab) => void }) {
         </div>
         <div className="space-y-3">
           {data.latestReqs?.slice(0, 10).map((r: any) => (
-            <div key={r.id} className="flex items-start justify-between rounded-lg border px-4 py-3 hover:bg-gray-50">
+            <div key={r.id} className="flex items-start justify-between rounded-lg border px-4 py-3 cursor-pointer hover:bg-indigo-50 transition-colors" onClick={() => setSelectedRow(r)}>
               <div className="flex-1">
                 <p className="font-medium text-gray-900">{r.title || 'Untitled'}</p>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
@@ -263,10 +271,20 @@ function OverviewTab({ onNavigate }: { onNavigate: (tab: Tab) => void }) {
           <div className="grid grid-cols-2 gap-4">
             <StatCard label="Client Companies" value={data.clientCompanies} icon={BuildingOfficeIcon} color="purple"
               onClick={() => onNavigate('clients')} />
-            <StatCard label="Client Contacts" value={data.clientContacts} icon={UserIcon} color="purple" />
+            <ClickableMetric metric="vendorContacts">
+              <StatCard label="Client Contacts" value={data.clientContacts} icon={UserIcon} color="purple" />
+            </ClickableMetric>
           </div>
         </div>
       </div>
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title={selectedRow.title || selectedRow.vendorName || 'Details'}
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
+      )}
     </div>
   );
 }
@@ -682,6 +700,7 @@ function ReqSignalsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
   const [loading, setLoading] = useState(true);
   const [matchPanel, setMatchPanel] = useState<any>(null);
   const [matchLoading, setMatchLoading] = useState(false);
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -729,7 +748,7 @@ function ReqSignalsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
           <p className="text-sm text-gray-500">{fmtNum(data?.pagination?.total || 0)} req signals found</p>
           <div className="space-y-3">
             {data?.data?.map((r: any) => (
-              <div key={r.id} className="rounded-xl border bg-white p-4 hover:border-indigo-200 hover:shadow-sm transition-all">
+              <div key={r.id} className="rounded-xl border bg-white p-4 cursor-pointer hover:border-indigo-300 hover:shadow-md transition-all" onClick={() => setSelectedRow(r)}>
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <h4 className="font-medium text-gray-900">{r.title || 'Untitled Req'}</h4>
@@ -745,13 +764,13 @@ function ReqSignalsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
                       </div>
                     )}
                     <div className="mt-2 flex gap-2">
-                      <button onClick={() => showMatches(r.id)}
+                      <button onClick={(e) => { e.stopPropagation(); showMatches(r.id); }}
                         className="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100">
                         <SparklesIcon className="h-3 w-3" /> Find Matches
                       </button>
                     </div>
                   </div>
-                  <div className="ml-4 text-right">
+                  <div className="ml-4 text-right" onClick={(e) => e.stopPropagation()}>
                     {r.vendorName && <p className="text-xs font-medium text-indigo-600">{r.vendorName}</p>}
                     {r.contactEmail && <a href={r.contactEmail.startsWith('http') ? r.contactEmail : `mailto:${r.contactEmail}`} target={r.contactEmail.startsWith('http') ? '_blank' : undefined} rel={r.contactEmail.startsWith('http') ? 'noopener noreferrer' : undefined} className="text-xs text-indigo-600 hover:underline block">{r.contactEmail.startsWith('http') ? 'View Posting' : r.contactEmail}</a>}
                     {r.contactName && <p className="text-xs text-gray-500">{r.contactName}</p>}
@@ -762,6 +781,14 @@ function ReqSignalsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
           </div>
           <Pagination page={page} totalPages={data?.pagination?.totalPages || 1} total={data?.pagination?.total || 0} onPageChange={setPage} />
         </>
+      )}
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title={selectedRow.title || selectedRow.vendorName || 'Req Details'}
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
       )}
 
       <DetailPanel open={!!matchPanel || matchLoading} onClose={() => setMatchPanel(null)}>

@@ -28,7 +28,9 @@ import {
   UserIcon,
   MagnifyingGlassIcon,
   FunnelIcon,
+  EyeIcon,
 } from '@heroicons/react/24/outline';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 
 function ScoreBadge({ score, label }: { score: number | null; label?: string }) {
   if (score == null) return null;
@@ -95,6 +97,7 @@ export default function StrategyOpsPage() {
   const [matchLoading, setMatchLoading] = useState(false);
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [submitResult, setSubmitResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   // Auto-refresh
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
@@ -333,20 +336,32 @@ export default function StrategyOpsPage() {
       {activeTab === 'overview' && overview && (
         <div className="space-y-6">
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <KpiCard title="Total Req Signals" value={overview.pipeline?.totalSignals?.toLocaleString() || '0'} subtitle="from email extraction" icon={SignalIcon} />
-            <KpiCard title="Premium Signals" value={`${overview.pipeline?.premiumSignals?.toLocaleString() || '0'} (${overview.pipeline?.premiumPct}%)`} subtitle="AI/ML, MLOps, Data Eng" icon={SparklesIcon} />
-            <KpiCard title="Prime Vendors" value={`${overview.vendors?.prime || 0} / ${overview.vendors?.total || 0}`} subtitle="PRIME + DIRECT tier" icon={BuildingOfficeIcon} />
-            <KpiCard title="Ready Consultants" value={`${overview.supply?.ready || 0} / ${overview.supply?.total || 0}`} subtitle="SUBMISSION_READY + VERIFIED" icon={UserGroupIcon} />
+            <ClickableMetric metric="vendorReqSignals">
+              <KpiCard title="Total Req Signals" value={overview.pipeline?.totalSignals?.toLocaleString() || '0'} subtitle="from email extraction" icon={SignalIcon} />
+            </ClickableMetric>
+            <ClickableMetric metric="qualityReqs">
+              <KpiCard title="Premium Signals" value={`${overview.pipeline?.premiumSignals?.toLocaleString() || '0'} (${overview.pipeline?.premiumPct}%)`} subtitle="AI/ML, MLOps, Data Eng" icon={SparklesIcon} />
+            </ClickableMetric>
+            <ClickableMetric metric="vendorCompanies">
+              <KpiCard title="Prime Vendors" value={`${overview.vendors?.prime || 0} / ${overview.vendors?.total || 0}`} subtitle="PRIME + DIRECT tier" icon={BuildingOfficeIcon} />
+            </ClickableMetric>
+            <ClickableMetric metric="allConsultants">
+              <KpiCard title="Ready Consultants" value={`${overview.supply?.ready || 0} / ${overview.supply?.total || 0}`} subtitle="SUBMISSION_READY + VERIFIED" icon={UserGroupIcon} />
+            </ClickableMetric>
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <KpiCard title="Submissions (30d)" value={String(overview.submissions?.last30d || 0)} subtitle={`${overview.submissions?.total || 0} lifetime`} icon={CurrencyDollarIcon} />
-            <KpiCard
-              title="Tech Tiers Configured"
-              value={String(overview.configuration?.techTiers || 0)}
-              subtitle={`${overview.configuration?.optEmployers || 0} OPT employers indexed`}
-              icon={AcademicCapIcon}
-            />
+            <ClickableMetric metric="submissions">
+              <KpiCard title="Submissions (30d)" value={String(overview.submissions?.last30d || 0)} subtitle={`${overview.submissions?.total || 0} lifetime`} icon={CurrencyDollarIcon} />
+            </ClickableMetric>
+            <ClickableMetric metric="vendorReqSignals">
+              <KpiCard
+                title="Tech Tiers Configured"
+                value={String(overview.configuration?.techTiers || 0)}
+                subtitle={`${overview.configuration?.optEmployers || 0} OPT employers indexed`}
+                icon={AcademicCapIcon}
+              />
+            </ClickableMetric>
           </div>
 
           {/* Conversion Funnel */}
@@ -471,7 +486,7 @@ export default function StrategyOpsPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-50">
                     {lanePerf.vendorTiers.map((vt: any) => (
-                      <tr key={vt.tier} className="text-gray-700">
+                      <tr key={vt.tier} className="text-gray-700 cursor-pointer hover:bg-indigo-50 transition-colors" onClick={() => setSelectedRow(vt)}>
                         <td className="py-2.5 pr-4"><TierBadge tier={vt.tier} /></td>
                         <td className="py-2.5 pr-4 font-medium">{vt.count}</td>
                         <td className="py-2.5 pr-4"><ScoreBadge score={vt.avgTrust} /></td>
@@ -513,6 +528,7 @@ export default function StrategyOpsPage() {
                     <th className="px-4 py-3">Live Reqs (30d)</th>
                     <th className="px-4 py-3">Week Reqs</th>
                     <th className="px-4 py-3">Avg Actionability</th>
+                    <th className="w-8 px-2 py-3" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -570,12 +586,15 @@ export default function StrategyOpsPage() {
                           </td>
                           <td className="px-4 py-3 text-gray-700">{t.liveMetrics?.weekReqs ?? 0}</td>
                           <td className="px-4 py-3"><ScoreBadge score={t.liveMetrics?.avgActionability} /></td>
+                          <td className="px-2 py-3 text-center">
+                            <button onClick={(e) => { e.stopPropagation(); setSelectedRow(t); }} className="rounded p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50" title="View Details"><EyeIcon className="h-3.5 w-3.5" /></button>
+                          </td>
                         </tr>
 
                         {/* EXPANDED: Req signals for this family */}
                         {isExpanded && (
                           <tr>
-                            <td colSpan={9} className="bg-gray-50/70 px-4 py-0">
+                            <td colSpan={10} className="bg-gray-50/70 px-4 py-0">
                               <div className="py-4">
                                 {/* ── Filter Bar ── */}
                                 <div className="mb-4 rounded-lg border border-gray-200 bg-white p-3" onClick={(e) => e.stopPropagation()}>
@@ -817,7 +836,7 @@ export default function StrategyOpsPage() {
             ) : (
               <div className="space-y-3">
                 {supplyDemand.demand.map((d: any) => (
-                  <div key={d.family} className="flex items-center gap-4">
+                  <div key={d.family} className="flex items-center gap-4 cursor-pointer hover:bg-indigo-50 rounded-lg px-2 py-1 -mx-2 transition-colors" onClick={() => setSelectedRow(d)}>
                     <span className="w-36 shrink-0 text-sm font-medium text-gray-700">{d.family || 'OTHER'}</span>
                     <div className="flex-1">
                       <ProgressBar value={d.recentReqs || 0} max={Math.max(...supplyDemand.demand.map((x: any) => x.recentReqs || 1))} color="bg-blue-500" />
@@ -844,7 +863,7 @@ export default function StrategyOpsPage() {
             ) : (
               <div className="space-y-3">
                 {supplyDemand.supply.map((s: any) => (
-                  <div key={s.family} className="flex items-center gap-4">
+                  <div key={s.family} className="flex items-center gap-4 cursor-pointer hover:bg-indigo-50 rounded-lg px-2 py-1 -mx-2 transition-colors" onClick={() => setSelectedRow(s)}>
                     <span className="w-36 shrink-0 text-sm font-medium text-gray-700">{s.family || 'UNASSIGNED'}</span>
                     <div className="flex-1">
                       <ProgressBar value={s.readyConsultants || 0} max={Math.max(...supplyDemand.supply.map((x: any) => x.readyConsultants || 1), 1)} color="bg-emerald-500" />
@@ -880,7 +899,7 @@ export default function StrategyOpsPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-50">
                     {supplyDemand.lanePerformance.map((lp: any) => (
-                      <tr key={lp.lane} className="text-gray-700">
+                      <tr key={lp.lane} className="text-gray-700 cursor-pointer hover:bg-indigo-50 transition-colors" onClick={() => setSelectedRow(lp)}>
                         <td className="py-2.5 pr-4"><LaneBadge lane={lp.lane} /></td>
                         <td className="py-2.5 pr-4 font-medium">{lp.queuedItems}</td>
                         <td className="py-2.5 pr-4">{lp.sentItems}</td>
@@ -894,6 +913,14 @@ export default function StrategyOpsPage() {
             </div>
           )}
         </div>
+      )}
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title={selectedRow.technologyFamily || selectedRow.tier || selectedRow.family || selectedRow.lane || 'Details'}
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
       )}
 
       {/* ═══ REQ DETAIL + APPLY MODAL ═══ */}

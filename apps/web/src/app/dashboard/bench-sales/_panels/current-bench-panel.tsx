@@ -172,14 +172,34 @@ export default function CurrentBenchPanel() {
         if (sort) params.set('sort', sort);
 
         const result = await api.get<{
-          data: BenchConsultant[];
+          items: Array<{
+            id: string;
+            firstName: string;
+            lastName: string;
+            email: string;
+            phone: string | null;
+            skills: string[];
+            desiredRate: number | null;
+            availableFrom: string | null;
+            benchStatus: string;
+            readinessScore: number | null;
+            visa: string | null;
+            aiRun: AiRunInfo | null;
+            createdAt: string;
+          }>;
           total: number;
           page: number;
           pageSize: number;
           totalPages: number;
         }>(`/bench-intake/current-bench?${params.toString()}`);
 
-        setConsultants(result.data);
+        setConsultants(
+          result.items.map((c) => ({
+            ...c,
+            visaType: c.visa,
+            latestAiRun: c.aiRun,
+          })),
+        );
         setPagination({
           page: result.page,
           pageSize: result.pageSize,
@@ -280,8 +300,8 @@ export default function CurrentBenchPanel() {
           onChange={setSort}
           options={[
             { value: 'newest', label: 'Newest First' },
-            { value: 'readiness', label: 'Highest Readiness' },
-            { value: 'name', label: 'Name A-Z' },
+            { value: 'readiness-desc', label: 'Highest Readiness' },
+            { value: 'name-asc', label: 'Name A-Z' },
           ]}
         />
       </div>

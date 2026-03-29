@@ -14,7 +14,9 @@ import {
   EnvelopeIcon,
   UserIcon,
   CheckBadgeIcon,
+  InformationCircleIcon,
 } from '@heroicons/react/24/outline';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 
 interface VendorReq {
   id: string;
@@ -109,6 +111,7 @@ export default function VendorReqsPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedReq, setSelectedReq] = useState<VendorReq | null>(null);
+  const [drillDownRow, setDrillDownRow] = useState<any>(null);
 
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('ALL');
@@ -164,10 +167,10 @@ export default function VendorReqsPage() {
       {/* Stats Bar */}
       {stats && (
         <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatCard label="New" value={String(stats.new)} accent />
-          <StatCard label="Reviewed" value={String(stats.reviewed)} />
-          <StatCard label="Converted" value={String(stats.converted)} />
-          <StatCard label="Total" value={String(stats.total)} />
+          <ClickableMetric metric="vendorReqSignals"><StatCard label="New" value={String(stats.new)} accent /></ClickableMetric>
+          <ClickableMetric metric="vendorReqSignals"><StatCard label="Reviewed" value={String(stats.reviewed)} /></ClickableMetric>
+          <ClickableMetric metric="vendorReqSignals"><StatCard label="Converted" value={String(stats.converted)} /></ClickableMetric>
+          <ClickableMetric metric="vendorReqSignals"><StatCard label="Total" value={String(stats.total)} /></ClickableMetric>
         </div>
       )}
 
@@ -272,6 +275,13 @@ export default function VendorReqsPage() {
                       </span>
                     </div>
                   </div>
+                  <span
+                    onClick={(e) => { e.stopPropagation(); setDrillDownRow(req); }}
+                    className="shrink-0 inline-flex items-center cursor-pointer rounded p-0.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                    title="View full data"
+                  >
+                    <InformationCircleIcon className="h-4 w-4" />
+                  </span>
                 </div>
               </button>
             ))
@@ -328,6 +338,14 @@ export default function VendorReqsPage() {
           )}
         </div>
       </div>
+
+      {drillDownRow && (
+        <StaticDrillDownModal
+          title={drillDownRow.subject || drillDownRow.title || 'Vendor Req Details'}
+          rows={[drillDownRow]}
+          onClose={() => setDrillDownRow(null)}
+        />
+      )}
     </>
   );
 }

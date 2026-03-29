@@ -123,6 +123,44 @@ const ALL_STEPS = [
   'LINKEDIN_PREP', 'SALES_STRATEGY', 'JOB_SEARCH', 'GM_STRATEGIST',
 ];
 
+const AI_OUTPUT_STYLES = `
+.ai-content .ai-output { font-family: system-ui, sans-serif; }
+.ai-content h3 { font-size: 1.25rem; font-weight: 700; color: #1e293b; margin-bottom: 1rem; }
+.ai-content h4 { font-size: 0.95rem; font-weight: 600; color: #334155; margin: 1.25rem 0 0.5rem; }
+.ai-content h5 { font-size: 0.85rem; font-weight: 600; color: #475569; margin: 0.75rem 0 0.25rem; }
+.ai-content .section { margin-bottom: 1.25rem; padding-bottom: 1rem; border-bottom: 1px solid #f1f5f9; }
+.ai-content .section:last-child { border-bottom: none; }
+.ai-content .skill-tag, .ai-content .skill-pill, .ai-content .keyword-tag, .ai-content .industry-tag {
+  display: inline-block; padding: 2px 10px; margin: 2px 4px 2px 0; border-radius: 9999px;
+  font-size: 0.75rem; font-weight: 500; background: #e0e7ff; color: #3730a3;
+}
+.ai-content .priority-high { color: #dc2626; font-weight: 700; }
+.ai-content .priority-medium { color: #d97706; font-weight: 600; }
+.ai-content .priority-low { color: #16a34a; font-weight: 500; }
+.ai-content table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.ai-content th { text-align: left; padding: 8px 12px; background: #f8fafc; border-bottom: 2px solid #e2e8f0; font-weight: 600; color: #475569; }
+.ai-content td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; }
+.ai-content blockquote { border-left: 3px solid #6366f1; padding-left: 1rem; margin: 0.75rem 0; color: #475569; font-style: italic; }
+.ai-content .coaching-tip { background: #f8fafc; border-radius: 0.5rem; padding: 0.75rem 1rem; margin-bottom: 0.5rem; }
+.ai-content .objection { background: #fffbeb; border-radius: 0.5rem; padding: 0.75rem 1rem; margin-bottom: 0.5rem; border-left: 3px solid #f59e0b; }
+.ai-content .score-hero { text-align: center; padding: 1.5rem; }
+.ai-content .score-circle { display: inline-block; }
+.ai-content .score-value { font-size: 3rem; font-weight: 800; color: #4f46e5; }
+.ai-content .score-label { font-size: 1.25rem; color: #94a3b8; }
+.ai-content .score-status { font-size: 1rem; font-weight: 600; color: #475569; margin-top: 0.5rem; }
+.ai-content .resume-header { text-align: center; margin-bottom: 1rem; }
+.ai-content .resume-header h2 { font-size: 1.5rem; color: #1e293b; }
+.ai-content .resume-header .subtitle { color: #6366f1; font-weight: 500; }
+.ai-content .score-bar { position: relative; height: 1.5rem; background: #e2e8f0; border-radius: 0.5rem; overflow: hidden; }
+.ai-content .score-fill { height: 100%; background: linear-gradient(90deg, #6366f1, #8b5cf6); border-radius: 0.5rem; }
+.ai-content .score-bar span { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-weight: 700; font-size: 0.75rem; }
+.ai-content .work-entry { margin-bottom: 0.75rem; }
+.ai-content .study-plan .week { padding: 0.5rem 0; border-bottom: 1px solid #f1f5f9; }
+.ai-content .positioning { font-size: 1rem; color: #1e293b; font-weight: 500; line-height: 1.6; }
+.ai-content .linkedin-headline { font-size: 1.1rem; color: #0369a1; font-weight: 600; }
+.ai-content .assessment { font-size: 0.95rem; color: #1e293b; font-weight: 500; background: #f0fdf4; padding: 0.75rem; border-radius: 0.5rem; }
+`;
+
 type TabKey =
   | 'overview'
   | 'RESUME_PARSING'
@@ -187,8 +225,66 @@ export default function BenchConsultantDetailPage() {
 
   const fetchConsultant = useCallback(async () => {
     try {
-      const data = await api.get<BenchConsultantDetail>(`/bench-intake/consultant/${id}`);
-      setConsultant(data);
+      const raw = await api.get<any>(`/bench-intake/consultant/${id}`);
+      // Map raw Prisma response to our interface
+      const latestRun = raw.aiRuns?.[0] ?? null;
+      const mapped: BenchConsultantDetail = {
+        id: raw.id,
+        firstName: raw.firstName,
+        lastName: raw.lastName,
+        email: raw.email,
+        phone: raw.phone,
+        skills: Array.isArray(raw.skills) ? raw.skills : [],
+        desiredRate: raw.desiredRate,
+        availableFrom: raw.availableFrom,
+        benchStatus: raw.benchStatus ?? 'NEW',
+        readinessScore: raw.readinessScore,
+        visaType: raw.workAuths?.[0]?.authType ?? null,
+        qualityScore: raw.qualityScore,
+        readiness: raw.readiness,
+        createdAt: raw.createdAt,
+        latestAiRun: latestRun
+          ? {
+              id: latestRun.id,
+              status: latestRun.status,
+              currentStep: latestRun.currentStep,
+              stepsCompleted: latestRun.stepsCompleted,
+              totalSteps: latestRun.totalSteps,
+              readinessScore: latestRun.readinessScore,
+              errorMessage: latestRun.errorMessage,
+              startedAt: latestRun.startedAt,
+              completedAt: latestRun.completedAt,
+              outputs: (latestRun.outputs ?? []).map((o: any) => ({
+                id: o.id,
+                step: o.step,
+                status: o.status,
+                output: o.output ?? {},
+                htmlContent: o.htmlContent,
+                tokensUsed: o.tokensUsed,
+                durationMs: o.durationMs,
+                errorMessage: o.errorMessage,
+                createdAt: o.createdAt,
+              })),
+            }
+          : null,
+        documents: (raw.documents ?? []).map((d: any) => ({
+          id: d.id,
+          docType: d.docType,
+          fileName: d.fileName,
+          fileUrl: d.fileUrl,
+          mimeType: d.mimeType,
+          createdAt: d.createdAt,
+        })),
+        activities: (raw.activities ?? []).map((a: any) => ({
+          id: a.id,
+          activityType: a.activityType,
+          title: a.title,
+          description: a.description,
+          createdBy: a.createdBy,
+          createdAt: a.createdAt,
+        })),
+      };
+      setConsultant(mapped);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load consultant');
     } finally {
@@ -591,8 +687,9 @@ function AiStepTab({ step, output }: { step: string; output: AiOutput | null }) 
       {/* HTML content */}
       {output.htmlContent && (
         <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+          <style dangerouslySetInnerHTML={{ __html: AI_OUTPUT_STYLES }} />
           <div
-            className="prose prose-sm max-w-none p-6"
+            className="ai-content prose prose-sm max-w-none p-6"
             dangerouslySetInnerHTML={{ __html: output.htmlContent }}
           />
         </div>

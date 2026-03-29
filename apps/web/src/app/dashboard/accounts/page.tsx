@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/page-header';
 import { KpiCard } from '@/components/kpi-card';
 import { StatusBadge } from '@/components/status-badge';
 import { DataTable, type Column } from '@/components/data-table';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 import {
   BanknotesIcon,
   ClockIcon,
@@ -177,6 +178,7 @@ export default function AccountsPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -274,38 +276,46 @@ export default function AccountsPage() {
 
       {/* KPIs */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard
-          title="Outstanding AR"
-          value={formatCurrency(totalOutstanding)}
-          change={`${unpaidInvoices.length} invoices`}
-          changeType={totalOutstanding > 0 ? 'negative' : 'neutral'}
-          subtitle="unpaid"
-          icon={BanknotesIcon}
-        />
-        <KpiCard
-          title="Overdue Invoices"
-          value={formatCurrency(overdueTotal)}
-          change={`${overdueCount} invoice${overdueCount !== 1 ? 's' : ''}`}
-          changeType={overdueCount > 0 ? 'negative' : 'neutral'}
-          subtitle="past due"
-          icon={ClockIcon}
-        />
-        <KpiCard
-          title="Total Revenue"
-          value={formatCurrency(totalRevenue)}
-          change={`${paidInvoices.length} paid`}
-          changeType={totalRevenue > 0 ? 'positive' : 'neutral'}
-          subtitle="collected"
-          icon={ChartBarIcon}
-        />
-        <KpiCard
-          title="Avg Days to Pay"
-          value={avgDaysToPay > 0 ? `${avgDaysToPay} days` : '—'}
-          change={paidInvoices.length > 0 ? `${paidInvoices.length} samples` : 'no data'}
-          changeType="neutral"
-          subtitle="sent → paid"
-          icon={BoltIcon}
-        />
+        <ClickableMetric metric="accounts">
+          <KpiCard
+            title="Outstanding AR"
+            value={formatCurrency(totalOutstanding)}
+            change={`${unpaidInvoices.length} invoices`}
+            changeType={totalOutstanding > 0 ? 'negative' : 'neutral'}
+            subtitle="unpaid"
+            icon={BanknotesIcon}
+          />
+        </ClickableMetric>
+        <ClickableMetric metric="timesheets">
+          <KpiCard
+            title="Overdue Invoices"
+            value={formatCurrency(overdueTotal)}
+            change={`${overdueCount} invoice${overdueCount !== 1 ? 's' : ''}`}
+            changeType={overdueCount > 0 ? 'negative' : 'neutral'}
+            subtitle="past due"
+            icon={ClockIcon}
+          />
+        </ClickableMetric>
+        <ClickableMetric metric="rateCards">
+          <KpiCard
+            title="Total Revenue"
+            value={formatCurrency(totalRevenue)}
+            change={`${paidInvoices.length} paid`}
+            changeType={totalRevenue > 0 ? 'positive' : 'neutral'}
+            subtitle="collected"
+            icon={ChartBarIcon}
+          />
+        </ClickableMetric>
+        <ClickableMetric metric="allConsultants">
+          <KpiCard
+            title="Avg Days to Pay"
+            value={avgDaysToPay > 0 ? `${avgDaysToPay} days` : '—'}
+            change={paidInvoices.length > 0 ? `${paidInvoices.length} samples` : 'no data'}
+            changeType="neutral"
+            subtitle="sent → paid"
+            icon={BoltIcon}
+          />
+        </ClickableMetric>
       </div>
 
       {/* AR Aging */}
@@ -401,8 +411,17 @@ export default function AccountsPage() {
           data={rows}
           keyField="id"
           emptyMessage="No invoices yet. Create your first invoice to get started."
+          onRowClick={(row) => setSelectedRow(row)}
         />
       </div>
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title="Invoice Details"
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
+      )}
     </>
   );
 }

@@ -25,7 +25,9 @@ import {
   ClipboardDocumentIcon,
   FunnelIcon,
   SparklesIcon,
+  EyeIcon,
 } from '@heroicons/react/24/outline';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 
 const SOURCE_COLORS: Record<string, string> = {
   'Email Intel': 'bg-violet-100 text-violet-700 border-violet-200',
@@ -143,6 +145,7 @@ export default function LiveFeedPage() {
   const [nextRefreshIn, setNextRefreshIn] = useState(60);
   const [extracting, setExtracting] = useState(false);
   const [extractResult, setExtractResult] = useState<string | null>(null);
+  const [selectedRow, setSelectedRow] = useState<any>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const countdownRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -356,14 +359,18 @@ export default function LiveFeedPage() {
       {/* Stats Bar — LinkedIn */}
       {activeTab === 'linkedin' && linkedinData?.summary && (
         <div className="grid grid-cols-2 sm:grid-cols-7 gap-3">
-          <div className="rounded-xl border-2 border-sky-200 bg-sky-50 p-3 text-center">
-            <p className="text-2xl font-bold text-sky-700">{linkedinData.summary.totalJobs}</p>
-            <p className="text-[10px] font-medium text-sky-600">Total LinkedIn</p>
-          </div>
-          <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 p-3 text-center">
-            <p className="text-2xl font-bold text-emerald-700">{linkedinData.summary.highConfidence}</p>
-            <p className="text-[10px] font-medium text-emerald-600">High Confidence</p>
-          </div>
+          <ClickableMetric metric="marketJobs">
+            <div className="rounded-xl border-2 border-sky-200 bg-sky-50 p-3 text-center">
+              <p className="text-2xl font-bold text-sky-700">{linkedinData.summary.totalJobs}</p>
+              <p className="text-[10px] font-medium text-sky-600">Total LinkedIn</p>
+            </div>
+          </ClickableMetric>
+          <ClickableMetric metric="qualityReqs">
+            <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 p-3 text-center">
+              <p className="text-2xl font-bold text-emerald-700">{linkedinData.summary.highConfidence}</p>
+              <p className="text-[10px] font-medium text-emerald-600">High Confidence</p>
+            </div>
+          </ClickableMetric>
           <button
             onClick={() => setVendorTierFilter(vendorTierFilter === 'prime_like' ? 'ALL' : 'prime_like')}
             className={`rounded-xl border-2 p-3 text-center transition-all ${vendorTierFilter === 'prime_like' ? 'border-emerald-400 ring-2 ring-emerald-200 bg-emerald-50' : 'border-emerald-200 bg-emerald-50 hover:border-emerald-300'}`}
@@ -392,10 +399,12 @@ export default function LiveFeedPage() {
             <p className="text-2xl font-bold text-amber-700">{linkedinData.summary.freshUnder24h}</p>
             <p className="text-[10px] font-medium text-amber-600">Fresh &lt;24h</p>
           </button>
-          <div className="rounded-xl border border-gray-200 bg-white p-3 text-center">
-            <p className="text-2xl font-bold text-gray-700">{fmt(filtered.length)}</p>
-            <p className="text-[10px] text-gray-500 font-medium">Showing</p>
-          </div>
+          <ClickableMetric metric="activeJobs">
+            <div className="rounded-xl border border-gray-200 bg-white p-3 text-center">
+              <p className="text-2xl font-bold text-gray-700">{fmt(filtered.length)}</p>
+              <p className="text-[10px] text-gray-500 font-medium">Showing</p>
+            </div>
+          </ClickableMetric>
         </div>
       )}
 
@@ -446,10 +455,12 @@ export default function LiveFeedPage() {
             <p className="text-2xl font-bold text-purple-700">{fmt(c2hCount)}</p>
             <p className="text-[10px] font-medium text-purple-600">C2H</p>
           </button>
-          <div className="rounded-xl border border-gray-200 bg-white p-3 text-center">
-            <p className="text-2xl font-bold text-gray-700">{fmt(filtered.length)}</p>
-            <p className="text-[10px] text-gray-500 font-medium">Showing</p>
-          </div>
+          <ClickableMetric metric="activeJobs">
+            <div className="rounded-xl border border-gray-200 bg-white p-3 text-center">
+              <p className="text-2xl font-bold text-gray-700">{fmt(filtered.length)}</p>
+              <p className="text-[10px] text-gray-500 font-medium">Showing</p>
+            </div>
+          </ClickableMetric>
         </div>
       ) : activeTab === 'highpaid' ? (
         <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
@@ -473,15 +484,19 @@ export default function LiveFeedPage() {
             );
           })}
           {highPaidData?.avgOpportunityScore > 0 && (
-            <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50 p-3 text-center">
-              <p className="text-2xl font-bold text-indigo-700">{highPaidData.avgOpportunityScore}</p>
-              <p className="text-[10px] font-medium text-indigo-600">Avg Score</p>
-            </div>
+            <ClickableMetric metric="qualityReqs">
+              <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50 p-3 text-center">
+                <p className="text-2xl font-bold text-indigo-700">{highPaidData.avgOpportunityScore}</p>
+                <p className="text-[10px] font-medium text-indigo-600">Avg Score</p>
+              </div>
+            </ClickableMetric>
           )}
-          <div className="rounded-xl border border-gray-200 bg-white p-3 text-center">
-            <p className="text-2xl font-bold text-gray-700">{fmt(filtered.length)}</p>
-            <p className="text-[10px] text-gray-500 font-medium">Showing</p>
-          </div>
+          <ClickableMetric metric="activeJobs">
+            <div className="rounded-xl border border-gray-200 bg-white p-3 text-center">
+              <p className="text-2xl font-bold text-gray-700">{fmt(filtered.length)}</p>
+              <p className="text-[10px] text-gray-500 font-medium">Showing</p>
+            </div>
+          </ClickableMetric>
         </div>
       ) : null}
 
@@ -929,6 +944,7 @@ export default function LiveFeedPage() {
                           <span className="text-[10px] font-bold text-gray-600">{job.vendorConfidenceScore}%</span>
                         </div>
                       )}
+                      <button onClick={(e) => { e.stopPropagation(); setSelectedRow(job); }} className="rounded p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50" title="View Details"><EyeIcon className="h-3.5 w-3.5" /></button>
                       {expandedId === job.id ? <ChevronUpIcon className="h-4 w-4 text-gray-400" /> : <ChevronDownIcon className="h-4 w-4 text-gray-400" />}
                     </div>
                   </div>
@@ -1194,6 +1210,7 @@ export default function LiveFeedPage() {
                         <span className="text-[10px] text-gray-500">{job.actionabilityScore}</span>
                       </div>
                     )}
+                    <button onClick={(e) => { e.stopPropagation(); setSelectedRow(job); }} className="rounded p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50" title="View Details"><EyeIcon className="h-3.5 w-3.5" /></button>
                     {expandedId === job.id ? <ChevronUpIcon className="h-4 w-4 text-gray-400" /> : <ChevronDownIcon className="h-4 w-4 text-gray-400" />}
                   </div>
                 </div>
@@ -1385,6 +1402,7 @@ export default function LiveFeedPage() {
                         <p className="text-[11px] font-semibold text-indigo-600">{job.totalCompDisplay}</p>
                       </div>
                     )}
+                    <button onClick={(e) => { e.stopPropagation(); setSelectedRow(job); }} className="rounded p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50" title="View Details"><EyeIcon className="h-3.5 w-3.5" /></button>
                     {expandedId === job.id ? <ChevronUpIcon className="h-4 w-4 text-gray-400" /> : <ChevronDownIcon className="h-4 w-4 text-gray-400" />}
                   </div>
                 </div>
@@ -1467,6 +1485,14 @@ export default function LiveFeedPage() {
             </button>
           )}
         </div>
+      )}
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title={selectedRow.title || selectedRow.company || 'Details'}
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
       )}
     </div>
   );

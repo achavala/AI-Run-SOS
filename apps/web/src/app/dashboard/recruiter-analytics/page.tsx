@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 import {
   ArrowPathIcon,
   EnvelopeIcon,
@@ -62,6 +63,7 @@ export default function RecruiterAnalyticsPage() {
   const [quality, setQuality] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'activity' | 'pipeline' | 'quality'>('activity');
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -123,15 +125,17 @@ export default function RecruiterAnalyticsPage() {
           {/* Per-recruiter cards */}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
             {activity.recruiters?.map((r: any) => (
-              <div key={r.email} className="rounded-xl border bg-white p-5 shadow-sm">
+              <div key={r.email} className="rounded-xl border bg-white p-5 shadow-sm cursor-pointer hover:bg-indigo-50 transition-colors" onClick={() => setSelectedRow(r)}>
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900 capitalize">{r.name}</h3>
                     <a href={`mailto:${r.email}`} className="text-xs text-indigo-600 hover:underline">{r.email}</a>
                   </div>
-                  <div className="text-right">
-                    <p className="text-2xl font-bold text-indigo-600">{fmt(r.totalEmails)}</p>
-                    <p className="text-xs text-gray-500">total emails</p>
+                  <div className="text-right" onClick={e => e.stopPropagation()}>
+                    <ClickableMetric metric="emailMessages" title={`${r.name} — Total Emails`}>
+                      <p className="text-2xl font-bold text-indigo-600">{fmt(r.totalEmails)}</p>
+                      <p className="text-xs text-gray-500">total emails</p>
+                    </ClickableMetric>
                   </div>
                 </div>
 
@@ -160,17 +164,29 @@ export default function RecruiterAnalyticsPage() {
 
                 <div className="mt-4 pt-4 border-t border-gray-100">
                   <div className="grid grid-cols-3 gap-2 text-center">
-                    <div className="rounded-lg bg-indigo-50 p-2">
-                      <p className="text-lg font-bold text-indigo-700">{fmt(r.vendorReqs)}</p>
-                      <p className="text-[10px] text-indigo-600">Vendor Reqs</p>
+                    <div onClick={e => e.stopPropagation()}>
+                      <ClickableMetric metric="vendorReqSignals" title={`${r.name} — Vendor Reqs`}>
+                        <div className="rounded-lg bg-indigo-50 p-2">
+                          <p className="text-lg font-bold text-indigo-700">{fmt(r.vendorReqs)}</p>
+                          <p className="text-[10px] text-indigo-600">Vendor Reqs</p>
+                        </div>
+                      </ClickableMetric>
                     </div>
-                    <div className="rounded-lg bg-green-50 p-2">
-                      <p className="text-lg font-bold text-green-700">{fmt(r.submissionsSent)}</p>
-                      <p className="text-[10px] text-green-600">Submissions</p>
+                    <div onClick={e => e.stopPropagation()}>
+                      <ClickableMetric metric="submissions" title={`${r.name} — Submissions`}>
+                        <div className="rounded-lg bg-green-50 p-2">
+                          <p className="text-lg font-bold text-green-700">{fmt(r.submissionsSent)}</p>
+                          <p className="text-[10px] text-green-600">Submissions</p>
+                        </div>
+                      </ClickableMetric>
                     </div>
-                    <div className="rounded-lg bg-purple-50 p-2">
-                      <p className="text-lg font-bold text-purple-700">{fmt(r.interviewRelated)}</p>
-                      <p className="text-[10px] text-purple-600">Interviews</p>
+                    <div onClick={e => e.stopPropagation()}>
+                      <ClickableMetric metric="interviews" title={`${r.name} — Interviews`}>
+                        <div className="rounded-lg bg-purple-50 p-2">
+                          <p className="text-lg font-bold text-purple-700">{fmt(r.interviewRelated)}</p>
+                          <p className="text-[10px] text-purple-600">Interviews</p>
+                        </div>
+                      </ClickableMetric>
                     </div>
                   </div>
                 </div>
@@ -195,7 +211,7 @@ export default function RecruiterAnalyticsPage() {
                 </thead>
                 <tbody>
                   {activity.dailyActivity?.slice(0, 50).map((d: any, i: number) => (
-                    <tr key={i} className="border-b border-gray-50">
+                    <tr key={i} className="border-b border-gray-50 cursor-pointer hover:bg-indigo-50" onClick={() => setSelectedRow(d)}>
                       <td className="py-2 pr-4 capitalize">{d.email?.split('@')[0]}</td>
                       <td className="py-2 pr-4 text-gray-500">{new Date(d.day).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
                       <td className="py-2 pr-4 text-right font-medium">{fmt(d.total)}</td>
@@ -219,7 +235,7 @@ export default function RecruiterAnalyticsPage() {
           {/* Pipeline funnel per recruiter */}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
             {pipeline.pipeline?.map((p: any) => (
-              <div key={p.email} className="rounded-xl border bg-white p-5 shadow-sm">
+              <div key={p.email} className="rounded-xl border bg-white p-5 shadow-sm cursor-pointer hover:bg-indigo-50 transition-colors" onClick={() => setSelectedRow(p)}>
                 <h3 className="text-lg font-semibold capitalize mb-1">{p.name}</h3>
                 <a href={`mailto:${p.email}`} className="text-xs text-indigo-600 hover:underline block mb-4">{p.email}</a>
 
@@ -274,7 +290,7 @@ export default function RecruiterAnalyticsPage() {
                 </thead>
                 <tbody>
                   {pipeline.weeklyTrend?.slice(0, 40).map((w: any, i: number) => (
-                    <tr key={i} className="border-b border-gray-50">
+                    <tr key={i} className="border-b border-gray-50 cursor-pointer hover:bg-indigo-50" onClick={() => setSelectedRow(w)}>
                       <td className="py-2 pr-4 text-gray-500">{new Date(w.week).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
                       <td className="py-2 pr-4 capitalize">{w.email?.split('@')[0]}</td>
                       <td className="py-2 pr-4 text-right font-medium">{fmt(w.openings)}</td>
@@ -295,7 +311,7 @@ export default function RecruiterAnalyticsPage() {
           {/* Quality tier breakdown */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
             {quality.qualityBreakdown?.map((tier: any) => (
-              <div key={tier.tier} className="rounded-xl border bg-white p-5 shadow-sm text-center">
+              <div key={tier.tier} className="rounded-xl border bg-white p-5 shadow-sm text-center cursor-pointer hover:bg-indigo-50 transition-colors" onClick={() => setSelectedRow(tier)}>
                 <QualityTierBadge tier={tier.tier} />
                 <p className="text-3xl font-bold mt-3 text-gray-900">{fmt(tier.count)}</p>
                 <p className="text-xs text-gray-500 mt-1">Avg Score: {tier.avgActionScore}</p>
@@ -316,7 +332,7 @@ export default function RecruiterAnalyticsPage() {
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {quality.junkPatterns?.map((p: any, i: number) => (
-                <div key={i} className="flex items-center justify-between rounded-lg bg-gray-50 px-4 py-3">
+                <div key={i} className="flex items-center justify-between rounded-lg bg-gray-50 px-4 py-3 cursor-pointer hover:bg-indigo-50 transition-colors" onClick={() => setSelectedRow(p)}>
                   <span className="text-sm text-gray-700">{p.pattern}</span>
                   <span className="text-sm font-bold text-red-600">{fmt(p.count)}</span>
                 </div>
@@ -340,6 +356,14 @@ export default function RecruiterAnalyticsPage() {
             </ul>
           </div>
         </div>
+      )}
+
+      {selectedRow && (
+        <StaticDrillDownModal
+          title={selectedRow.name || selectedRow.email || selectedRow.tier || selectedRow.pattern || 'Details'}
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
       )}
     </div>
   );

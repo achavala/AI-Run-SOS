@@ -11,6 +11,7 @@ import {
   ChevronRightIcon,
   SparklesIcon,
 } from '@heroicons/react/24/outline';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 
 interface Consultant {
   id: string;
@@ -84,6 +85,7 @@ export default function ConsultantsPage() {
   const [readinessFilter, setReadinessFilter] = useState('ALL');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedRow, setSelectedRow] = useState<any>(null);
 
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout>>();
 
@@ -228,7 +230,8 @@ export default function ConsultantsPage() {
               return (
                 <div
                   key={c.id}
-                  className="group rounded-xl border border-gray-200 bg-white px-5 py-4 transition-shadow hover:shadow-md"
+                  onClick={() => setSelectedRow(c)}
+                  className="cursor-pointer group rounded-xl border border-gray-200 bg-white px-5 py-4 transition-shadow hover:shadow-md"
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0 flex-1">
@@ -357,6 +360,13 @@ export default function ConsultantsPage() {
             </div>
           )}
         </>
+      )}
+      {selectedRow && (
+        <StaticDrillDownModal
+          title="Consultant Details"
+          rows={[selectedRow]}
+          onClose={() => setSelectedRow(null)}
+        />
       )}
     </>
   );

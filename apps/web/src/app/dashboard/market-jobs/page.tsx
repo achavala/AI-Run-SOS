@@ -21,7 +21,9 @@ import {
   ExclamationTriangleIcon,
   CheckBadgeIcon,
   XCircleIcon,
+  InformationCircleIcon,
 } from '@heroicons/react/24/outline';
+import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 
 interface MarketJob {
   id: string;
@@ -198,6 +200,7 @@ export default function MarketJobsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedJob, setSelectedJob] = useState<MarketJob | null>(null);
+  const [drillDownRow, setDrillDownRow] = useState<any>(null);
 
   // Filters
   const [search, setSearch] = useState('');
@@ -280,19 +283,19 @@ export default function MarketJobsPage() {
       {/* Stats Bar */}
       {stats && (
         <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-10">
-          <StatCard label="Active" value={String(stats.active)} />
-          <StatCard label="Fresh 6h" value={String(stats.fresh6h)} accent />
-          <StatCard label="Fresh 24h" value={String(stats.fresh24h)} accent />
-          <StatCard label="Unique" value={String(stats.uniqueJobs)} />
-          <StatCard label="C2C" value={String(stats.byEmploymentType?.C2C ?? 0)} />
-          <StatCard label="W2" value={String(stats.byEmploymentType?.W2 ?? 0)} />
-          <StatCard label="URL Live" value={String(stats.urlAlive)} />
-          <StatCard label="Avg Score" value={String(stats.avgRealnessScore)} />
-          <StatCard label="Converted" value={String(stats.converted)} />
-          <StatCard
+          <ClickableMetric metric="activeJobs"><StatCard label="Active" value={String(stats.active)} /></ClickableMetric>
+          <ClickableMetric metric="marketJobs"><StatCard label="Fresh 6h" value={String(stats.fresh6h)} accent /></ClickableMetric>
+          <ClickableMetric metric="marketJobs"><StatCard label="Fresh 24h" value={String(stats.fresh24h)} accent /></ClickableMetric>
+          <ClickableMetric metric="marketJobs"><StatCard label="Unique" value={String(stats.uniqueJobs)} /></ClickableMetric>
+          <ClickableMetric metric="marketJobs"><StatCard label="C2C" value={String(stats.byEmploymentType?.C2C ?? 0)} /></ClickableMetric>
+          <ClickableMetric metric="marketJobs"><StatCard label="W2" value={String(stats.byEmploymentType?.W2 ?? 0)} /></ClickableMetric>
+          <ClickableMetric metric="marketJobs"><StatCard label="URL Live" value={String(stats.urlAlive)} /></ClickableMetric>
+          <ClickableMetric metric="qualityReqs"><StatCard label="Avg Score" value={String(stats.avgRealnessScore)} /></ClickableMetric>
+          <ClickableMetric metric="marketJobs"><StatCard label="Converted" value={String(stats.converted)} /></ClickableMetric>
+          <ClickableMetric metric="marketJobs"><StatCard
             label="Last Sync"
             value={stats.lastSync ? timeAgo(stats.lastSync) : 'Never'}
-          />
+          /></ClickableMetric>
         </div>
       )}
 
@@ -453,6 +456,13 @@ export default function MarketJobsPage() {
                     )}
                   </div>
                   <div className="shrink-0 text-right space-y-1">
+                    <span
+                      onClick={(e) => { e.stopPropagation(); setDrillDownRow(job); }}
+                      className="inline-flex items-center cursor-pointer rounded p-0.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                      title="View full data"
+                    >
+                      <InformationCircleIcon className="h-4 w-4" />
+                    </span>
                     <span className="text-[10px] font-medium text-gray-400">
                       {SOURCE_LABELS[job.source] ?? job.source}
                     </span>
@@ -822,6 +832,14 @@ export default function MarketJobsPage() {
           )}
         </div>
       </div>
+
+      {drillDownRow && (
+        <StaticDrillDownModal
+          title={drillDownRow.title || 'Job Details'}
+          rows={[drillDownRow]}
+          onClose={() => setDrillDownRow(null)}
+        />
+      )}
     </>
   );
 }

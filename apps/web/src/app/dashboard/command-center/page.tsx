@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
+import { ClickableMetric, StaticDrillDownModal, ApiDrillDownModal } from '@/components/drill-down-modal';
 import { ArrowTopRightOnSquareIcon } from '@heroicons/react/24/solid';
 import {
   RocketLaunchIcon,
@@ -69,6 +70,7 @@ export default function CommandCenterPage() {
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState<'morning' | 'midday' | 'evening'>('morning');
   const [expandedReqId, setExpandedReqId] = useState<string | null>(null);
+  const [selectedVendor, setSelectedVendor] = useState<any>(null);
   const [filterLocation, setFilterLocation] = useState('');
   const [filterEmpType, setFilterEmpType] = useState('');
   const [filterRole, setFilterRole] = useState('');
@@ -150,6 +152,7 @@ export default function CommandCenterPage() {
       {activeSection === 'morning' && (
         <div className="space-y-6">
           {/* Quota bar */}
+          <ClickableMetric metric="autoSubmitQueue" title="Daily Submission Quota">
           <div className="rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-purple-50 p-6">
             <div className="flex items-center justify-between">
               <div>
@@ -162,6 +165,7 @@ export default function CommandCenterPage() {
               </div>
             </div>
           </div>
+          </ClickableMetric>
 
           {/* Filters */}
           {(() => {
@@ -270,6 +274,7 @@ export default function CommandCenterPage() {
 
                 {/* Actionable Reqs */}
                 <div className="rounded-xl border border-gray-200 bg-white">
+                  <ClickableMetric metric="qualityReqs" title="Top Actionable Reqs">
                   <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
                     <div className="flex items-center gap-2">
                       <BoltIcon className="h-5 w-5 text-amber-500" />
@@ -279,6 +284,7 @@ export default function CommandCenterPage() {
                       </span>
                     </div>
                   </div>
+                  </ClickableMetric>
                   <div className="divide-y divide-gray-50">
                     {filteredReqs.slice(0, 50).map((req: any) => {
                 const isOpen = expandedReqId === req.id;
@@ -489,6 +495,7 @@ export default function CommandCenterPage() {
           {/* Bench Matches */}
           {morning.benchMatches?.length > 0 && (
             <div className="rounded-xl border border-gray-200 bg-white">
+              <ClickableMetric metric="benchSize" title="Ready Bench Matches">
               <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
                 <div className="flex items-center gap-2">
                   <SparklesIcon className="h-5 w-5 text-purple-500" />
@@ -496,6 +503,7 @@ export default function CommandCenterPage() {
                   <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700">{morning.benchMatches.length}</span>
                 </div>
               </div>
+              </ClickableMetric>
               <div className="divide-y divide-gray-50">
                 {morning.benchMatches.map((m: any) => (
                   <div key={m.id} className="flex items-center gap-4 px-6 py-3 hover:bg-gray-50">
@@ -543,11 +551,13 @@ export default function CommandCenterPage() {
           <div className="grid grid-cols-2 gap-6">
             {/* Follow-ups Due */}
             <div className="rounded-xl border border-gray-200 bg-white">
+              <ClickableMetric metric="submissions" title="Follow-ups Due">
               <div className="flex items-center gap-2 border-b border-gray-100 px-6 py-4">
                 <ClockIcon className="h-5 w-5 text-amber-500" />
                 <h3 className="font-semibold text-gray-900">Follow-ups Due</h3>
                 <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">{midday.followupsDue?.length || 0}</span>
               </div>
+              </ClickableMetric>
               <div className="p-6">
                 {midday.followupsDue?.length === 0 ? (
                   <div className="text-center py-8 text-gray-400">
@@ -574,11 +584,13 @@ export default function CommandCenterPage() {
 
             {/* Stuck Submissions */}
             <div className="rounded-xl border border-gray-200 bg-white">
+              <ClickableMetric metric="submissions" title="Stuck Submissions">
               <div className="flex items-center gap-2 border-b border-gray-100 px-6 py-4">
                 <ExclamationTriangleIcon className="h-5 w-5 text-red-500" />
                 <h3 className="font-semibold text-gray-900">Stuck Submissions (&gt;48h)</h3>
                 <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">{midday.stuckSubmissions?.length || 0}</span>
               </div>
+              </ClickableMetric>
               <div className="p-6">
                 {midday.stuckSubmissions?.length === 0 ? (
                   <div className="text-center py-8 text-gray-400">
@@ -616,15 +628,17 @@ export default function CommandCenterPage() {
           {/* Today's Activity */}
           <div className="grid grid-cols-4 gap-4">
             {[
-              { label: 'Submissions Sent', value: evening?.todayActivity?.submissionsSent || 0, cls: 'text-indigo-600' },
-              { label: 'Responses', value: evening?.todayActivity?.responsesReceived || 0, cls: 'text-green-600' },
-              { label: 'Interviews', value: evening?.todayActivity?.interviewsScheduled || 0, cls: 'text-purple-600' },
-              { label: 'Closure Prob.', value: `${evening?.closureProbability || 0}%`, cls: 'text-amber-600' },
+              { label: 'Submissions Sent', value: evening?.todayActivity?.submissionsSent || 0, cls: 'text-indigo-600', metric: 'todaySubmissions' },
+              { label: 'Responses', value: evening?.todayActivity?.responsesReceived || 0, cls: 'text-green-600', metric: 'vendorReqSignals' },
+              { label: 'Interviews', value: evening?.todayActivity?.interviewsScheduled || 0, cls: 'text-purple-600', metric: 'todayInterviews' },
+              { label: 'Closure Prob.', value: `${evening?.closureProbability || 0}%`, cls: 'text-amber-600', metric: 'activeJobs' },
             ].map((stat) => (
-              <div key={stat.label} className="rounded-xl border border-gray-200 bg-white p-5">
+              <ClickableMetric key={stat.label} metric={stat.metric} title={stat.label}>
+              <div className="rounded-xl border border-gray-200 bg-white p-5">
                 <p className="text-sm text-gray-500">{stat.label}</p>
                 <p className={`mt-1 text-2xl font-bold ${stat.cls}`}>{stat.value}</p>
               </div>
+              </ClickableMetric>
             ))}
           </div>
 
@@ -649,7 +663,7 @@ export default function CommandCenterPage() {
                   {(() => {
                     const vendors = topVendors?.length > 0 ? topVendors : (evening?.vendorLeaderboard || []);
                     return vendors.map((v: any, i: number) => (
-                      <tr key={v.id || i} className="hover:bg-gray-50">
+                      <tr key={v.id || i} className="hover:bg-gray-50 cursor-pointer" onClick={() => setSelectedVendor(v)}>
                         <td className="px-6 py-3">
                           <div className="font-medium text-gray-900">{v.companyName || v.vendorName || v.vendor_name}</div>
                           {v.domain ? (
@@ -680,11 +694,13 @@ export default function CommandCenterPage() {
             <h3 className="mb-4 font-semibold text-gray-900">Vendor Trust Distribution</h3>
             <div className="flex gap-4">
               {(trustDist || []).map((d: any) => (
-                <div key={d.tier} className="flex-1 rounded-lg border border-gray-100 p-4 text-center">
+                <ClickableMetric key={d.tier} metric="allVendors" title={`${d.tier} Tier Vendors`}>
+                <div className="flex-1 rounded-lg border border-gray-100 p-4 text-center">
                   <TierBadge tier={d.tier} />
                   <p className="mt-2 text-2xl font-bold text-gray-900">{d.count}</p>
                   <p className="text-xs text-gray-500">avg score: {d.avg_score}</p>
                 </div>
+                </ClickableMetric>
               ))}
             </div>
           </div>
@@ -693,6 +709,15 @@ export default function CommandCenterPage() {
             <p className="text-sm text-rose-800">{evening.message || 'End-of-day summary — review progress and plan tomorrow.'}</p>
           </div>
         </div>
+      )}
+
+      {selectedVendor && (
+        <StaticDrillDownModal
+          title={selectedVendor.companyName || selectedVendor.vendorName || selectedVendor.vendor_name || 'Vendor Details'}
+          description="Vendor trust details"
+          rows={[selectedVendor]}
+          onClose={() => setSelectedVendor(null)}
+        />
       )}
     </div>
   );
