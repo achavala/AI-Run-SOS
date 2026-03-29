@@ -229,7 +229,7 @@ export class DashboardService {
       podReqCount = podJobs.length;
 
       podBenchCount = podBenchReady.filter((c) =>
-        c.pods.includes(focusPod),
+        (Array.isArray(c.pods) ? c.pods as string[] : []).includes(focusPod),
       ).length;
 
       const podPlacements = activePlacements.filter(

@@ -25,24 +25,19 @@ export class MatchingService {
 
     const consultants = await this.prisma.extractedConsultant.findMany({
       where: {
-        primarySkills: { isEmpty: false },
-        NOT: { email: { contains: 'placeholder.local' } },
+        AND: [
+          { NOT: { primarySkills: { equals: '[]' as any } } },
+          { NOT: { email: { contains: 'placeholder.local' } } },
+        ],
       },
-      select: {
-        id: true,
-        fullName: true,
-        email: true,
-        phone: true,
-        primarySkills: true,
-        sourceType: true,
-        location: true,
+      include: {
         _count: { select: { resumeVersions: true } },
       },
     });
 
     const scored = consultants
       .map((c) => {
-        const cSkills = c.primarySkills.map((s) => s.toLowerCase().trim());
+        const cSkills = (Array.isArray(c.primarySkills) ? c.primarySkills as string[] : []).map((s: string) => s.toLowerCase().trim());
 
         // Exact match scoring
         const exactMatches = normalizedSkills.filter((rs) =>
@@ -64,8 +59,8 @@ export class MatchingService {
         // TF-IDF-style weighting: rare skills get higher weight
         const skillWeight = (skill: string) => {
           const freq = consultants.filter((c2) =>
-            c2.primarySkills.some(
-              (s) => s.toLowerCase().trim() === skill,
+            (Array.isArray(c2.primarySkills) ? c2.primarySkills as string[] : []).some(
+              (s: string) => s.toLowerCase().trim() === skill,
             ),
           ).length;
           return Math.log(consultants.length / Math.max(freq, 1));

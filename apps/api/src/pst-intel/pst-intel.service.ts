@@ -106,9 +106,9 @@ export class PstIntelService {
     if (filters.hasPhone) where.phone = { not: null };
     if (filters.search) {
       where.OR = [
-        { name: { contains: filters.search, mode: 'insensitive' } },
-        { email: { contains: filters.search, mode: 'insensitive' } },
-        { phone: { contains: filters.search, mode: 'insensitive' } },
+        { name: { contains: filters.search } },
+        { email: { contains: filters.search } },
+        { phone: { contains: filters.search } },
       ];
     }
 
@@ -153,13 +153,13 @@ export class PstIntelService {
     const where: any = {};
     if (filters.search) {
       where.OR = [
-        { fullName: { contains: filters.search, mode: 'insensitive' } },
-        { email: { contains: filters.search, mode: 'insensitive' } },
-        { phone: { contains: filters.search, mode: 'insensitive' } },
+        { fullName: { contains: filters.search } },
+        { email: { contains: filters.search } },
+        { phone: { contains: filters.search } },
       ];
     }
     if (filters.skill) {
-      where.primarySkills = { has: filters.skill };
+      where.primarySkills = { string_contains: filters.skill };
     }
     if (filters.sourceType && filters.sourceType !== 'ALL') {
       where.sourceType = filters.sourceType;
@@ -240,9 +240,9 @@ export class PstIntelService {
     if (filters.vendorId) where.vendorCompanyId = filters.vendorId;
     if (filters.search) {
       where.OR = [
-        { title: { contains: filters.search, mode: 'insensitive' } },
-        { location: { contains: filters.search, mode: 'insensitive' } },
-        { rateText: { contains: filters.search, mode: 'insensitive' } },
+        { title: { contains: filters.search } },
+        { location: { contains: filters.search } },
+        { rateText: { contains: filters.search } },
       ];
     }
 
@@ -282,7 +282,7 @@ export class PstIntelService {
 
     const skillCounts: Record<string, number> = {};
     for (const c of allConsultants) {
-      for (const skill of c.primarySkills) {
+      for (const skill of (Array.isArray(c.primarySkills) ? c.primarySkills as string[] : [])) {
         const s = skill.toLowerCase();
         skillCounts[s] = (skillCounts[s] ?? 0) + 1;
       }

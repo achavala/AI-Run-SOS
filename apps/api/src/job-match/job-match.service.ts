@@ -962,7 +962,7 @@ export class JobMatchService {
     };
 
     // ── Determine pod template ────────────────────────────
-    const podKey = consultant.pods?.[0] ?? 'DEFAULT';
+    const podKey = (Array.isArray(consultant.pods) ? consultant.pods as string[] : [])[0] ?? 'DEFAULT';
     const template = POD_TEMPLATES[podKey] ?? POD_TEMPLATES.DEFAULT!;
 
     // ── Generate HTML ─────────────────────────────────────
