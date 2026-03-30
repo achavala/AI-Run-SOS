@@ -80,60 +80,128 @@ export class CommandCenterService {
     return plan;
   }
 
-  private async getActionableReqs(limit: number) {
-    const emailReqs = await this.prisma.$queryRaw`
-      WITH top_signals AS (
-        SELECT id, title, location, "rateText", "employmentType", skills,
-               COALESCE("actionabilityScore", 50) as "actionabilityScore", "createdAt",
-               "vendorCompanyId", "vendorContactId",
-               "premiumSkillFamily", "premiumSkillBonus"
-        FROM "VendorReqSignal"
-        WHERE title IS NOT NULL AND title != '' AND length(title) > 15
-          AND "employmentType" = 'C2C'
-          AND title !~* '(unsubscribe|no third party|no c2c|w2 only|hot.?list|bench|available|looking for|h1b)'
-        ORDER BY "createdAt" DESC
-        LIMIT 500
-      )
-      SELECT ts.id::text, ts.title, ts.location, ts."rateText",
-             ts."employmentType", ts.skills,
-             ts."actionabilityScore",
-             ts."createdAt",
-             ts."premiumSkillFamily", ts."premiumSkillBonus",
-             vc.name as "vendorName", vc.domain as "vendorDomain",
-             vct.email as "contactEmail", vct.name as "contactName",
-             COALESCE(v."trustScore", 30) as "vendorTrustScore",
-             COALESCE(v.tier::text, 'UNCLASSIFIED') as "vendorTier",
-             'EMAIL' as "source"
-      FROM top_signals ts
-      LEFT JOIN "ExtractedVendorCompany" vc ON vc.id = ts."vendorCompanyId"
-      LEFT JOIN "ExtractedVendorContact" vct ON vct.id = ts."vendorContactId"
-      LEFT JOIN "Vendor" v ON v.domain = vc.domain
-      ORDER BY ts."premiumSkillBonus" DESC NULLS LAST, ts."createdAt" DESC
-      LIMIT 100
-    ` as any[];
+  /* ── Helper: check if title contains junk patterns ── */
+  private isJunkTitle(title: string): boolean {
+    const junk = /unsubscribe|no third party|no c2c|w2 only|hot\s?list|bench|available|looking for|h1b/i;
+    return junk.test(title);
+  }
 
-    const marketJobs = await this.prisma.$queryRaw`
-      SELECT
-        m.id::text, m.title, m.location, 
-        COALESCE(m."rateText", CASE WHEN m."rateMax" > 0 THEN '$' || m."rateMin"::int || '-$' || m."rateMax"::int ELSE NULL END) as "rateText",
-        COALESCE(m."employmentType"::text, 'C2C') as "employmentType",
-        CASE WHEN m.skills IS NOT NULL THEN ARRAY(SELECT jsonb_array_elements_text(m.skills)) ELSE ARRAY[]::text[] END as skills,
-        COALESCE(m."actionabilityScore", 70) as "actionabilityScore",
-        m."postedAt" as "createdAt",
-        m.company as "vendorName",
-        m.source::text as "vendorDomain",
-        COALESCE(m."applyUrl", m."sourceUrl") as "contactEmail",
-        m."recruiterName" as "contactName",
-        COALESCE(m."realnessScore", 80) as "vendorTrustScore",
-        'HIGH' as "vendorTier",
-        m.source::text as "source"
-      FROM "MarketJob" m
-      WHERE m."postedAt" >= NOW() - interval '3 days'
-        AND m.title IS NOT NULL AND m.title != ''
-        AND m.source IN ('JSEARCH', 'CORPTOCORP')
-      ORDER BY m."postedAt" DESC
-      LIMIT 50
-    ` as any[];
+  /* ── Helper: detect premium skill family ── */
+  private detectPremiumSkill(text: string): { family: string | null; bonus: number } {
+    const lower = text.toLowerCase();
+    if (/machine learning|deep learning|nlp|computer vision|pytorch|tensorflow|ai engineer|ml engineer|artificial intelligence|llm|large language model|generative ai|gen ai|langchain|rag|transformers/.test(lower))
+      return { family: 'AI_ML', bonus: 15 };
+    if (/mlops|ml ops|kubeflow|mlflow|sagemaker|vertex ai|model deployment|model serving|feature store|genai infra/.test(lower))
+      return { family: 'MLOPS_GENAI', bonus: 13 };
+    if (/data engineer|spark|airflow|databricks|snowflake|dbt|kafka|data pipeline|etl|data lake|data warehouse/.test(lower))
+      return { family: 'DATA_ENGINEERING', bonus: 10 };
+    if (/devops|platform engineer|sre|site reliability|kubernetes|terraform|cicd|ci\/cd|cloud architect|infrastructure as code/.test(lower))
+      return { family: 'CLOUD_DEVOPS', bonus: 8 };
+    if (/cybersecurity|security engineer|penetration test|soc analyst|siem|zero trust|devsecops|cloud security/.test(lower))
+      return { family: 'CYBERSECURITY', bonus: 8 };
+    return { family: null, bonus: 0 };
+  }
+
+  private async getActionableReqs(limit: number) {
+    // Fetch email-based req signals using Prisma
+    const rawSignals = await this.prisma.vendorReqSignal.findMany({
+      where: {
+        title: { not: '' },
+        employmentType: 'C2C',
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+      include: {
+        vendorCompany: { select: { name: true, domain: true } },
+        vendorContact: { select: { name: true, email: true } },
+      },
+    });
+
+    // Filter out junk and short titles, compute scores in JS
+    const emailReqs = rawSignals
+      .filter((s) => s.title && s.title.length > 15 && !this.isJunkTitle(s.title))
+      .map((s) => {
+        const skills = Array.isArray(s.skills) ? (s.skills as string[]) : [];
+        const combined = `${s.title || ''} ${skills.join(' ')}`;
+        const premium = this.detectPremiumSkill(combined);
+        return {
+          id: s.id,
+          title: s.title,
+          location: s.location,
+          rateText: s.rateText,
+          employmentType: s.employmentType,
+          skills,
+          actionabilityScore: s.actionabilityScore ?? 50,
+          createdAt: s.createdAt,
+          premiumSkillFamily: premium.family,
+          premiumSkillBonus: premium.bonus,
+          vendorName: s.vendorCompany?.name ?? null,
+          vendorDomain: s.vendorCompany?.domain ?? null,
+          contactEmail: s.vendorContact?.email ?? null,
+          contactName: s.vendorContact?.name ?? null,
+          vendorTrustScore: 30,
+          vendorTier: 'UNCLASSIFIED',
+          source: 'EMAIL',
+        };
+      });
+
+    // Enrich vendor tier/trust from Vendor table
+    const domains = [...new Set(emailReqs.map((r) => r.vendorDomain).filter(Boolean))] as string[];
+    if (domains.length > 0) {
+      const vendors = await this.prisma.vendor.findMany({
+        where: { domain: { in: domains } },
+        select: { domain: true, trustScore: true, tier: true },
+      });
+      const vendorMap = new Map(vendors.map((v) => [v.domain, v]));
+      for (const req of emailReqs) {
+        if (req.vendorDomain) {
+          const v = vendorMap.get(req.vendorDomain);
+          if (v) {
+            req.vendorTrustScore = v.trustScore ?? 30;
+            req.vendorTier = (v.tier as string) ?? 'UNCLASSIFIED';
+          }
+        }
+      }
+    }
+
+    // Fetch market jobs
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    let marketJobs: any[] = [];
+    try {
+      const rawJobs = await this.prisma.marketJob.findMany({
+        where: {
+          title: { not: '' },
+          postedAt: { gte: threeDaysAgo },
+          source: { in: ['JSEARCH', 'CORPTOCORP'] },
+        },
+        orderBy: { postedAt: 'desc' },
+        take: 50,
+      });
+
+      marketJobs = rawJobs.map((m) => {
+        const skills = Array.isArray(m.skills) ? (m.skills as string[]) : [];
+        const rateText = m.rateText || (m.rateMax && m.rateMax > 0 ? `$${Math.round(m.rateMin || 0)}-$${Math.round(m.rateMax)}` : null);
+        return {
+          id: m.id,
+          title: m.title,
+          location: m.location,
+          rateText,
+          employmentType: (m.employmentType as string) || 'C2C',
+          skills,
+          actionabilityScore: m.actionabilityScore ?? 70,
+          createdAt: m.postedAt,
+          vendorName: m.company,
+          vendorDomain: m.source,
+          contactEmail: m.applyUrl || m.sourceUrl,
+          contactName: m.recruiterName,
+          vendorTrustScore: m.realnessScore ?? 80,
+          vendorTier: 'HIGH',
+          source: m.source,
+        };
+      });
+    } catch {
+      // MarketJob table may not exist in all environments
+    }
 
     const combined = [
       ...marketJobs.map((j: any) => ({ ...j, _sortPriority: j.source === 'JSEARCH' ? 1 : 2 })),
@@ -149,187 +217,267 @@ export class CommandCenterService {
   }
 
   private async getBenchMatchReqs(limit: number) {
-    return this.prisma.$queryRaw`
-      WITH recent_reqs AS (
-        SELECT vrs.id, vrs.title, vrs.location, vrs."rateText",
-               vrs."employmentType", vrs.skills,
-               vrs."createdAt",
-               vrs."vendorCompanyId", vrs."vendorContactId",
-               vrs."premiumSkillFamily"
-        FROM "VendorReqSignal" vrs
-        WHERE vrs."createdAt" >= NOW() - interval '2 days'
-          AND vrs.skills IS NOT NULL AND array_length(vrs.skills, 1) > 0
-          AND COALESCE(vrs."actionabilityScore", 50) >= 40
-        ORDER BY COALESCE(vrs."actionabilityScore", 50) DESC, vrs."createdAt" DESC
-        LIMIT 50
-      ),
-      matched AS (
-        SELECT rr.*,
-               vc.name as "vendorName",
-               vct.email as "contactEmail",
-               c.id as "consultantId",
-               c."firstName" || ' ' || c."lastName" as "consultantName",
-               (
-                 SELECT COUNT(*)
-                 FROM unnest(rr.skills) rs(s)
-                 JOIN jsonb_array_elements_text(c.skills) cs(s) ON LOWER(rs.s) = LOWER(cs.s)
-               )::int as skill_overlap
-        FROM recent_reqs rr
-        LEFT JOIN "ExtractedVendorCompany" vc ON vc.id = rr."vendorCompanyId"
-        LEFT JOIN "ExtractedVendorContact" vct ON vct.id = rr."vendorContactId"
-        CROSS JOIN LATERAL (
-          SELECT c.id, c."firstName", c."lastName", c.skills
-          FROM "Consultant" c
-          WHERE c.readiness IN ('SUBMISSION_READY', 'VERIFIED')
-            AND c."firstName" IS NOT NULL AND c."firstName" != ''
-          ORDER BY c."qualityScore" DESC NULLS LAST
-          LIMIT 5
-        ) c
-      )
-      SELECT * FROM matched
-      WHERE skill_overlap >= 2
-      ORDER BY skill_overlap DESC, "createdAt" DESC
-      LIMIT ${limit}
-    ` as Promise<any[]>;
+    try {
+      const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+
+      // Get recent actionable reqs with skills
+      const reqs = await this.prisma.vendorReqSignal.findMany({
+        where: {
+          createdAt: { gte: twoDaysAgo },
+          NOT: { skills: { equals: [] } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      });
+
+      // Get bench consultants
+      const consultants = await this.prisma.consultant.findMany({
+        where: {
+          readiness: { in: ['SUBMISSION_READY', 'VERIFIED'] },
+          firstName: { not: '' },
+        },
+        orderBy: { qualityScore: 'desc' },
+        take: 10,
+        select: { id: true, firstName: true, lastName: true, skills: true },
+      });
+
+      // Match in JS
+      const matches: any[] = [];
+      for (const req of reqs) {
+        const reqSkills = Array.isArray(req.skills) ? (req.skills as string[]).map((s) => s.toLowerCase()) : [];
+        if (reqSkills.length === 0) continue;
+
+        for (const c of consultants) {
+          const cSkills = Array.isArray(c.skills) ? (c.skills as string[]).map((s) => s.toLowerCase()) : [];
+          const overlap = reqSkills.filter((s) => cSkills.includes(s)).length;
+          if (overlap >= 2) {
+            matches.push({
+              id: req.id,
+              title: req.title,
+              location: req.location,
+              rateText: req.rateText,
+              employmentType: req.employmentType,
+              skills: req.skills,
+              createdAt: req.createdAt,
+              premiumSkillFamily: req.premiumSkillFamily,
+              vendorName: null,
+              contactEmail: null,
+              consultantId: c.id,
+              consultantName: `${c.firstName} ${c.lastName}`,
+              skill_overlap: overlap,
+            });
+          }
+        }
+      }
+
+      matches.sort((a, b) => b.skill_overlap - a.skill_overlap);
+      return matches.slice(0, limit);
+    } catch (err) {
+      this.logger.warn(`getBenchMatchReqs error: ${(err as Error).message}`);
+      return [];
+    }
   }
 
   private async getSubmissionPipelineStats(tenantId: string) {
-    const stats = await this.prisma.$queryRaw`
-      SELECT status, COUNT(*)::int as count
-      FROM "Submission" WHERE "tenantId" = ${tenantId}
-      GROUP BY status
-    ` as any[];
+    try {
+      const stats = await this.prisma.submission.groupBy({
+        by: ['status'],
+        where: { tenantId },
+        _count: { _all: true },
+      });
 
-    const today = await this.prisma.$queryRaw`
-      SELECT COUNT(*)::int as count
-      FROM "Submission"
-      WHERE "tenantId" = ${tenantId}
-        AND "createdAt" >= CURRENT_DATE
-    ` as any[];
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
 
-    return {
-      byStatus: stats,
-      todayCount: today[0]?.count || 0,
-    };
+      const todayCount = await this.prisma.submission.count({
+        where: { tenantId, createdAt: { gte: todayStart } },
+      });
+
+      return {
+        byStatus: stats.map((s) => ({ status: s.status, count: s._count._all })),
+        todayCount,
+      };
+    } catch {
+      return { byStatus: [], todayCount: 0 };
+    }
   }
 
   private async getDueFollowups() {
+    // submission_followup may not exist in SQLite schema
+    return [];
+  }
+
+  private async getStuckSubmissions(tenantId: string) {
     try {
-      return await this.prisma.$queryRaw`
-        SELECT sf.id, sf.submission_id as "submissionId",
-               sf.followup_number as "number",
-               sf.scheduled_at as "scheduledAt",
-               s."jobId", s."consultantId", s.status as "submissionStatus"
-        FROM submission_followup sf
-        JOIN "Submission" s ON s.id = sf.submission_id
-        WHERE sf.status = 'PENDING'
-          AND sf.scheduled_at <= NOW()
-          AND s.status IN ('SUBMITTED')
-        ORDER BY sf.scheduled_at ASC
-        LIMIT 30
-      ` as any[];
+      const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
+      const stuck = await this.prisma.submission.findMany({
+        where: {
+          tenantId,
+          status: 'SUBMITTED',
+          updatedAt: { lt: cutoff },
+        },
+        orderBy: { updatedAt: 'asc' },
+        take: 20,
+        select: { id: true, jobId: true, consultantId: true, status: true, createdAt: true, updatedAt: true },
+      });
+
+      return stuck.map((s) => ({
+        ...s,
+        stuckHours: Math.round((Date.now() - new Date(s.updatedAt).getTime()) / (1000 * 60 * 60)),
+      }));
     } catch {
       return [];
     }
   }
 
-  private async getStuckSubmissions(tenantId: string) {
-    return this.prisma.$queryRaw`
-      SELECT s.id, s."jobId", s."consultantId", s.status,
-             s."createdAt", s."updatedAt",
-             EXTRACT(EPOCH FROM (NOW() - s."updatedAt")) / 3600 as "stuckHours"
-      FROM "Submission" s
-      WHERE s."tenantId" = ${tenantId}
-        AND s.status = 'SUBMITTED'
-        AND s."updatedAt" < NOW() - interval '48 hours'
-      ORDER BY s."updatedAt" ASC
-      LIMIT 20
-    ` as Promise<any[]>;
-  }
-
   private async getTodayActivity(tenantId: string) {
-    const [result] = await this.prisma.$queryRaw`
-      SELECT
-        COUNT(*) FILTER (WHERE "createdAt" >= CURRENT_DATE)::int as "submissionsCreated",
-        COUNT(*) FILTER (WHERE status = 'SUBMITTED' AND "updatedAt" >= CURRENT_DATE)::int as "submissionsSent",
-        COUNT(*) FILTER (WHERE "feedbackReceivedAt" >= CURRENT_DATE)::int as "responsesReceived",
-        COUNT(*) FILTER (WHERE status = 'INTERVIEWING' AND "updatedAt" >= CURRENT_DATE)::int as "interviewsScheduled"
-      FROM "Submission"
-      WHERE "tenantId" = ${tenantId}
-    ` as any[];
-    return result || { submissionsCreated: 0, submissionsSent: 0, responsesReceived: 0, interviewsScheduled: 0 };
+    try {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+
+      const [submissionsCreated, submissionsSent, responsesReceived, interviewsScheduled] = await Promise.all([
+        this.prisma.submission.count({
+          where: { tenantId, createdAt: { gte: todayStart } },
+        }),
+        this.prisma.submission.count({
+          where: { tenantId, status: 'SUBMITTED', updatedAt: { gte: todayStart } },
+        }),
+        this.prisma.submission.count({
+          where: { tenantId, feedbackReceivedAt: { gte: todayStart } },
+        }),
+        this.prisma.submission.count({
+          where: { tenantId, status: 'INTERVIEWING', updatedAt: { gte: todayStart } },
+        }),
+      ]);
+
+      return { submissionsCreated, submissionsSent, responsesReceived, interviewsScheduled };
+    } catch {
+      return { submissionsCreated: 0, submissionsSent: 0, responsesReceived: 0, interviewsScheduled: 0 };
+    }
   }
 
   private async getVendorLeaderboard() {
-    return this.prisma.$queryRaw`
-      SELECT v."companyName" as "vendorName", v.domain,
-             COALESCE(v."trustScore", 0) as "trustScore",
-             v.tier::text as "tier",
-             v."responseRate",
-             v."interviewGrantRate",
-             v."placementCount",
-             v."avgBillRateMin", v."avgBillRateMax"
-      FROM "Vendor" v
-      WHERE COALESCE(v."trustScore", 0) >= 40
-      ORDER BY v."trustScore" DESC NULLS LAST
-      LIMIT 20
-    ` as Promise<any[]>;
+    try {
+      const vendors = await this.prisma.vendor.findMany({
+        where: { trustScore: { gte: 40 } },
+        orderBy: { trustScore: 'desc' },
+        take: 20,
+        select: {
+          companyName: true,
+          domain: true,
+          trustScore: true,
+          tier: true,
+          responseRate: true,
+          interviewGrantRate: true,
+          placementCount: true,
+          avgBillRateMin: true,
+          avgBillRateMax: true,
+        },
+      });
+
+      return vendors.map((v) => ({
+        vendorName: v.companyName,
+        domain: v.domain,
+        trustScore: v.trustScore ?? 0,
+        tier: v.tier,
+        responseRate: v.responseRate,
+        interviewGrantRate: v.interviewGrantRate,
+        placementCount: v.placementCount,
+        avgBillRateMin: v.avgBillRateMin,
+        avgBillRateMax: v.avgBillRateMax,
+      }));
+    } catch {
+      return [];
+    }
   }
 
   private async getLaneMetrics(tenantId: string) {
-    const autoSubmitByLane = await this.prisma.$queryRaw`
-      SELECT
-        COALESCE("sourcingLane"::text, 'UNASSIGNED') as lane,
-        COUNT(*)::int as total,
-        COUNT(*) FILTER (WHERE status = 'QUEUED')::int as queued,
-        COUNT(*) FILTER (WHERE status = 'SENT')::int as sent,
-        COUNT(*) FILTER (WHERE status = 'APPROVED')::int as approved,
-        ROUND(AVG("opportunityPriority")::numeric, 1) as "avgPriority",
-        ROUND(AVG("matchScore")::numeric, 1) as "avgMatchScore",
-        ROUND(AVG("premiumSkillBonus")::numeric, 1) as "avgPremiumBonus"
-      FROM "AutoSubmitQueueItem"
-      WHERE "tenantId" = ${tenantId}
-        AND "createdAt" >= CURRENT_DATE - interval '7 days'
-      GROUP BY "sourcingLane"
-      ORDER BY total DESC
-    ` as any[];
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-    const vendorTierDist = await this.prisma.$queryRaw`
-      SELECT
-        tier::text as tier,
-        COUNT(*)::int as count,
-        ROUND(AVG("trustScore")::numeric, 1) as "avgTrust"
-      FROM "Vendor"
-      WHERE "trustScore" IS NOT NULL
-      GROUP BY tier
-      ORDER BY "avgTrust" DESC NULLS LAST
-    ` as any[];
+      // Auto-submit lane metrics
+      let lanes: any[] = [];
+      try {
+        const items = await this.prisma.autoSubmitQueueItem.findMany({
+          where: { tenantId, createdAt: { gte: sevenDaysAgo } },
+          select: { sourcingLane: true, status: true, opportunityPriority: true, matchScore: true, premiumSkillBonus: true },
+        });
 
-    const supplyByPod = await this.prisma.$queryRaw`
-      SELECT
-        readiness::text as readiness,
-        COUNT(*)::int as count
-      FROM "Consultant"
-      WHERE readiness IN ('SUBMISSION_READY', 'VERIFIED')
-      GROUP BY readiness
-    ` as any[];
+        const laneMap = new Map<string, { total: number; queued: number; sent: number; approved: number; priorities: number[]; matchScores: number[]; premiumBonuses: number[] }>();
+        for (const item of items) {
+          const lane = (item.sourcingLane as string) || 'UNASSIGNED';
+          if (!laneMap.has(lane)) laneMap.set(lane, { total: 0, queued: 0, sent: 0, approved: 0, priorities: [], matchScores: [], premiumBonuses: [] });
+          const l = laneMap.get(lane)!;
+          l.total++;
+          if (item.status === 'QUEUED') l.queued++;
+          if (item.status === 'SENT') l.sent++;
+          if (item.status === 'APPROVED') l.approved++;
+          if (item.opportunityPriority != null) l.priorities.push(item.opportunityPriority);
+          if (item.matchScore != null) l.matchScores.push(item.matchScore);
+          if (item.premiumSkillBonus != null) l.premiumBonuses.push(item.premiumSkillBonus);
+        }
 
-    return {
-      lanes: autoSubmitByLane,
-      vendorTiers: vendorTierDist,
-      availableSupply: supplyByPod,
-      strategy: {
-        PRIME_C2C: 'Prioritize: margin + speed. Trust >= 60, margin >= $10/hr. Fast follow-up.',
-        BROAD_C2C_W2: 'Volume play: strict dedupe, lower priority than Lane 1. Auto-deprioritize low-conversion vendors.',
-        FTE_HIGH_COMP: 'Premium vertical: comp-verified only, shortlist top candidates, human review for mega roles.',
-        OPT_JUNIOR_FTE: 'Early-career pipeline: separate scoring, compliance-aware, junior-friendly employers.',
-      },
-    };
+        lanes = [...laneMap.entries()].map(([lane, l]) => ({
+          lane,
+          total: l.total,
+          queued: l.queued,
+          sent: l.sent,
+          approved: l.approved,
+          avgPriority: l.priorities.length > 0 ? Math.round(l.priorities.reduce((a, b) => a + b, 0) / l.priorities.length * 10) / 10 : null,
+          avgMatchScore: l.matchScores.length > 0 ? Math.round(l.matchScores.reduce((a, b) => a + b, 0) / l.matchScores.length * 10) / 10 : null,
+          avgPremiumBonus: l.premiumBonuses.length > 0 ? Math.round(l.premiumBonuses.reduce((a, b) => a + b, 0) / l.premiumBonuses.length * 10) / 10 : null,
+        })).sort((a, b) => b.total - a.total);
+      } catch { /* table may not exist */ }
+
+      // Vendor tier distribution
+      let vendorTiers: any[] = [];
+      try {
+        const tiers = await this.prisma.vendor.groupBy({
+          by: ['tier'],
+          where: { trustScore: { not: null } },
+          _count: { _all: true },
+          _avg: { trustScore: true },
+        });
+        vendorTiers = tiers.map((t) => ({
+          tier: t.tier,
+          count: t._count._all,
+          avgTrust: t._avg.trustScore ? Math.round(t._avg.trustScore * 10) / 10 : null,
+        }));
+      } catch { /* ok */ }
+
+      // Available supply
+      let availableSupply: any[] = [];
+      try {
+        const supply = await this.prisma.consultant.groupBy({
+          by: ['readiness'],
+          where: { readiness: { in: ['SUBMISSION_READY', 'VERIFIED'] } },
+          _count: { _all: true },
+        });
+        availableSupply = supply.map((s) => ({ readiness: s.readiness, count: s._count._all }));
+      } catch { /* ok */ }
+
+      return {
+        lanes,
+        vendorTiers,
+        availableSupply,
+        strategy: {
+          PRIME_C2C: 'Prioritize: margin + speed. Trust >= 60, margin >= $10/hr. Fast follow-up.',
+          BROAD_C2C_W2: 'Volume play: strict dedupe, lower priority than Lane 1. Auto-deprioritize low-conversion vendors.',
+          FTE_HIGH_COMP: 'Premium vertical: comp-verified only, shortlist top candidates, human review for mega roles.',
+          OPT_JUNIOR_FTE: 'Early-career pipeline: separate scoring, compliance-aware, junior-friendly employers.',
+        },
+      };
+    } catch {
+      return {
+        lanes: [],
+        vendorTiers: [],
+        availableSupply: [],
+        strategy: {},
+      };
+    }
   }
 
   private calculateDailyQuota(stats: any): number {
-    // Target: 25 submissions/day for 1 closure/day
-    // (assumes ~4% conversion rate: 25 subs → 5 interviews → 1 offer)
     const todaySoFar = stats.todayCount || 0;
     return Math.max(0, 25 - todaySoFar);
   }
@@ -339,7 +487,6 @@ export class CommandCenterService {
     const interviewing = (stats.byStatus || []).find((s: any) => s.status === 'INTERVIEWING')?.count || 0;
     const offered = (stats.byStatus || []).find((s: any) => s.status === 'OFFERED')?.count || 0;
 
-    // Rough probability model
     return Math.min(99, Math.round(offered * 60 + interviewing * 15 + submitted * 2));
   }
 
@@ -348,151 +495,128 @@ export class CommandCenterService {
   async computeActionabilityScores() {
     this.logger.log('Computing actionability + premium skill scores...');
 
-    const BATCH_SIZE = 50000;
+    const BATCH_SIZE = 500;
     let totalUpdated = 0;
-    let batchNum = 0;
 
+    // Process VendorReqSignal in batches
     while (true) {
-      batchNum++;
-      const result = await this.prisma.$executeRaw`
-        UPDATE "VendorReqSignal" vrs SET
-          "actionabilityScore" = (
-            CASE WHEN title IS NOT NULL AND title != '' THEN 20 ELSE 0 END
-            + CASE WHEN "vendorContactId" IS NOT NULL THEN 20 ELSE 0 END
-            + CASE WHEN "rateText" IS NOT NULL THEN 15 ELSE 0 END
-            + CASE WHEN location IS NOT NULL AND location != '' THEN 10 ELSE 0 END
-            + CASE WHEN skills IS NOT NULL AND array_length(skills, 1) > 0 THEN 10 ELSE 0 END
-            + CASE WHEN "employmentType" IN ('C2C', 'W2', 'CONTRACT') THEN 10 ELSE 0 END
-            + CASE WHEN "createdAt" >= NOW() - interval '3 days' THEN 10 ELSE 0 END
-            + CASE WHEN EXISTS (
-                SELECT 1 FROM "Vendor" v
-                WHERE v.domain = (SELECT evc.domain FROM "ExtractedVendorCompany" evc WHERE evc.id = vrs."vendorCompanyId")
-                  AND COALESCE(v."trustScore", 0) >= 60
-              ) THEN 5 ELSE 0 END
-            - CASE WHEN title ILIKE '%no third party%' OR title ILIKE '%no c2c%' OR title ILIKE '%w2 only%' THEN 30 ELSE 0 END
-            + CASE
-                WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
-                  ~* '(machine learning|deep learning|nlp|computer vision|pytorch|tensorflow|ai engineer|ml engineer|artificial intelligence|llm|large language model|generative ai|gen ai|langchain|rag|transformers)'
-                THEN 15
-                WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
-                  ~* '(mlops|ml ops|kubeflow|mlflow|sagemaker|vertex ai|model deployment|model serving|feature store|genai infra)'
-                THEN 13
-                WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
-                  ~* '(data engineer|spark|airflow|databricks|snowflake|dbt|kafka|data pipeline|etl|data lake|data warehouse)'
-                THEN 10
-                WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
-                  ~* '(devops|platform engineer|sre|site reliability|kubernetes|terraform|cicd|ci/cd|cloud architect|infrastructure as code)'
-                THEN 8
-                WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
-                  ~* '(cybersecurity|security engineer|penetration test|soc analyst|siem|zero trust|devsecops|cloud security)'
-                THEN 8
-                ELSE 0
-              END
-          ),
-          "engagementModel" = CASE
-            WHEN title ILIKE '%c2c%' OR title ILIKE '%corp to corp%' OR title ILIKE '%corp-to-corp%' THEN 'C2C'
-            WHEN title ILIKE '%w2%' THEN 'W2'
-            WHEN title ILIKE '%1099%' THEN '1099'
-            WHEN title ILIKE '%full time%' OR title ILIKE '%fte%' OR title ILIKE '%permanent%' THEN 'FTE'
-            ELSE 'UNKNOWN'
-          END,
-          "employmentNature" = CASE
-            WHEN title ILIKE '%contract to hire%' OR title ILIKE '%c2h%' OR title ILIKE '%contract-to-hire%' THEN 'C2H'
-            WHEN title ILIKE '%contract%' OR "employmentType" IN ('CONTRACT', 'C2C', 'W2', '1099') THEN 'CONTRACT'
-            WHEN title ILIKE '%perm%' OR title ILIKE '%full time%' OR title ILIKE '%fte%' THEN 'PERM'
-            ELSE 'UNKNOWN'
-          END,
-          "premiumSkillFamily" = CASE
-            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
-              ~* '(machine learning|deep learning|nlp|pytorch|tensorflow|ai engineer|ml engineer|llm|generative ai|gen ai|langchain)' THEN 'AI_ML'
-            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
-              ~* '(mlops|ml ops|kubeflow|mlflow|sagemaker|vertex ai|model deployment|genai infra)' THEN 'MLOPS_GENAI'
-            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
-              ~* '(data engineer|spark|airflow|databricks|snowflake|dbt|kafka|data pipeline)' THEN 'DATA_ENGINEERING'
-            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
-              ~* '(devops|platform engineer|sre|kubernetes|terraform|cicd|cloud architect)' THEN 'CLOUD_DEVOPS'
-            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
-              ~* '(cybersecurity|security engineer|penetration test|soc analyst|siem|zero trust|devsecops)' THEN 'CYBERSECURITY'
-            ELSE NULL
-          END,
-          "premiumSkillBonus" = CASE
-            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
-              ~* '(machine learning|deep learning|nlp|pytorch|tensorflow|ai engineer|ml engineer|llm|generative ai|gen ai|langchain)' THEN 15
-            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
-              ~* '(mlops|ml ops|kubeflow|mlflow|sagemaker|vertex ai|model deployment|genai infra)' THEN 13
-            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
-              ~* '(data engineer|spark|airflow|databricks|snowflake|dbt|kafka|data pipeline)' THEN 10
-            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
-              ~* '(devops|platform engineer|sre|kubernetes|terraform|cicd|cloud architect)' THEN 8
-            WHEN LOWER(COALESCE(title,'') || ' ' || array_to_string(COALESCE(skills, ARRAY[]::text[]), ' '))
-              ~* '(cybersecurity|security engineer|penetration test|soc analyst|siem|zero trust|devsecops)' THEN 8
-            ELSE 0
-          END
-        WHERE vrs.id IN (
-          SELECT id FROM "VendorReqSignal"
-          WHERE "actionabilityScore" IS NULL OR "actionabilityScore" = 0
-          LIMIT ${BATCH_SIZE}
-        )
-      `;
+      const batch = await this.prisma.vendorReqSignal.findMany({
+        where: { OR: [{ actionabilityScore: null }, { actionabilityScore: 0 }] },
+        take: BATCH_SIZE,
+        select: {
+          id: true,
+          title: true,
+          vendorContactId: true,
+          rateText: true,
+          location: true,
+          skills: true,
+          employmentType: true,
+          createdAt: true,
+          vendorCompanyId: true,
+        },
+      });
 
-      totalUpdated += Number(result);
-      this.logger.log(`Batch ${batchNum}: scored ${result} rows (total: ${totalUpdated})`);
+      if (batch.length === 0) break;
 
-      if (Number(result) < BATCH_SIZE) break;
+      const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+
+      for (const row of batch) {
+        let score = 0;
+        const title = row.title || '';
+        const skills = Array.isArray(row.skills) ? (row.skills as string[]) : [];
+        const combined = `${title} ${skills.join(' ')}`;
+
+        if (title) score += 20;
+        if (row.vendorContactId) score += 20;
+        if (row.rateText) score += 15;
+        if (row.location) score += 10;
+        if (skills.length > 0) score += 10;
+        if (['C2C', 'W2', 'CONTRACT'].includes(row.employmentType ?? '')) score += 10;
+        if (row.createdAt >= threeDaysAgo) score += 10;
+        if (/no third party|no c2c|w2 only/i.test(title)) score -= 30;
+
+        const premium = this.detectPremiumSkill(combined);
+        score += premium.bonus;
+
+        let engagementModel = 'UNKNOWN';
+        if (/c2c|corp to corp|corp-to-corp/i.test(title)) engagementModel = 'C2C';
+        else if (/w2/i.test(title)) engagementModel = 'W2';
+        else if (/1099/i.test(title)) engagementModel = '1099';
+        else if (/full time|fte|permanent/i.test(title)) engagementModel = 'FTE';
+
+        let employmentNature = 'UNKNOWN';
+        if (/contract to hire|c2h|contract-to-hire/i.test(title)) employmentNature = 'C2H';
+        else if (/contract/i.test(title) || ['CONTRACT', 'C2C', 'W2', '1099'].includes(row.employmentType ?? '')) employmentNature = 'CONTRACT';
+        else if (/perm|full time|fte/i.test(title)) employmentNature = 'PERM';
+
+        await this.prisma.vendorReqSignal.update({
+          where: { id: row.id },
+          data: {
+            actionabilityScore: Math.max(0, score),
+            engagementModel,
+            employmentNature,
+            premiumSkillFamily: premium.family,
+            premiumSkillBonus: premium.bonus,
+          },
+        });
+      }
+
+      totalUpdated += batch.length;
+      this.logger.log(`Batch scored ${batch.length} rows (total: ${totalUpdated})`);
+
+      if (batch.length < BATCH_SIZE) break;
     }
 
     this.logger.log(`Completed: scored ${totalUpdated} req signals total`);
 
-    // Also score VendorReq table (Prisma-managed vendor reqs with full fields)
-    const vendorReqUpdated = await this.prisma.$executeRaw`
-      UPDATE "VendorReq" SET
-        "actionabilityScore" = (
-          CASE WHEN title IS NOT NULL AND title != '' THEN 20 ELSE 0 END
-          + CASE WHEN "fromEmail" IS NOT NULL THEN 15 ELSE 0 END
-          + CASE WHEN "rateText" IS NOT NULL THEN 15 ELSE 0 END
-          + CASE WHEN location IS NOT NULL AND location != '' THEN 10 ELSE 0 END
-          + CASE WHEN skills IS NOT NULL AND skills::text != '[]' THEN 10 ELSE 0 END
-          + CASE WHEN "employmentType" IN ('C2C', 'W2', 'CONTRACT') THEN 10 ELSE 0 END
-          + CASE WHEN "createdAt" >= NOW() - interval '3 days' THEN 10 ELSE 0 END
-          - CASE WHEN title ILIKE '%no third party%' OR title ILIKE '%no c2c%' OR title ILIKE '%w2 only%' THEN 30 ELSE 0 END
-        )
-      WHERE "actionabilityScore" IS NULL
-    `;
-    this.logger.log(`Scored ${vendorReqUpdated} VendorReq rows`);
+    // Distribution stats
+    const allScored = await this.prisma.vendorReqSignal.findMany({
+      where: { actionabilityScore: { not: null } },
+      select: { actionabilityScore: true, premiumSkillFamily: true, engagementModel: true, employmentNature: true },
+    });
 
-    const distribution = await this.prisma.$queryRaw`
-      SELECT
-        COUNT(*) FILTER (WHERE "actionabilityScore" >= 80)::int as "highAction",
-        COUNT(*) FILTER (WHERE "actionabilityScore" >= 50 AND "actionabilityScore" < 80)::int as "mediumAction",
-        COUNT(*) FILTER (WHERE "actionabilityScore" >= 20 AND "actionabilityScore" < 50)::int as "lowAction",
-        COUNT(*) FILTER (WHERE "actionabilityScore" < 20)::int as "junk",
-        ROUND(AVG("actionabilityScore")::numeric, 1) as "avgScore"
-      FROM "VendorReqSignal"
-      WHERE "actionabilityScore" IS NOT NULL
-    ` as any[];
+    let highAction = 0, mediumAction = 0, lowAction = 0, junk = 0;
+    let totalScore = 0;
+    const premiumMap = new Map<string, { count: number; totalScore: number }>();
+    const engagementMap = new Map<string, number>();
 
-    const premiumBreakdown = await this.prisma.$queryRaw`
-      SELECT "premiumSkillFamily" as family, COUNT(*)::int as count,
-             ROUND(AVG("actionabilityScore")::numeric, 1) as "avgScore"
-      FROM "VendorReqSignal"
-      WHERE "premiumSkillFamily" IS NOT NULL
-      GROUP BY "premiumSkillFamily"
-      ORDER BY count DESC
-    ` as any[];
+    for (const row of allScored) {
+      const s = row.actionabilityScore ?? 0;
+      totalScore += s;
+      if (s >= 80) highAction++;
+      else if (s >= 50) mediumAction++;
+      else if (s >= 20) lowAction++;
+      else junk++;
 
-    const engagementBreakdown = await this.prisma.$queryRaw`
-      SELECT "engagementModel" as model, "employmentNature" as nature, COUNT(*)::int as count
-      FROM "VendorReqSignal"
-      WHERE "engagementModel" IS NOT NULL
-      GROUP BY "engagementModel", "employmentNature"
-      ORDER BY count DESC
-    ` as any[];
+      if (row.premiumSkillFamily) {
+        const p = premiumMap.get(row.premiumSkillFamily) ?? { count: 0, totalScore: 0 };
+        p.count++;
+        p.totalScore += s;
+        premiumMap.set(row.premiumSkillFamily, p);
+      }
+
+      const key = `${row.engagementModel || 'UNKNOWN'}|${row.employmentNature || 'UNKNOWN'}`;
+      engagementMap.set(key, (engagementMap.get(key) ?? 0) + 1);
+    }
 
     return {
-      updated: totalUpdated + Number(vendorReqUpdated),
-      distribution: distribution[0],
-      premiumBreakdown,
-      engagementBreakdown,
+      updated: totalUpdated,
+      distribution: {
+        highAction,
+        mediumAction,
+        lowAction,
+        junk,
+        avgScore: allScored.length > 0 ? Math.round(totalScore / allScored.length * 10) / 10 : 0,
+      },
+      premiumBreakdown: [...premiumMap.entries()].map(([family, p]) => ({
+        family,
+        count: p.count,
+        avgScore: Math.round(p.totalScore / p.count * 10) / 10,
+      })).sort((a, b) => b.count - a.count),
+      engagementBreakdown: [...engagementMap.entries()].map(([key, count]) => {
+        const [model, nature] = key.split('|');
+        return { model, nature, count };
+      }).sort((a, b) => b.count - a.count),
     };
   }
 }

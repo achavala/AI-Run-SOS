@@ -75,6 +75,16 @@ export class BenchIntakeController {
     );
   }
 
+  /* ── Parse resume and extract details ────────────────────── */
+
+  @Post('parse-resume')
+  @Roles('MANAGEMENT', 'SUPERADMIN', 'RECRUITMENT')
+  @UseInterceptors(FileInterceptor('resume', { limits: { fileSize: 10 * 1024 * 1024 } }))
+  parseResume(@UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('Resume file is required');
+    return this.svc.parseResume(file);
+  }
+
   /* ── List current bench consultants ──────────────────────── */
 
   @Get('current-bench')
@@ -127,6 +137,42 @@ export class BenchIntakeController {
     @Param('id') id: string,
   ) {
     return this.svc.triggerAi(tenantId, id);
+  }
+
+  /* ── Update consultant details (skills, contact, etc.) ──── */
+
+  @Patch('consultant/:id')
+  @Roles('MANAGEMENT', 'SUPERADMIN', 'RECRUITMENT')
+  updateConsultant(
+    @CurrentTenant() tenantId: string,
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Body() body: {
+      firstName?: string;
+      lastName?: string;
+      email?: string;
+      phone?: string;
+      skills?: string[];
+      desiredRate?: number;
+      availableFrom?: string;
+    },
+  ) {
+    return this.svc.updateConsultant(tenantId, id, body, userId);
+  }
+
+  /* ── Upload resume to existing consultant ────────────────── */
+
+  @Post('consultant/:id/upload-resume')
+  @Roles('MANAGEMENT', 'SUPERADMIN', 'RECRUITMENT')
+  @UseInterceptors(FileInterceptor('resume', { limits: { fileSize: 10 * 1024 * 1024 } }))
+  uploadResume(
+    @CurrentTenant() tenantId: string,
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Resume file is required');
+    return this.svc.uploadResume(tenantId, id, file, userId);
   }
 
   /* ── Update bench consultant status ──────────────────────── */

@@ -40,10 +40,10 @@ export class VendorReqsService {
       where.AND = [
         {
           OR: [
-            { title: { contains: filters.search, mode: 'insensitive' } },
-            { subject: { contains: filters.search, mode: 'insensitive' } },
-            { fromEmail: { contains: filters.search, mode: 'insensitive' } },
-            { clientHint: { contains: filters.search, mode: 'insensitive' } },
+            { title: { contains: filters.search } },
+            { subject: { contains: filters.search } },
+            { fromEmail: { contains: filters.search } },
+            { clientHint: { contains: filters.search } },
           ],
         },
       ];

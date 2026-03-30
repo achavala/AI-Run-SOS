@@ -213,9 +213,9 @@ export class BenchSalesService {
       const term = filters.search.trim();
       andConditions.push({
         OR: [
-          { firstName: { contains: term, mode: 'insensitive' } },
-          { lastName: { contains: term, mode: 'insensitive' } },
-          { email: { contains: term, mode: 'insensitive' } },
+          { firstName: { contains: term } },
+          { lastName: { contains: term } },
+          { email: { contains: term } },
         ],
       });
     }
@@ -235,9 +235,9 @@ export class BenchSalesService {
       const loc = filters.location.trim();
       andConditions.push({
         OR: [
-          { assignments: { some: { job: { location: { contains: loc, mode: 'insensitive' } } } } },
-          { placements: { some: { job: { location: { contains: loc, mode: 'insensitive' } } } } },
-          { email: { contains: loc, mode: 'insensitive' } },
+          { assignments: { some: { job: { location: { contains: loc } } } } },
+          { placements: { some: { job: { location: { contains: loc } } } } },
+          { email: { contains: loc } },
         ],
       });
     }
@@ -287,9 +287,9 @@ export class BenchSalesService {
 
     /* exclude recruiter patterns in names */
     andConditions.push(
-      { NOT: { firstName: { contains: 'recruiter', mode: 'insensitive' as const } } },
-      { NOT: { firstName: { contains: 'recruiting', mode: 'insensitive' as const } } },
-      { NOT: { lastName: { contains: 'staffing', mode: 'insensitive' as const } } },
+      { NOT: { firstName: { contains: 'recruiter' } } },
+      { NOT: { firstName: { contains: 'recruiting' } } },
+      { NOT: { lastName: { contains: 'staffing' } } },
     );
 
     if (andConditions.length > 0) {

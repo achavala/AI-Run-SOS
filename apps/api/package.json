@@ -57,6 +57,7 @@
     "@types/passport-jwt": "^4",
     "jest": "^30.3.0",
     "nodemon": "^3.1.14",
+    "pdfjs-dist": "^4.10.38",
     "ts-jest": "^29.4.6",
     "tsx": "^4",
     "typescript": "^5"

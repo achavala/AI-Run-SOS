@@ -6,6 +6,7 @@ import {
   CloudArrowUpIcon,
   DocumentTextIcon,
   ArrowPathIcon,
+  SparklesIcon,
 } from '@heroicons/react/24/outline';
 import { api, ApiError } from '@/lib/api';
 
@@ -40,7 +41,9 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 export default function AddConsultantModal({ onClose, onSuccess }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [parsing, setParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [populateSuccess, setPopulateSuccess] = useState(false);
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -61,6 +64,51 @@ export default function AddConsultantModal({ onClose, onSuccess }: Props) {
     }
     setFile(selected);
     setError(null);
+  };
+
+  const handlePopulate = async () => {
+    if (!file) return;
+    setError(null);
+    setPopulateSuccess(false);
+    setParsing(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('resume', file);
+
+      const token = (await import('@/lib/auth')).useAuthStore.getState().token;
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+
+      const res = await fetch(`${API_BASE}/bench-intake/parse-resume`, {
+        method: 'POST',
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.message || `Parse failed (${res.status})`);
+      }
+
+      const data = await res.json();
+
+      // Only populate fields that are currently empty
+      if (data.firstName && !firstName) setFirstName(data.firstName);
+      if (data.lastName && !lastName) setLastName(data.lastName);
+      if (data.email && !email) setEmail(data.email);
+      if (data.phone && !phone) setPhone(data.phone);
+      if (data.skills?.length && !skills) setSkills(data.skills.join(', '));
+      if (data.visaType && !visaType) setVisaType(data.visaType);
+
+      setPopulateSuccess(true);
+      setTimeout(() => setPopulateSuccess(false), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to parse resume');
+    } finally {
+      setParsing(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -278,6 +326,7 @@ export default function AddConsultantModal({ onClose, onSuccess }: Props) {
                     onClick={(e) => {
                       e.stopPropagation();
                       setFile(null);
+                      setPopulateSuccess(false);
                       if (fileRef.current) fileRef.current.value = '';
                     }}
                     className="ml-2 rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-600"
@@ -296,6 +345,37 @@ export default function AddConsultantModal({ onClose, onSuccess }: Props) {
               )}
             </div>
           </div>
+
+          {/* Populate Details button */}
+          {file && (
+            <button
+              type="button"
+              onClick={handlePopulate}
+              disabled={parsing}
+              className={`w-full inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium shadow-sm transition ${
+                populateSuccess
+                  ? 'border border-green-300 bg-green-50 text-green-700'
+                  : 'border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+              } disabled:opacity-50`}
+            >
+              {parsing ? (
+                <>
+                  <ArrowPathIcon className="h-4 w-4 animate-spin" />
+                  Extracting details from resume...
+                </>
+              ) : populateSuccess ? (
+                <>
+                  <SparklesIcon className="h-4 w-4" />
+                  Details populated from resume!
+                </>
+              ) : (
+                <>
+                  <SparklesIcon className="h-4 w-4" />
+                  Populate Details from Resume
+                </>
+              )}
+            </button>
+          )}
 
           {/* Info note */}
           <div className="rounded-lg border border-indigo-100 bg-indigo-50/50 px-4 py-3">

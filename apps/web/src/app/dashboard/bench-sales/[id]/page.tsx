@@ -760,6 +760,18 @@ function decodeBase64Html(dataUri: string): string {
   }
 }
 
+function useBlobUrl(html: string) {
+  const [url, setUrl] = useState('');
+  useEffect(() => {
+    if (!html) { setUrl(''); return; }
+    const blob = new Blob([html], { type: 'text/html' });
+    const u = URL.createObjectURL(blob);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [html]);
+  return url;
+}
+
 function ResumeSection({
   currentResume,
   resumeHistory,
@@ -775,19 +787,53 @@ function ResumeSection({
   const [fullScreen, setFullScreen] = useState(false);
   const [activeVersion, setActiveVersion] = useState<ResumeInfo | null>(currentResume);
 
-  const openInNewTab = () => {
-    if (!activeVersion) return;
-    const html = decodeBase64Html(activeVersion.fileUrl);
-    if (html) {
-      const w = window.open('', '_blank');
-      if (w) { w.document.write(html); w.document.close(); }
-    }
-  };
-
   const resumeHtml = activeVersion ? decodeBase64Html(activeVersion.fileUrl) : '';
+  const blobUrl = useBlobUrl(resumeHtml);
   const isDataUri = activeVersion?.fileUrl?.startsWith('data:text/html;base64,');
+  const isDocDataUri = activeVersion?.fileUrl?.startsWith('data:') && !isDataUri;
   const isUrl = activeVersion?.fileUrl?.startsWith('http');
   const isS3 = activeVersion?.fileUrl?.startsWith('s3://');
+
+  const openInNewTab = () => {
+    if (blobUrl) window.open(blobUrl, '_blank');
+  };
+
+  const downloadResume = () => {
+    const url = activeVersion?.fileUrl;
+    if (!url) return;
+    const safeName = consultantName.replace(/\s+/g, '_');
+    const a = document.createElement('a');
+    if (isDataUri && resumeHtml) {
+      const blob = new Blob([resumeHtml], { type: 'text/html' });
+      a.href = URL.createObjectURL(blob);
+      a.download = `${safeName}_Resume.html`;
+    } else if (url.startsWith('data:')) {
+      a.href = url;
+      const mime = (url.split(';')[0] ?? '').replace('data:', '');
+      const ext = mime.includes('pdf') ? '.pdf'
+        : mime.includes('word') || mime.includes('openxmlformats') ? '.docx'
+        : mime.includes('msword') ? '.doc'
+        : '';
+      a.download = `${safeName}_Resume${ext}`;
+    } else {
+      a.href = url;
+      a.download = `${safeName}_Resume`;
+    }
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    if (a.href.startsWith('blob:')) URL.revokeObjectURL(a.href);
+  };
+
+  const printResume = () => {
+    if (!resumeHtml) return;
+    const w = window.open('', '_blank');
+    if (w) {
+      w.document.write(resumeHtml);
+      w.document.close();
+      setTimeout(() => { w.print(); }, 500);
+    }
+  };
 
   return (
     <>
@@ -812,7 +858,7 @@ function ResumeSection({
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 <button
-                  onClick={() => setShowResume(!showResume)}
+                  onClick={() => { setShowResume(!showResume); }}
                   className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-500"
                 >
                   <DocumentTextIcon className="h-4 w-4" />
@@ -821,55 +867,82 @@ function ResumeSection({
                 {isDataUri && (
                   <>
                     <button
-                      onClick={openInNewTab}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
-                    >
-                      <ArrowTopRightOnSquareIcon className="h-4 w-4" />
-                      New Tab
-                    </button>
-                    <button
                       onClick={() => setFullScreen(true)}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
                     >
+                      <ArrowTopRightOnSquareIcon className="h-4 w-4" />
                       Full Screen
                     </button>
+                    <button
+                      onClick={downloadResume}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                    >
+                      Download
+                    </button>
+                    <button
+                      onClick={printResume}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                    >
+                      Print / PDF
+                    </button>
                   </>
+                )}
+                {isDocDataUri && (
+                  <button
+                    onClick={downloadResume}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                  >
+                    Download
+                  </button>
                 )}
               </div>
             </div>
 
-            {/* Inline resume preview */}
-            {showResume && (
+            {/* Inline resume preview via iframe (preserves resume CSS isolation) */}
+            {showResume && blobUrl && (
               <div className="mt-3 rounded-lg border border-gray-200 overflow-hidden bg-white">
-                {isDataUri && resumeHtml ? (
-                  <div
-                    className="resume-embed w-full bg-white"
-                    dangerouslySetInnerHTML={{ __html: resumeHtml }}
-                    style={{ padding: '20px' }}
-                  />
-                ) : isUrl ? (
-                  <iframe
-                    src={activeVersion!.fileUrl}
-                    className="w-full border-0"
-                    style={{ minHeight: '800px' }}
-                    title="Resume Preview"
-                  />
-                ) : isS3 ? (
-                  <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
-                    <DocumentTextIcon className="h-16 w-16 text-gray-300 mb-4" />
-                    <p className="text-sm font-medium text-gray-700">
-                      {activeVersion!.version || 'Resume'} (Seed Data)
-                    </p>
-                    <p className="mt-3 text-xs text-gray-400">
-                      This is placeholder seed data. Upload a real resume to replace it.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
-                    <DocumentTextIcon className="h-16 w-16 text-gray-300 mb-4" />
-                    <p className="text-sm font-medium text-gray-700">{activeVersion!.version || 'Resume'}</p>
-                  </div>
-                )}
+                <iframe
+                  src={blobUrl}
+                  className="w-full border-0"
+                  style={{ height: '700px' }}
+                  title="Resume Preview"
+                />
+              </div>
+            )}
+            {showResume && isUrl && !isDataUri && (
+              <div className="mt-3 rounded-lg border border-gray-200 overflow-hidden bg-white">
+                <iframe
+                  src={activeVersion!.fileUrl}
+                  className="w-full border-0"
+                  style={{ height: '700px' }}
+                  title="Resume Preview"
+                />
+              </div>
+            )}
+            {showResume && isDocDataUri && (
+              <div className="mt-3 rounded-lg border border-gray-200 overflow-hidden bg-white">
+                <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
+                  <DocumentTextIcon className="h-16 w-16 text-indigo-300 mb-4" />
+                  <p className="text-sm font-medium text-gray-700">
+                    {activeVersion!.version || 'Resume'} (Document File)
+                  </p>
+                  <p className="mt-2 text-xs text-gray-500">
+                    This resume is a document file that cannot be previewed inline.
+                  </p>
+                  <button
+                    onClick={downloadResume}
+                    className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-500"
+                  >
+                    Download Resume
+                  </button>
+                </div>
+              </div>
+            )}
+            {showResume && isS3 && (
+              <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
+                <DocumentTextIcon className="h-16 w-16 text-gray-300 mb-4" />
+                <p className="text-sm font-medium text-gray-700">{activeVersion!.version || 'Resume'} (Seed Data)</p>
+                <p className="mt-3 text-xs text-gray-400">This is placeholder seed data. Upload a real resume to replace it.</p>
               </div>
             )}
 
@@ -903,10 +976,10 @@ function ResumeSection({
         )}
       </div>
 
-      {/* Full Screen Resume Modal */}
-      {fullScreen && resumeHtml && (
-        <div className="fixed inset-0 z-50 bg-white overflow-auto" style={{ padding: 0 }}>
-          <div className="sticky top-0 z-10 flex items-center justify-between bg-white border-b border-gray-200 px-6 py-3 shadow-sm">
+      {/* Full Screen Resume Modal — iframe-based for perfect rendering */}
+      {fullScreen && blobUrl && (
+        <div className="fixed inset-0 z-50 bg-gray-100 flex flex-col">
+          <div className="flex items-center justify-between bg-white border-b border-gray-200 px-6 py-3 shadow-sm shrink-0">
             <div className="flex items-center gap-3">
               <h2 className="text-lg font-semibold text-gray-900">{consultantName} — Resume</h2>
               <span className="inline-flex rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">
@@ -919,7 +992,19 @@ function ResumeSection({
                 className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
               >
                 <ArrowTopRightOnSquareIcon className="h-4 w-4" />
-                Open in New Tab
+                New Tab
+              </button>
+              <button
+                onClick={downloadResume}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+              >
+                Download
+              </button>
+              <button
+                onClick={printResume}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-500"
+              >
+                Print / Save as PDF
               </button>
               <button
                 onClick={() => setFullScreen(false)}
@@ -929,8 +1014,13 @@ function ResumeSection({
               </button>
             </div>
           </div>
-          <div className="max-w-4xl mx-auto py-8 px-6">
-            <div dangerouslySetInnerHTML={{ __html: resumeHtml }} />
+          <div className="flex-1 flex justify-center overflow-auto bg-gray-100 p-6">
+            <iframe
+              src={blobUrl}
+              className="bg-white shadow-xl rounded-lg border-0"
+              style={{ width: '850px', height: '100%', minHeight: '1100px' }}
+              title="Resume Full Screen"
+            />
           </div>
         </div>
       )}

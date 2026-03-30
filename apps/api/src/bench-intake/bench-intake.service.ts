@@ -1,7 +1,8 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiPipelineService } from './ai-pipeline.service';
 import { createHash } from 'crypto';
+import * as mammoth from 'mammoth';
 
 @Injectable()
 export class BenchIntakeService {
@@ -150,16 +151,16 @@ export class BenchIntakeService {
       benchStatus: { not: null },
     };
 
-    if (filters.status) {
+    if (filters.status && filters.status !== 'ALL') {
       where.benchStatus = filters.status;
     }
 
     if (filters.search) {
       const term = filters.search.trim();
       where.OR = [
-        { firstName: { contains: term, mode: 'insensitive' } },
-        { lastName: { contains: term, mode: 'insensitive' } },
-        { email: { contains: term, mode: 'insensitive' } },
+        { firstName: { contains: term } },
+        { lastName: { contains: term } },
+        { email: { contains: term } },
       ];
     }
 
@@ -434,6 +435,119 @@ export class BenchIntakeService {
     return updated;
   }
 
+  /* ── Update consultant details ──────────────────────────── */
+
+  async updateConsultant(
+    tenantId: string,
+    consultantId: string,
+    data: {
+      firstName?: string;
+      lastName?: string;
+      email?: string;
+      phone?: string;
+      skills?: string[];
+      desiredRate?: number;
+      availableFrom?: string;
+    },
+    userId: string,
+  ) {
+    const consultant = await this.prisma.consultant.findFirst({
+      where: { id: consultantId, tenantId },
+    });
+
+    if (!consultant) {
+      throw new NotFoundException(`Consultant ${consultantId} not found`);
+    }
+
+    const updateData: any = {};
+    if (data.firstName) updateData.firstName = data.firstName;
+    if (data.lastName) updateData.lastName = data.lastName;
+    if (data.email) updateData.email = data.email;
+    if (data.phone !== undefined) updateData.phone = data.phone || null;
+    if (data.skills) updateData.skills = data.skills;
+    if (data.desiredRate !== undefined) updateData.desiredRate = data.desiredRate || null;
+    if (data.availableFrom) updateData.availableFrom = new Date(data.availableFrom);
+
+    const updated = await this.prisma.consultant.update({
+      where: { id: consultantId },
+      data: updateData,
+    });
+
+    await this.prisma.consultantActivity.create({
+      data: {
+        tenantId,
+        consultantId,
+        activityType: 'PROFILE_UPDATED',
+        title: 'Consultant profile updated',
+        description: `Updated fields: ${Object.keys(updateData).join(', ')}.`,
+        metadata: { updatedFields: Object.keys(updateData) },
+        createdBy: userId,
+      },
+    });
+
+    return updated;
+  }
+
+  /* ── Upload resume to existing consultant ────────────────── */
+
+  async uploadResume(tenantId: string, consultantId: string, file: Express.Multer.File, userId: string) {
+    const consultant = await this.prisma.consultant.findFirst({
+      where: { id: consultantId, tenantId },
+    });
+
+    if (!consultant) {
+      throw new NotFoundException(`Consultant ${consultantId} not found`);
+    }
+
+    const dataUri = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+    const fileHash = createHash('sha256').update(file.buffer).digest('hex');
+
+    // Mark previous resume versions as not current
+    await this.prisma.resumeVersion.updateMany({
+      where: { consultantId, isCurrent: true },
+      data: { isCurrent: false },
+    });
+
+    const [document, resumeVersion] = await Promise.all([
+      this.prisma.consultantDocument.create({
+        data: {
+          tenantId,
+          consultantId,
+          docType: 'ORIGINAL_RESUME',
+          fileName: file.originalname,
+          fileUrl: dataUri,
+          mimeType: file.mimetype,
+          fileSizeBytes: file.size,
+        },
+      }),
+      this.prisma.resumeVersion.create({
+        data: {
+          tenantId,
+          consultantId,
+          version: `v${Date.now()}`,
+          fileUrl: dataUri,
+          fileHash,
+          source: 'uploaded',
+          isCurrent: true,
+        },
+      }),
+    ]);
+
+    await this.prisma.consultantActivity.create({
+      data: {
+        tenantId,
+        consultantId,
+        activityType: 'RESUME_UPLOADED',
+        title: 'Resume uploaded',
+        description: `Resume "${file.originalname}" uploaded (${(file.size / 1024).toFixed(0)} KB).`,
+        metadata: { fileName: file.originalname, fileSize: file.size },
+        createdBy: userId,
+      },
+    });
+
+    return { document, resumeVersion, message: 'Resume uploaded successfully' };
+  }
+
   /* ── Activity timeline ───────────────────────────────────── */
 
   async getActivities(tenantId: string, consultantId: string, page: number, pageSize: number) {
@@ -466,6 +580,185 @@ export class BenchIntakeService {
       page,
       pageSize,
       totalPages: Math.ceil(total / pageSize),
+    };
+  }
+
+  /* ── Parse resume and extract details ─────────────────────── */
+
+  async parseResume(file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('No file provided');
+
+    let text = '';
+
+    try {
+      if (file.mimetype === 'application/pdf' || file.originalname?.endsWith('.pdf')) {
+        const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+        const uint8 = new Uint8Array(file.buffer);
+        const doc = await getDocument({ data: uint8, useSystemFonts: true }).promise;
+        const pages: string[] = [];
+        for (let i = 1; i <= doc.numPages; i++) {
+          const page = await doc.getPage(i);
+          const content = await page.getTextContent();
+          // Group items by Y position to reconstruct lines
+          const items = (content.items as any[]).filter((it) => it.str?.trim());
+          if (items.length === 0) continue;
+          let lastY = items[0]?.transform?.[5] ?? 0;
+          let currentLine = '';
+          const pageLines: string[] = [];
+          for (const item of items) {
+            const y = item.transform?.[5] ?? lastY;
+            if (Math.abs(y - lastY) > 3) {
+              if (currentLine.trim()) pageLines.push(currentLine.trim());
+              currentLine = item.str;
+            } else {
+              currentLine += (currentLine ? ' ' : '') + item.str;
+            }
+            lastY = y;
+          }
+          if (currentLine.trim()) pageLines.push(currentLine.trim());
+          pages.push(pageLines.join('\n'));
+        }
+        text = pages.join('\n');
+      } else if (
+        file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+        file.originalname?.endsWith('.docx')
+      ) {
+        const result = await mammoth.extractRawText({ buffer: file.buffer });
+        text = result.value;
+      } else if (
+        file.mimetype === 'application/msword' ||
+        file.originalname?.endsWith('.doc')
+      ) {
+        // .doc files — best-effort text extraction
+        text = file.buffer.toString('utf-8').replace(/[^\x20-\x7E\n\r\t]/g, ' ');
+      } else {
+        throw new BadRequestException('Unsupported file type. Upload PDF, DOC, or DOCX.');
+      }
+    } catch (err) {
+      if (err instanceof BadRequestException) throw err;
+      this.logger.error(`Resume parse error: ${(err as Error).message}`);
+      throw new BadRequestException('Failed to parse resume file');
+    }
+
+    if (!text || text.trim().length < 20) {
+      throw new BadRequestException('Could not extract meaningful text from resume. Please ensure the file is not scanned/image-only.');
+    }
+
+    return this.extractDetailsFromText(text);
+  }
+
+  private extractDetailsFromText(text: string) {
+    // Split on newlines and common separators (|, pipes in PDF text)
+    const rawLines = text.split(/\n/).map((l) => l.trim()).filter(Boolean);
+    // Also split long lines on pipe/vertical bar separators
+    const lines: string[] = [];
+    for (const line of rawLines) {
+      if (line.includes('|')) {
+        lines.push(...line.split('|').map((s) => s.trim()).filter(Boolean));
+      } else {
+        lines.push(line);
+      }
+    }
+
+    // ── Email ──
+    const emailMatch = text.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
+    const email = emailMatch?.[0] || '';
+
+    // ── Phone ──
+    const phoneMatch = text.match(
+      /(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}/,
+    );
+    const phone = phoneMatch?.[0]?.replace(/[^\d+() .-]/g, '').trim() || '';
+
+    // ── Name — try multiple strategies ──
+    let firstName = '';
+    let lastName = '';
+
+    // Strategy 1: Look for a segment that contains only 2-3 capitalized words (name-like)
+    for (const segment of lines.slice(0, 10)) {
+      const cleaned = segment.replace(/[^a-zA-Z\s.''-]/g, '').trim();
+      if (!cleaned || cleaned.length < 3 || cleaned.length > 40) continue;
+      // Skip headers/labels
+      if (/^(resume|curriculum|vitae|objective|summary|profile|contact|technical|skills|experience|education|senior|junior|lead|engineer)/i.test(cleaned)) continue;
+      // Skip segments with email/phone
+      if (/@/.test(segment) || /\d{3}.*\d{4}/.test(segment)) continue;
+      // A name is typically 2-3 words, all capitalized
+      const words = cleaned.split(/\s+/).filter((w) => w.length >= 2);
+      if (words.length >= 2 && words.length <= 4 && words.every((w) => /^[A-Z]/.test(w))) {
+        firstName = words[0] ?? '';
+        lastName = words.slice(1).join(' ');
+        break;
+      }
+    }
+
+    // Strategy 2: Take the first segment that looks like a name (2+ alpha words)
+    if (!firstName) {
+      for (const segment of lines.slice(0, 8)) {
+        const cleaned = segment.replace(/[^a-zA-Z\s.-]/g, '').trim();
+        if (!cleaned || cleaned.length < 3) continue;
+        if (/^(resume|curriculum|vitae|objective|summary|profile|contact|technical|skills)/i.test(cleaned)) continue;
+        if (/@/.test(segment) || /\d{3}.*\d{4}/.test(segment)) continue;
+
+        const nameParts = cleaned.split(/\s+/).filter((p) => p.length >= 2);
+        if (nameParts.length >= 2 && nameParts.length <= 4) {
+          firstName = nameParts[0] ?? '';
+          lastName = nameParts.slice(1).join(' ');
+          break;
+        }
+      }
+    }
+
+    // ── Skills — look for known tech keywords ──
+    const KNOWN_SKILLS = [
+      'JavaScript', 'TypeScript', 'Python', 'Java', 'C#', 'C\\+\\+', 'Go', 'Rust', 'Ruby', 'PHP', 'Swift', 'Kotlin',
+      'React', 'Angular', 'Vue', 'Next\\.js', 'Node\\.js', 'Express', 'NestJS', 'Django', 'Flask', 'Spring Boot',
+      'AWS', 'Azure', 'GCP', 'Docker', 'Kubernetes', 'Terraform', 'Jenkins', 'CI/CD',
+      'PostgreSQL', 'MySQL', 'MongoDB', 'Redis', 'Elasticsearch', 'DynamoDB', 'SQL Server', 'Oracle',
+      'Machine Learning', 'Deep Learning', 'NLP', 'Computer Vision', 'TensorFlow', 'PyTorch', 'Scikit-learn',
+      'REST', 'GraphQL', 'gRPC', 'Microservices', 'Kafka', 'RabbitMQ',
+      'Git', 'Linux', 'Agile', 'Scrum', 'Jira',
+      'HTML', 'CSS', 'SASS', 'Tailwind', 'Bootstrap',
+      'Power BI', 'Tableau', 'Snowflake', 'Spark', 'Hadoop', 'Airflow', 'dbt',
+      'Figma', 'Sketch', 'UI/UX',
+      'Salesforce', 'SAP', 'ServiceNow',
+      'Selenium', 'Cypress', 'Jest', 'JUnit',
+      'iOS', 'Android', 'React Native', 'Flutter',
+      'Blockchain', 'Solidity', 'Web3',
+      'DevOps', 'SRE', 'Observability', 'Prometheus', 'Grafana', 'Datadog',
+      'Pandas', 'NumPy', 'R',
+      '.NET', 'ASP\\.NET',
+    ];
+
+    const skills: string[] = [];
+    const seen = new Set<string>();
+    for (const skill of KNOWN_SKILLS) {
+      const regex = new RegExp(`\\b${skill}\\b`, 'i');
+      if (regex.test(text) && !seen.has(skill.toLowerCase().replace(/\\/g, ''))) {
+        // Use the canonical name (without regex escapes)
+        const clean = skill.replace(/\\/g, '');
+        skills.push(clean);
+        seen.add(clean.toLowerCase());
+      }
+    }
+
+    // ── Visa — check for mentions ──
+    let visaType = '';
+    if (/\bUS\s*Citizen\b/i.test(text) || /\bUSC\b/.test(text)) visaType = 'USC';
+    else if (/\bGreen\s*Card\b/i.test(text) || /\bPermanent\s*Resident\b/i.test(text)) visaType = 'GC';
+    else if (/\bH[\s-]?1B\b/i.test(text)) visaType = 'H1B';
+    else if (/\bL[\s-]?1\b/i.test(text)) visaType = 'L1';
+    else if (/\bOPT\b/.test(text)) visaType = 'OPT';
+    else if (/\bCPT\b/.test(text)) visaType = 'CPT';
+    else if (/\bEAD\b/.test(text)) visaType = 'EAD';
+    else if (/\bTN\s*Visa\b/i.test(text)) visaType = 'TN';
+
+    return {
+      firstName,
+      lastName,
+      email,
+      phone,
+      skills,
+      visaType,
     };
   }
 }

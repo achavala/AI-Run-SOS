@@ -751,28 +751,66 @@ export class AiPipelineService {
 
   private computeReadinessScore(skills: string[], ctx: any): number {
     const skillCount = skills.length;
+    const hasResume = ctx.documents?.length > 0;
+    const hasVisa = !!ctx.workAuths?.[0]?.authType;
+    const hasPhone = !!ctx.phone;
+    const hasEmail = !!ctx.email;
+    const hasRate = !!ctx.desiredRate;
+    const hasAvailability = !!ctx.availableFrom;
 
-    // Resume quality (25%) - based on having skills, contact info
-    const resumeQuality = Math.min(100, 65 + skillCount * 3);
+    // Resume quality (25%) - having a resume is worth a lot
+    let resumeQuality = 50;
+    if (hasResume) resumeQuality += 30;        // uploaded resume = strong signal
+    if (skillCount >= 1) resumeQuality += 5;
+    if (skillCount >= 3) resumeQuality += 5;
+    if (skillCount >= 6) resumeQuality += 5;
+    if (skillCount >= 10) resumeQuality += 5;
+    resumeQuality = Math.min(100, resumeQuality);
 
-    // Skills depth (25%) - more skills = higher depth
-    const skillsDepth = Math.min(100, 50 + skillCount * 5);
+    // Skills depth (20%) - differentiate by skill breadth
+    let skillsDepth = 50;
+    if (skillCount >= 1) skillsDepth += 10;
+    if (skillCount >= 3) skillsDepth += 10;
+    if (skillCount >= 5) skillsDepth += 10;
+    if (skillCount >= 8) skillsDepth += 10;
+    if (skillCount >= 12) skillsDepth += 10;
+    skillsDepth = Math.min(100, skillsDepth);
 
-    // Market fit (20%) - slight randomization to simulate analysis
-    const marketFit = Math.min(100, 60 + Math.floor(Math.random() * 20));
+    // Market fit (20%) - visa + rate + availability = ready for market
+    let marketFit = 55;
+    if (hasVisa) marketFit += 15;
+    if (hasRate) marketFit += 10;
+    if (hasAvailability) marketFit += 10;
+    if (skillCount >= 3) marketFit += 5;
+    if (skillCount >= 8) marketFit += 5;
+    marketFit = Math.min(100, marketFit);
 
-    // Interview readiness (15%)
-    const interviewReadiness = Math.min(100, 55 + Math.floor(Math.random() * 25));
+    // Interview readiness (15%) - having detailed profile helps
+    let interviewReadiness = 55;
+    if (hasResume) interviewReadiness += 15;
+    if (skillCount >= 3) interviewReadiness += 10;
+    if (skillCount >= 6) interviewReadiness += 10;
+    if (hasPhone) interviewReadiness += 5;
+    if (hasRate) interviewReadiness += 5;
+    interviewReadiness = Math.min(100, interviewReadiness);
 
-    // Documentation completeness (15%)
-    const docComplete = ctx.phone ? 80 : 50;
+    // Documentation completeness (20%) - profile completeness
+    let docComplete = 30;
+    if (hasResume) docComplete += 20;
+    if (hasEmail) docComplete += 10;
+    if (hasPhone) docComplete += 10;
+    if (hasVisa) docComplete += 10;
+    if (hasRate) docComplete += 10;
+    if (hasAvailability) docComplete += 5;
+    if (skillCount >= 1) docComplete += 5;
+    docComplete = Math.min(100, docComplete);
 
     const weighted =
       resumeQuality * 0.25 +
-      skillsDepth * 0.25 +
+      skillsDepth * 0.20 +
       marketFit * 0.20 +
       interviewReadiness * 0.15 +
-      docComplete * 0.15;
+      docComplete * 0.20;
 
     return Math.round(weighted);
   }

@@ -27,9 +27,9 @@ export class ConsultantsService {
     if (opts.search) {
       const term = opts.search.trim();
       where.OR = [
-        { firstName: { contains: term, mode: 'insensitive' } },
-        { lastName: { contains: term, mode: 'insensitive' } },
-        { email: { contains: term, mode: 'insensitive' } },
+        { firstName: { contains: term } },
+        { lastName: { contains: term } },
+        { email: { contains: term } },
       ];
     }
 

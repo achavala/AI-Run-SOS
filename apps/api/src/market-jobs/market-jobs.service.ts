@@ -41,8 +41,8 @@ export class MarketJobsService {
     if (filters.search) {
       andConditions.push({
         OR: [
-          { title: { contains: filters.search, mode: 'insensitive' } },
-          { company: { contains: filters.search, mode: 'insensitive' } },
+          { title: { contains: filters.search } },
+          { company: { contains: filters.search } },
         ],
       });
     }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
@@ -26,6 +26,12 @@ import {
   TagIcon,
   ShieldCheckIcon,
   PlayIcon,
+  PencilIcon,
+  PlusIcon,
+  XMarkIcon,
+  CloudArrowUpIcon,
+  ArrowDownTrayIcon,
+  EyeIcon,
 } from '@heroicons/react/24/outline';
 import { ClickableMetric, StaticDrillDownModal } from '@/components/drill-down-modal';
 
@@ -76,6 +82,15 @@ interface Activity {
   createdAt: string;
 }
 
+interface ResumeVersion {
+  id: string;
+  version: string;
+  fileUrl: string;
+  source: string;
+  isCurrent: boolean;
+  createdAt: string;
+}
+
 interface BenchConsultantDetail {
   id: string;
   firstName: string;
@@ -93,6 +108,7 @@ interface BenchConsultantDetail {
   createdAt: string;
   latestAiRun: AiRun | null;
   documents: ConsultantDoc[];
+  resumeVersions: ResumeVersion[];
   activities: Activity[];
 }
 
@@ -276,6 +292,14 @@ export default function BenchConsultantDetailPage() {
           fileUrl: d.fileUrl,
           mimeType: d.mimeType,
           createdAt: d.createdAt,
+        })),
+        resumeVersions: (raw.resumeVersions ?? []).map((r: any) => ({
+          id: r.id,
+          version: r.version ?? 'v1.0',
+          fileUrl: r.fileUrl,
+          source: r.source ?? 'uploaded',
+          isCurrent: r.isCurrent ?? false,
+          createdAt: r.createdAt,
         })),
         activities: (raw.activities ?? []).map((a: any) => ({
           id: a.id,
@@ -549,7 +573,7 @@ export default function BenchConsultantDetailPage() {
 
       {/* Tab Content */}
       <div>
-        {activeTab === 'overview' && <OverviewTab consultant={c} onItemClick={setSelectedRow} />}
+        {activeTab === 'overview' && <OverviewTab consultant={c} onItemClick={setSelectedRow} onRefresh={fetchConsultant} showToast={showToast} />}
         {ALL_STEPS.includes(activeTab) && (
           <AiStepTab step={activeTab} output={outputsByStep[activeTab] ?? null} />
         )}
@@ -572,7 +596,128 @@ export default function BenchConsultantDetailPage() {
 /*  Tab: Overview                                                      */
 /* ------------------------------------------------------------------ */
 
-function OverviewTab({ consultant: c, onItemClick }: { consultant: BenchConsultantDetail; onItemClick: (item: any) => void }) {
+function OverviewTab({
+  consultant: c,
+  onItemClick,
+  onRefresh,
+  showToast,
+}: {
+  consultant: BenchConsultantDetail;
+  onItemClick: (item: any) => void;
+  onRefresh: () => void;
+  showToast: (msg: string, type?: 'success' | 'error') => void;
+}) {
+  const [editingSkills, setEditingSkills] = useState(false);
+  const [skillInput, setSkillInput] = useState('');
+  const [editedSkills, setEditedSkills] = useState<string[]>(c.skills);
+  const [savingSkills, setSavingSkills] = useState(false);
+  const [rerunning, setRerunning] = useState(false);
+  const skillInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAddSkill = () => {
+    const newSkills = skillInput
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s && !editedSkills.some((es) => es.toLowerCase() === s.toLowerCase()));
+    if (newSkills.length > 0) {
+      setEditedSkills([...editedSkills, ...newSkills]);
+    }
+    setSkillInput('');
+    skillInputRef.current?.focus();
+  };
+
+  const handleRemoveSkill = (skill: string) => {
+    setEditedSkills(editedSkills.filter((s) => s !== skill));
+  };
+
+  const handleSaveSkills = async () => {
+    setSavingSkills(true);
+    try {
+      await api.patch(`/bench-intake/consultant/${c.id}`, { skills: editedSkills });
+      showToast(`Skills updated (${editedSkills.length} skills)`);
+      setEditingSkills(false);
+      onRefresh();
+    } catch {
+      showToast('Failed to save skills', 'error');
+    } finally {
+      setSavingSkills(false);
+    }
+  };
+
+  const handleSaveAndRerun = async () => {
+    setRerunning(true);
+    try {
+      await api.patch(`/bench-intake/consultant/${c.id}`, { skills: editedSkills });
+      await api.post(`/bench-intake/consultant/${c.id}/trigger-ai`);
+      showToast('Skills saved & AI pipeline re-started');
+      setEditingSkills(false);
+      onRefresh();
+    } catch {
+      showToast('Failed to save & re-run', 'error');
+    } finally {
+      setRerunning(false);
+    }
+  };
+
+  // Compute score breakdown locally for display
+  const skillCount = c.skills.length;
+  const hasResume = (c.documents?.length > 0) || (c.resumeVersions?.length > 0);
+  const hasVisa = !!c.visaType;
+  const hasPhone = !!c.phone;
+  const hasEmail = !!c.email;
+  const hasRate = c.desiredRate != null;
+  const hasAvailability = !!c.availableFrom;
+
+  let resumeQuality = 50;
+  if (hasResume) resumeQuality += 30;
+  if (skillCount >= 1) resumeQuality += 5;
+  if (skillCount >= 3) resumeQuality += 5;
+  if (skillCount >= 6) resumeQuality += 5;
+  if (skillCount >= 10) resumeQuality += 5;
+  resumeQuality = Math.min(100, resumeQuality);
+
+  let skillsDepth = 50;
+  if (skillCount >= 1) skillsDepth += 10;
+  if (skillCount >= 3) skillsDepth += 10;
+  if (skillCount >= 5) skillsDepth += 10;
+  if (skillCount >= 8) skillsDepth += 10;
+  if (skillCount >= 12) skillsDepth += 10;
+  skillsDepth = Math.min(100, skillsDepth);
+
+  let marketFit = 55;
+  if (hasVisa) marketFit += 15;
+  if (hasRate) marketFit += 10;
+  if (hasAvailability) marketFit += 10;
+  if (skillCount >= 3) marketFit += 5;
+  if (skillCount >= 8) marketFit += 5;
+  marketFit = Math.min(100, marketFit);
+
+  let interviewReadiness = 55;
+  if (hasResume) interviewReadiness += 15;
+  if (skillCount >= 3) interviewReadiness += 10;
+  if (skillCount >= 6) interviewReadiness += 10;
+  if (hasPhone) interviewReadiness += 5;
+  if (hasRate) interviewReadiness += 5;
+  interviewReadiness = Math.min(100, interviewReadiness);
+
+  let docComplete = 30;
+  if (hasResume) docComplete += 20;
+  if (hasEmail) docComplete += 10;
+  if (hasPhone) docComplete += 10;
+  if (hasVisa) docComplete += 10;
+  if (hasRate) docComplete += 10;
+  if (hasAvailability) docComplete += 5;
+  if (skillCount >= 1) docComplete += 5;
+  docComplete = Math.min(100, docComplete);
+
+  const breakdown = [
+    { label: 'Resume Quality', score: resumeQuality, weight: 25, tip: !hasResume ? 'Upload a resume (+30 pts)' : skillCount < 10 ? 'Add more skills to boost' : null },
+    { label: 'Skills Depth', score: skillsDepth, weight: 20, tip: skillCount < 12 ? `Add ${12 - skillCount} more skills for max score` : null },
+    { label: 'Market Fit', score: marketFit, weight: 20, tip: !hasVisa ? 'Add visa type (+15 pts)' : !hasRate ? 'Set desired rate (+10 pts)' : !hasAvailability ? 'Set availability date (+10 pts)' : null },
+    { label: 'Interview Readiness', score: interviewReadiness, weight: 15, tip: !hasResume ? 'Upload resume (+15 pts)' : skillCount < 6 ? 'Add more skills (+10 pts)' : null },
+    { label: 'Doc Completeness', score: docComplete, weight: 20, tip: !hasResume ? 'Upload resume (+20 pts)' : !hasPhone ? 'Add phone (+10 pts)' : null },
+  ];
+
   return (
     <div className="space-y-6">
       {/* Contact + Details */}
@@ -612,43 +757,321 @@ function OverviewTab({ consultant: c, onItemClick }: { consultant: BenchConsulta
         </div>
       </div>
 
-      {/* Skills */}
-      {c.skills.length > 0 && (
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Skills</h3>
-          <div className="flex flex-wrap gap-2">
-            {c.skills.map((skill) => (
-              <span
-                key={skill}
-                className="inline-flex items-center rounded-md bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200"
-              >
-                {skill}
-              </span>
-            ))}
-          </div>
+      {/* Resume / Documents */}
+      <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
+            Resume & Documents ({c.documents.length + c.resumeVersions.length})
+          </h3>
+          <label className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 cursor-pointer">
+            <CloudArrowUpIcon className="h-3.5 w-3.5" />
+            Upload Resume
+            <input
+              type="file"
+              accept=".pdf,.doc,.docx"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                if (file.size > 10 * 1024 * 1024) {
+                  showToast('File must be under 10MB', 'error');
+                  return;
+                }
+                try {
+                  const formData = new FormData();
+                  formData.append('resume', file);
+                  formData.append('firstName', c.firstName);
+                  formData.append('lastName', c.lastName);
+                  formData.append('email', c.email);
+                  const token = (await import('@/lib/auth')).useAuthStore.getState().token;
+                  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+                  const res = await fetch(`${API_BASE}/bench-intake/consultant/${c.id}/upload-resume`, {
+                    method: 'POST',
+                    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                    body: formData,
+                  });
+                  if (!res.ok) throw new Error('Upload failed');
+                  showToast('Resume uploaded successfully');
+                  onRefresh();
+                } catch {
+                  showToast('Failed to upload resume', 'error');
+                }
+              }}
+            />
+          </label>
         </div>
-      )}
 
-      {/* Readiness breakdown */}
-      {c.readinessScore != null && (
-        <ClickableMetric metric="matchQuality" title="Readiness Score">
-          <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Readiness Score</h3>
-            <div className="flex items-center gap-4">
-              <div className={`text-4xl font-bold ${scoreTextColor(c.readinessScore)}`}>
-                {Math.round(c.readinessScore)}
-              </div>
-              <div className="flex-1">
-                <div className="h-3 rounded-full bg-gray-100 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all ${scoreColor(c.readinessScore)}`}
-                    style={{ width: `${Math.min(c.readinessScore, 100)}%` }}
-                  />
+        {c.documents.length === 0 && c.resumeVersions.length === 0 ? (
+          <div className="rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-8 text-center">
+            <DocumentTextIcon className="mx-auto h-8 w-8 text-gray-300" />
+            <p className="mt-2 text-sm text-gray-500">No resume uploaded yet</p>
+            <p className="mt-1 text-xs text-gray-400">Upload a resume to improve the readiness score</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {/* Show documents (ORIGINAL_RESUME, etc.) */}
+            {c.documents.map((doc) => (
+              <div key={doc.id} className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <DocumentTextIcon className="h-8 w-8 text-indigo-500 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900 truncate">{doc.fileName}</p>
+                  <p className="text-xs text-gray-500">
+                    {doc.docType.replace(/_/g, ' ')} · {new Date(doc.createdAt).toLocaleDateString()}
+                    {doc.mimeType && ` · ${doc.mimeType.split('/').pop()?.toUpperCase()}`}
+                  </p>
                 </div>
+                <div className="flex items-center gap-1.5">
+                  {doc.fileUrl.startsWith('data:') && (
+                    <>
+                      <a
+                        href={doc.fileUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                      >
+                        <EyeIcon className="h-3.5 w-3.5" />
+                        View
+                      </a>
+                      <a
+                        href={doc.fileUrl}
+                        download={doc.fileName}
+                        className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                      >
+                        <ArrowDownTrayIcon className="h-3.5 w-3.5" />
+                        Download
+                      </a>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {/* Show resume versions */}
+            {c.resumeVersions
+              .filter((r) => !c.documents.some((d) => d.fileUrl === r.fileUrl))
+              .map((rv) => (
+                <div key={rv.id} className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <DocumentTextIcon className="h-8 w-8 text-purple-500 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900">
+                      Resume {rv.version}
+                      {rv.isCurrent && (
+                        <span className="ml-2 inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                          Current
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {rv.source} · {new Date(rv.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                  {rv.fileUrl.startsWith('data:') && (
+                    <div className="flex items-center gap-1.5">
+                      <a
+                        href={rv.fileUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                      >
+                        <EyeIcon className="h-3.5 w-3.5" />
+                        View
+                      </a>
+                      <a
+                        href={rv.fileUrl}
+                        download={`resume-${rv.version}.pdf`}
+                        className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                      >
+                        <ArrowDownTrayIcon className="h-3.5 w-3.5" />
+                        Download
+                      </a>
+                    </div>
+                  )}
+                </div>
+              ))}
+          </div>
+        )}
+      </div>
+
+      {/* Skills — Editable */}
+      <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
+            Skills ({editingSkills ? editedSkills.length : c.skills.length})
+          </h3>
+          {!editingSkills && (
+            <button
+              onClick={() => { setEditedSkills([...c.skills]); setEditingSkills(true); }}
+              className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+            >
+              <PencilIcon className="h-3.5 w-3.5" />
+              Edit Skills
+            </button>
+          )}
+        </div>
+
+        {editingSkills ? (
+          <div className="space-y-3">
+            {/* Current skills as removable tags */}
+            <div className="flex flex-wrap gap-2">
+              {editedSkills.map((skill) => (
+                <span
+                  key={skill}
+                  className="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200"
+                >
+                  {skill}
+                  <button
+                    onClick={() => handleRemoveSkill(skill)}
+                    className="ml-0.5 rounded-full p-0.5 text-indigo-400 hover:bg-indigo-100 hover:text-indigo-600"
+                  >
+                    <XMarkIcon className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+
+            {/* Add skills input */}
+            <div className="flex gap-2">
+              <input
+                ref={skillInputRef}
+                type="text"
+                value={skillInput}
+                onChange={(e) => setSkillInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddSkill(); } }}
+                placeholder="Add skills (comma-separated): Python, AWS, React..."
+                className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+              <button
+                onClick={handleAddSkill}
+                disabled={!skillInput.trim()}
+                className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              >
+                <PlusIcon className="h-4 w-4" />
+                Add
+              </button>
+            </div>
+
+            {/* Quick-add popular skills */}
+            <div>
+              <p className="text-xs text-gray-500 mb-1.5">Quick add:</p>
+              <div className="flex flex-wrap gap-1.5">
+                {['Java', 'Python', 'JavaScript', 'React', 'Angular', 'Node.js', 'AWS', 'Azure', 'GCP', 'Docker', 'Kubernetes', 'SQL', 'MongoDB', 'TypeScript', 'Spring Boot', '.NET', 'C#', 'Go', 'Terraform', 'CI/CD', 'Microservices', 'REST API', 'GraphQL', 'Kafka', 'Redis']
+                  .filter((s) => !editedSkills.some((es) => es.toLowerCase() === s.toLowerCase()))
+                  .slice(0, 15)
+                  .map((skill) => (
+                    <button
+                      key={skill}
+                      onClick={() => setEditedSkills([...editedSkills, skill])}
+                      className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-600 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-700 transition"
+                    >
+                      + {skill}
+                    </button>
+                  ))}
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
+              <button
+                onClick={handleSaveAndRerun}
+                disabled={savingSkills || rerunning}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-purple-500 disabled:opacity-50"
+              >
+                {rerunning ? <ArrowPathIcon className="h-4 w-4 animate-spin" /> : <PlayIcon className="h-4 w-4" />}
+                Save & Re-run AI Pipeline
+              </button>
+              <button
+                onClick={handleSaveSkills}
+                disabled={savingSkills || rerunning}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+              >
+                {savingSkills && <ArrowPathIcon className="h-4 w-4 animate-spin" />}
+                Save Only
+              </button>
+              <button
+                onClick={() => { setEditingSkills(false); setEditedSkills([...c.skills]); setSkillInput(''); }}
+                className="rounded-lg px-3 py-2 text-sm font-medium text-gray-500 hover:text-gray-700"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {c.skills.length > 0 ? (
+              c.skills.map((skill) => (
+                <span
+                  key={skill}
+                  className="inline-flex items-center rounded-md bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200"
+                >
+                  {skill}
+                </span>
+              ))
+            ) : (
+              <p className="text-sm text-gray-400 italic">No skills added yet — click Edit Skills to add some</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Readiness Score + Breakdown */}
+      {c.readinessScore != null && (
+        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+          <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Readiness Score</h3>
+          <div className="flex items-center gap-4 mb-5">
+            <div className={`text-4xl font-bold ${scoreTextColor(c.readinessScore)}`}>
+              {Math.round(c.readinessScore)}
+            </div>
+            <div className="flex-1">
+              <div className="h-3 rounded-full bg-gray-100 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${scoreColor(c.readinessScore)}`}
+                  style={{ width: `${Math.min(c.readinessScore, 100)}%` }}
+                />
               </div>
             </div>
           </div>
-        </ClickableMetric>
+
+          {/* Breakdown categories */}
+          <div className="space-y-3">
+            {breakdown.map((cat) => (
+              <div key={cat.label}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-medium text-gray-600">{cat.label} ({cat.weight}%)</span>
+                  <span className={`text-xs font-bold ${cat.score >= 80 ? 'text-emerald-600' : cat.score >= 60 ? 'text-yellow-600' : 'text-red-600'}`}>
+                    {cat.score}/100
+                  </span>
+                </div>
+                <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${cat.score >= 80 ? 'bg-emerald-500' : cat.score >= 60 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                    style={{ width: `${cat.score}%` }}
+                  />
+                </div>
+                {cat.tip && (
+                  <p className="mt-0.5 text-[10px] text-amber-600">{cat.tip}</p>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Tips to improve */}
+          {c.readinessScore < 90 && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+              <p className="text-xs font-semibold text-amber-800 mb-1">How to reach 90+:</p>
+              <ul className="text-xs text-amber-700 space-y-0.5 list-disc pl-4">
+                {!hasResume && <li>Upload a resume document</li>}
+                {skillCount < 12 && <li>Add more skills (aim for 12+) — click Edit Skills above</li>}
+                {!hasVisa && <li>Add visa/work authorization type</li>}
+                {!hasRate && <li>Set a desired hourly rate</li>}
+                {!hasAvailability && <li>Set an availability date</li>}
+                {!hasPhone && <li>Add a phone number</li>}
+                {skillCount >= 12 && hasResume && hasVisa && hasRate && hasAvailability && hasPhone && (
+                  <li>Re-run the AI pipeline to recalculate your score</li>
+                )}
+              </ul>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

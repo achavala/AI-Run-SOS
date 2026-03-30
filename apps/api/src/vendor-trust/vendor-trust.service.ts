@@ -10,29 +10,46 @@ export class VendorTrustService {
   async computeAllScores() {
     this.logger.log('Computing vendor trust scores with tier-based weighting...');
 
-    const vendors = await this.prisma.$queryRaw`
-      SELECT
-        vc.id,
-        vc.domain,
-        vc.name,
-        vc."emailCount" as email_count,
-        (SELECT COUNT(*)::int FROM "VendorReqSignal" vrs WHERE vrs."vendorCompanyId" = vc.id) as req_count,
-        (SELECT COUNT(*)::int FROM "VendorReqSignal" vrs WHERE vrs."vendorCompanyId" = vc.id
-          AND vrs."createdAt" >= NOW() - interval '30 days') as req_count_30d,
-        (SELECT COUNT(*)::int FROM "ExtractedVendorContact" vct WHERE vct."vendorCompanyId" = vc.id) as contact_count,
-        (SELECT COUNT(DISTINCT title)::int FROM "VendorReqSignal" vrs WHERE vrs."vendorCompanyId" = vc.id
-          AND title IS NOT NULL) as unique_roles,
-        (SELECT ROUND(
-          COUNT(*) FILTER (WHERE "rateText" IS NOT NULL)::numeric / GREATEST(COUNT(*), 1) * 100, 1)
-          FROM "VendorReqSignal" vrs WHERE vrs."vendorCompanyId" = vc.id) as has_rate_pct,
-        (SELECT ROUND(
-          COUNT(*) FILTER (WHERE location IS NOT NULL AND location != '')::numeric / GREATEST(COUNT(*), 1) * 100, 1)
-          FROM "VendorReqSignal" vrs WHERE vrs."vendorCompanyId" = vc.id) as has_location_pct,
-        (SELECT COUNT(*)::int FROM "VendorReqSignal" vrs WHERE vrs."vendorCompanyId" = vc.id
-          AND "premiumSkillFamily" IS NOT NULL) as premium_req_count
-      FROM "ExtractedVendorCompany" vc
-      WHERE vc.name IS NOT NULL AND vc.name NOT LIKE '[SYSTEM]%'
-    ` as any[];
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const vendorCompanies = await this.prisma.extractedVendorCompany.findMany({
+      where: { name: { not: null } },
+      select: { id: true, domain: true, name: true, emailCount: true },
+    });
+
+    const vendors: any[] = [];
+    for (const vc of vendorCompanies) {
+      if (vc.name?.startsWith('[SYSTEM]')) continue;
+      const [reqCount, reqCount30d, contactCount, reqsForQuality, premiumReqCount] = await Promise.all([
+        this.prisma.vendorReqSignal.count({ where: { vendorCompanyId: vc.id } }),
+        this.prisma.vendorReqSignal.count({ where: { vendorCompanyId: vc.id, createdAt: { gte: thirtyDaysAgo } } }),
+        this.prisma.extractedVendorContact.count({ where: { vendorCompanyId: vc.id } }),
+        this.prisma.vendorReqSignal.findMany({
+          where: { vendorCompanyId: vc.id, title: { not: null } },
+          select: { title: true, rateText: true, location: true },
+        }),
+        this.prisma.vendorReqSignal.count({ where: { vendorCompanyId: vc.id, premiumSkillFamily: { not: null } } }),
+      ]);
+
+      const uniqueRoles = new Set(reqsForQuality.map((r) => r.title)).size;
+      const totalReqs = reqsForQuality.length || 1;
+      const hasRatePct = Math.round(reqsForQuality.filter((r) => r.rateText).length / totalReqs * 100 * 10) / 10;
+      const hasLocationPct = Math.round(reqsForQuality.filter((r) => r.location).length / totalReqs * 100 * 10) / 10;
+
+      vendors.push({
+        id: vc.id,
+        domain: vc.domain,
+        name: vc.name,
+        email_count: vc.emailCount,
+        req_count: reqCount,
+        req_count_30d: reqCount30d,
+        contact_count: contactCount,
+        unique_roles: uniqueRoles,
+        has_rate_pct: hasRatePct,
+        has_location_pct: hasLocationPct,
+        premium_req_count: premiumReqCount,
+      });
+    }
 
     let computed = 0;
     for (const v of vendors) {
@@ -149,14 +166,20 @@ export class VendorTrustService {
   }
 
   async getDistribution() {
-    return this.prisma.$queryRaw`
-      SELECT tier::text as tier, COUNT(*)::int as count,
-             ROUND(AVG("trustScore")::numeric, 1) as avg_score
-      FROM "Vendor"
-      WHERE "trustScore" IS NOT NULL
-      GROUP BY tier
-      ORDER BY avg_score DESC
-    ` as Promise<any[]>;
+    const tiers = await this.prisma.vendor.groupBy({
+      by: ['tier'],
+      where: { trustScore: { not: null } },
+      _count: { _all: true },
+      _avg: { trustScore: true },
+    });
+
+    return tiers
+      .map((t) => ({
+        tier: t.tier,
+        count: t._count._all,
+        avg_score: t._avg.trustScore ? Math.round(t._avg.trustScore * 10) / 10 : 0,
+      }))
+      .sort((a, b) => b.avg_score - a.avg_score);
   }
 
   async getVendorScore(vendorId: string) {
